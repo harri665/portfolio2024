@@ -1,11 +1,9 @@
 import React from 'react';
-import DistortedTorusScene from './Components/Homepage/DistortedTorusScene';
-import './App.css'; // Global styles
+import DistortedTorusScene from './DistortedTorusScene';
 import { motion } from 'framer-motion'; // Import Framer Motion
-import About from './Components/Homepage/About';
-import ArtStationProjects from './Components/Homepage/Artstationprojects';
+import ArtStationProjects from './Artstationprojects';
 
-export default function App() {
+export default function Homepage() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-900 via-gray-800 to-black text-white">
       <HeroSection />
