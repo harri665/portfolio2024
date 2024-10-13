@@ -3,11 +3,10 @@ import { OrbitControls, TorusKnot, SpotLight, PointLight } from '@react-three/dr
 import React, { useRef, useMemo } from 'react';
 import * as THREE from 'three';
 
-
 export default function DistortedTorusScene() {
   return (
     <div className="h-screen w-full relative">
-      <Canvas camera={{ position: [0, 0, 5], fov: 60 }}>
+      <Canvas camera={{ position: [0, 0, 5], fov: 60 }} style={{ width: '100%', height: '100%' }}>
         <ambientLight intensity={0.3} color="#ffffff" />
         <spotLight
           position={[5, 5, 5]}
@@ -22,9 +21,6 @@ export default function DistortedTorusScene() {
 
         <DistortedTorus />
       </Canvas>
-
-      {/* Sticky Notes Container */}
-      <NotesContainer />
     </div>
   );
 }
@@ -49,8 +45,11 @@ function DistortedTorus() {
     uniforms.time.value = elapsedTime;
   });
 
+  const isMobile = window.innerWidth <= 768;
+  const scale = isMobile ? 0.7 : 1.2;
+
   return (
-    <TorusKnot ref={meshRef} args={[1, 0.4, 256, 32]} scale={1.}>
+    <TorusKnot ref={meshRef} args={[1, 0.4, 256, 32]} scale={scale}>
       <shaderMaterial
         attach="material"
         uniforms={uniforms}
@@ -59,16 +58,6 @@ function DistortedTorus() {
         transparent
       />
     </TorusKnot>
-  );
-}
-
-function NotesContainer() {
-  return (
-    <div className="fixed bottom-0 left-0 w-full flex justify-between p-4 space-x-4 bg-gray-800 text-white">
-      <div className="w-1/3 p-2 bg-gray-700 rounded-lg">Note 1</div>
-      <div className="w-1/3 p-2 bg-gray-700 rounded-lg">Note 2</div>
-      <div className="w-1/3 p-2 bg-gray-700 rounded-lg">Note 3</div>
-    </div>
   );
 }
 
