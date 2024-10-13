@@ -14,7 +14,7 @@ const ArtStationProjects = () => {
       try {
         const apiBaseUrl = process.env.NODE_ENV === 'development' 
           ? 'https://artstation.harrison-martin.com/api/artstation/harr1' 
-          : 'http://localhost:3005/api/artstation/harr1';
+          : 'https://artstation.harrison-martin.com/api/artstation/harr1';//http://localhost:3005/api/artstation/harr1
         const response = await fetch(apiBaseUrl);
         
         if (!response.ok) {
