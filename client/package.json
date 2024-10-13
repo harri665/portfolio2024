@@ -1,6 +1,8 @@
 {
   "name": "portfolio2024",
   "version": "0.1.0",
+   "homepage": "https://harri665.github.io/portfolio2024",
+
   "private": true,
   "dependencies": {
     "@react-three/drei": "^9.114.3",
@@ -22,7 +24,8 @@
     "web-vitals": "^2.1.4"
   },
   "scripts": {
-    "prebuild": "node fetchArtStationData.js",
+    "predeploy": "npm run build",
+    "deploy": "gh-pages -d build",  
     "build": "react-scripts build",
     "start": "react-scripts start && fetchArtStationData.js",
     "test": "react-scripts test",
@@ -47,6 +50,7 @@
     ]
   },
   "devDependencies": {
-    "ajv": "^7.2.4"
+    "ajv": "^7.2.4",
+    "gh-pages": "^6.2.0"
   }
 }
