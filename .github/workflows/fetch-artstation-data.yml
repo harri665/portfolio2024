@@ -1,0 +1,25 @@
+name: Fetch ArtStation Projects
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Fetch data daily
+  workflow_dispatch: # Allows manual triggers
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Fetch ArtStation projects
+        run: |
+          curl https://www.artstation.com/users/harr1/projects.json -o src/artstation-projects.json
+
+      - name: Commit fetched data
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/artstation-projects.json
+          git commit -m "Update ArtStation projects data"
+          git push
