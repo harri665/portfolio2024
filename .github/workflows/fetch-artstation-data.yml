@@ -5,6 +5,9 @@ on:
     - cron: '0 0 * * *' # Fetch data daily
   workflow_dispatch: # Allows manual triggers
 
+permissions:
+  contents: write
+
 jobs:
   fetch:
     runs-on: ubuntu-latest
