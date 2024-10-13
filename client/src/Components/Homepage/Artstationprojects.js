@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
+import { useInView } from 'react-intersection-observer';
 
 const ArtStationProjects = () => {
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const { ref, inView } = useInView({ triggerOnce: true, threshold: 0.2 });
 
   useEffect(() => {
     const fetchProjects = async () => {
@@ -37,7 +39,7 @@ const ArtStationProjects = () => {
         className="text-5xl font-bold text-center mb-10 tracking-wide"
         initial={{ opacity: 0, y: -50 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6 }}
+        transition={{ duration: 0.6, ease: 'easeInOut' }}
       >
         ArtStation Projects
       </motion.h1>
@@ -46,7 +48,7 @@ const ArtStationProjects = () => {
           className="text-center text-lg"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ duration: 0.8 }}
+          transition={{ duration: 0.8, ease: 'easeInOut' }}
         >
           Loading...
         </motion.div>
@@ -55,30 +57,35 @@ const ArtStationProjects = () => {
           className="text-center text-lg text-red-500"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ duration: 0.8 }}
+          transition={{ duration: 0.8, ease: 'easeInOut' }}
         >
           {error}
         </motion.div>
       ) : (
         <motion.div 
+          
           className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 px-6"
           initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.8 }}
+          animate={inView ? { opacity: 1 } : { opacity: 1 }}
+          transition={{ duration: 0.8, staggerChildren: 0.2, ease: 'easeInOut' }}
         >
           {projects.length > 0 ? (
             projects.map((project) => (
               <motion.div 
                 key={project.id} 
                 className="relative rounded-lg shadow-2xl overflow-hidden hover:scale-105 transition-transform duration-300"
-                whileHover={{ scale: 1.08 }}
+                initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }}
+                whileHover={{ scale: 1.08, rotate: 1 }}
                 whileTap={{ scale: 0.95 }}
+                transition={{ duration: 0.6, ease: 'easeOut' }}
               >
                 <Link to={`/projects/${project.hash_id}`} className="block w-full h-full">
-                  <img 
+                  <motion.img 
                     src={project.cover.thumb_url} 
                     alt={project.title || 'ArtStation Project Image'} 
                     className="object-cover w-full h-full"
+                    whileHover={{ scale: 1.05 }}
+                    transition={{ duration: 0.5, ease: 'easeOut' }}
                   />
                   <div className="absolute inset-0 flex flex-col justify-end p-5">
                     <svg className="absolute bottom-0 left-0 w-60 h-60" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
@@ -95,8 +102,21 @@ const ArtStationProjects = () => {
                         <circle cx="40" cy="165" r="40" opacity="0.6" />
                       </g>
                     </svg>
-                    <h2 className="text-2xl font-semibold mb-2 tracking-wide text-white relative z-10">{project.title}</h2>
-                    
+                    <motion.h2 
+                      className="text-2xl font-semibold mb-2 tracking-wide text-white relative z-10"
+                      initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.6, ease: 'easeOut' }}
+                    >
+                      {project.title}
+                    </motion.h2>
+                    <motion.div 
+                      className="text-sm text-blue-400 font-medium underline relative z-10"
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={inView ? { opacity: 1, y: 0 } : {}}
+                      transition={{ duration: 0.6, ease: 'easeOut', delay: 0.1 }}
+                    >
+                      View Details
+                    </motion.div>
                   </div>
                 </Link>
               </motion.div>
@@ -106,7 +126,7 @@ const ArtStationProjects = () => {
               className="text-center text-lg"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              transition={{ duration: 0.8 }}
+              transition={{ duration: 0.8, ease: 'easeInOut' }}
             >
               No projects available
             </motion.div>
