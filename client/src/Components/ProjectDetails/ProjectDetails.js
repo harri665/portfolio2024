@@ -15,7 +15,7 @@ const ArtStationProject = () => {
     // Fetch data for the specific project using the passed hash ID
     const fetchProject = async () => {
       try {
-        const response = await fetch(`http://localhost:3005/api/project/${hashId}`);
+        const response = await fetch(`https://artstation.harrison-martin.com/api/project/${hashId}`);//http://localhost:3005/api/project/${hashId}
         if (!response.ok) {
           throw new Error("Network response was not ok");
         }
