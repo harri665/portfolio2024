@@ -49,7 +49,7 @@ const ArtStationProject = () => {
       <motion.div 
         initial={{ x: -300 }}
         animate={{ x: 0 }}
-        transition={{ duration: 0.5 }}
+        transition={{ duration: 0.5  }}
         className="w-full md:w-1/4 bg-gray-800 p-6 shadow-lg"
       >
         <button
@@ -102,7 +102,7 @@ const ArtStationProject = () => {
       <motion.div 
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        transition={{ duration: 0.7 }}
+        transition={{ duration: 0.01 }}
         className="w-full md:w-3/4 p-8"
       >
         <h1 className="text-5xl font-bold mb-6 text-center md:text-left">{project.title}</h1>
