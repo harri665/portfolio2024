@@ -1,6 +1,6 @@
 FROM node:18-alpine AS build
 
-WORKDIR /app
+WORKDIR /client
 
 COPY package.json package-lock.json ./
 RUN npm install --production
