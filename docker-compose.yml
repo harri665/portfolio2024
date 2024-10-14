@@ -6,7 +6,7 @@ services:
       context: ./client
       dockerfile: Dockerfile
     ports:
-      - "3004:3004" # Serve the frontend on port 80
+      - "3004:80" # Serve the frontend on port 80
     environment:
       - NODE_ENV=production
     depends_on:
