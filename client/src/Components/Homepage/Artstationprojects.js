@@ -14,7 +14,7 @@ const ArtStationProjects = () => {
       try {
         const apiBaseUrl = process.env.NODE_ENV === 'development' 
           ? 'https://artstation.harrison-martin.com/api/artstation/harr1' 
-          : 'https://artstation.harrison-martin.com/api/artstation/harr1';//http://localhost:3005/api/artstation/harr1
+          : 'https://artstation.harrison-martin.com/api/artstation/harr1'; //http://localhost:3005/api/artstation/harr1
         const response = await fetch(apiBaseUrl);
         
         if (!response.ok) {
@@ -22,7 +22,22 @@ const ArtStationProjects = () => {
         }
 
         const data = await response.json();
-        setProjects(data.data || []);
+        const projectsWithDetails = await Promise.all(
+          data.data.map(async (project) => {
+            try {
+              const detailsResponse = await fetch(`https://artstation.harrison-martin.com/api/project/${project.hash_id}`);
+              if (!detailsResponse.ok) {
+                throw new Error('Failed to fetch project details');
+              }
+              const details = await detailsResponse.json();
+              return { ...project, software_items: details.software_items };
+            } catch (err) {
+              console.error('Error fetching project details:', err);
+              return { ...project, software_items: [] };
+            }
+          })
+        );
+        setProjects(projectsWithDetails);
       } catch (error) {
         setError(error.message);
       } finally {
@@ -63,7 +78,7 @@ const ArtStationProjects = () => {
         </motion.div>
       ) : (
         <motion.div 
-          
+          ref={ref}
           className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 px-6"
           initial={{ opacity: 0 }}
           animate={inView ? { opacity: 1 } : { opacity: 1 }}
@@ -74,11 +89,17 @@ const ArtStationProjects = () => {
               <motion.div 
                 key={project.id} 
                 className="relative rounded-lg shadow-2xl overflow-hidden hover:scale-105 transition-transform duration-300"
-                initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }}
+                initial={{ opacity: 0, y: 30 }}
+                animate={{ opacity: 1, y: 0 }}
                 whileHover={{ scale: 1.08, rotate: 1 }}
                 whileTap={{ scale: 0.95 }}
                 transition={{ duration: 0.6, ease: 'easeOut' }}
               >
+                <div className="absolute top-0 right-0 flex gap-2 p-2 bg-black bg-opacity-50 rounded-bl-lg">
+                  {project.software_items && project.software_items.map((software, index) => (
+                    <img key={index} src={software.icon_url} alt={software.name} className="w-6 h-6" />
+                  ))}
+                </div>
                 <Link to={`/projects/${project.hash_id}`} className="block w-full h-full">
                   <motion.img 
                     src={project.cover.thumb_url} 
@@ -104,7 +125,8 @@ const ArtStationProjects = () => {
                     </svg>
                     <motion.h2 
                       className="text-2xl font-semibold mb-2 tracking-wide text-white relative z-10"
-                      initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.6, ease: 'easeOut' }}
                     >
                       {project.title}
@@ -112,7 +134,7 @@ const ArtStationProjects = () => {
                     <motion.div 
                       className="text-sm text-blue-400 font-medium underline relative z-10"
                       initial={{ opacity: 0, y: 20 }}
-                      animate={inView ? { opacity: 1, y: 0 } : {}}
+                      animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.6, ease: 'easeOut', delay: 0.1 }}
                     >
                       View Details
