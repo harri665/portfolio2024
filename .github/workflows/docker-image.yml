@@ -1,0 +1,26 @@
+name: Docker Image CI
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Build the client Docker image
+      run: docker build ./client --file client/Dockerfile --tag harri665/portfolio-frontend:$(date +%s)
+    
+    - name: Push the client Docker image to Docker Hub
+      run: docker push harri665/portfolio-frontend:$(date +%s)
+    
+    - name: Build the server Docker image
+      run: docker build ./server --file server/Dockerfile --tag harri665/portfolio-backend:$(date +%s)
+    
+    - name: Push the server Docker image to Docker Hub
+      run: docker push harri665/portfolio-backend:$(date +%s)
