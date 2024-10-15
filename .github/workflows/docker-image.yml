@@ -13,14 +13,20 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Build the client Docker image
-      run: docker build ./client --file client/Dockerfile --tag harri665/portfolio-frontend:latest
-    
-    - name: Push the client Docker image to Docker Hub
-      run: docker push harri665/portfolio-frontend:latest
+    - name: Log in to Docker Hub
+      env:
+        DOCKER_BUILDKIT: 1
+      run: |
+        echo "${{ secrets.DOCKER_HUB_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_HUB_USERNAME }}" --password-stdin
     
     - name: Build the server Docker image
       run: docker build ./server --file server/Dockerfile --tag harri665/portfolio-backend:latest
     
     - name: Push the server Docker image to Docker Hub
       run: docker push harri665/portfolio-backend:latest
+    
+    - name: Build the client Docker image
+      run: docker build ./client --file client/Dockerfile --tag harri665/portfolio-frontend:latest
+    
+    - name: Push the client Docker image to Docker Hub
+      run: docker push harri665/portfolio-frontend:latest
