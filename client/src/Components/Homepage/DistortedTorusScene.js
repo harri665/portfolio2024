@@ -49,7 +49,7 @@ function DistortedTorus() {
   const scale = isMobile ? 0.7 : 1.2;
 
   return (
-    <TorusKnot ref={meshRef} args={[1, 0.4, 256, 32]} scale={scale}>
+    <TorusKnot ref={meshRef} args={[1, 0.4, 512, 64]} scale={scale}>
       <shaderMaterial
         attach="material"
         uniforms={uniforms}
