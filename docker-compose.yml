@@ -2,9 +2,7 @@ version: '3.8'
 
 services:
   frontend:
-    build:
-      context: ./client
-      dockerfile: Dockerfile
+    image: harri665/portfolio-frontend:latest
     ports:
       - "3004:80" # Serve the frontend on port 80
     environment:
@@ -13,9 +11,7 @@ services:
       - backend
 
   backend:
-    build:
-      context: ./server
-      dockerfile: Dockerfile
+    image: harri665/portfolio-backend:latest
     ports:
       - "3005:3005"
     environment:
