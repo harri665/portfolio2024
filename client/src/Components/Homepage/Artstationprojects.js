@@ -7,6 +7,7 @@ const ArtStationProjects = () => {
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [visibleProjectsCount, setVisibleProjectsCount] = useState(8); // 2 rows initially (4 projects per row)
   const { ref, inView } = useInView({ triggerOnce: true, threshold: 0.2 });
 
   useEffect(() => {
@@ -48,6 +49,10 @@ const ArtStationProjects = () => {
     fetchProjects();
   }, []);
 
+  const loadMoreProjects = () => {
+    setVisibleProjectsCount((prevCount) => prevCount + 8);
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-900 via-gray-800 to-gray-900 text-white py-10">
       <motion.h1 
@@ -77,15 +82,15 @@ const ArtStationProjects = () => {
           {error}
         </motion.div>
       ) : (
-        <motion.div 
-          ref={ref}
-          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 px-6"
-          initial={{ opacity: 0 }}
-          animate={inView ? { opacity: 1 } : { opacity: 1 }}
-          transition={{ duration: 0.8, staggerChildren: 0.2, ease: 'easeInOut' }}
-        >
-          {projects.length > 0 ? (
-            projects.map((project) => (
+        <>
+          <motion.div 
+            ref={ref}
+            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 px-6"
+            initial={{ opacity: 0 }}
+            animate={inView ? { opacity: 1 } : { opacity: 1 }}
+            transition={{ duration: 0.8, staggerChildren: 0.2, ease: 'easeInOut' }}
+          >
+            {projects.slice(0, visibleProjectsCount).map((project) => (
               <motion.div 
                 key={project.id} 
                 className="relative rounded-lg shadow-2xl overflow-hidden hover:scale-105 transition-transform duration-300"
@@ -142,18 +147,40 @@ const ArtStationProjects = () => {
                   </div>
                 </Link>
               </motion.div>
-            ))
-          ) : (
-            <motion.div 
-              className="text-center text-lg"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: 0.8, ease: 'easeInOut' }}
-            >
-              No projects available
-            </motion.div>
+            ))}
+          </motion.div>
+          {visibleProjectsCount < projects.length && (
+            <div className="relative text-center mt-10">
+              <motion.div
+                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 px-6 opacity-20 relative"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.8, ease: 'easeInOut' }}
+              >
+                {projects.slice(visibleProjectsCount, visibleProjectsCount + 4).map((project, index) => (
+                  index < 4 && ( // Ensure only one row is displayed
+                    <div key={project.id} className="relative rounded-lg shadow-2xl overflow-hidden">
+                      <Link to={`/projects/${project.hash_id}`} className="block w-full h-full">
+                        <img 
+                          src={project.cover.thumb_url} 
+                          alt={project.title || 'ArtStation Project Image'} 
+                          className="object-cover w-full h-full opacity-20"
+                        />
+                      </Link>
+                    </div>
+                  )
+                ))}
+              </motion.div>
+              <button 
+                onClick={loadMoreProjects}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg transition duration-300 relative z-20 mt-4"
+                style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }}
+              >
+                Load More
+              </button>
+            </div>
           )}
-        </motion.div>
+        </>
       )}
     </div>
   );
