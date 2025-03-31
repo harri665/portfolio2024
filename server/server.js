@@ -6,6 +6,10 @@ import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
 
+// NEW imports
+import axios from 'axios';
+import useragent from 'express-useragent';
+
 puppeteer.use(StealthPlugin());
 
 const app = express();
@@ -14,11 +18,12 @@ const PORT = process.env.PORT || 3005;
 app.use(cors());
 app.use(express.json());
 
+// Enable express-useragent middleware to parse user-agent details
+app.use(useragent.express());
+
 // Cache file paths
 const videoLinkCacheFile = path.join(process.cwd(), 'videoLinkCache.json');
 const userProjectsCacheFile = path.join(process.cwd(), 'userProjectsCache.json');
-
-// Cache file paths for project details
 const projectDetailsCacheFile = path.join(process.cwd(), 'projectDetailsCache.json');
 
 // Load cache from files
@@ -112,25 +117,6 @@ async function getUserProjectsWithPuppeteer(username) {
   }
 }
 
-// Function to update user projects cache every hour
-function scheduleUserProjectsCacheUpdate() {
-  // Update project details cache every hour
-  setInterval(async () => {
-    for (const projectId in projectDetailsCache) {
-      console.log(`Updating cached project details for project ID: ${projectId}`);
-      projectDetailsCache[projectId] = await getProjectDetailsWithPuppeteer(projectId);
-    }
-    saveCacheToFile(projectDetailsCacheFile, projectDetailsCache); // Save updated cache to file
-  }, 60 * 60 * 1000); // Update every hour
-  setInterval(async () => {
-    for (const username in userProjectsCache) {
-      console.log(`Updating cached projects for user: ${username}`);
-      userProjectsCache[username] = await getUserProjectsWithPuppeteer(username);
-    }
-    saveCacheToFile(userProjectsCacheFile, userProjectsCache); // Save updated cache to file
-  }, 60 * 60 * 1000); // Update every hour
-}
-
 // Function to fetch project details by project ID
 async function getProjectDetailsWithPuppeteer(projectId) {
   // Check if the video link is already cached
@@ -199,6 +185,76 @@ async function getProjectDetailsWithPuppeteer(projectId) {
   }
 }
 
+// Function to update user projects cache every hour
+function scheduleUserProjectsCacheUpdate() {
+  // Update project details cache every hour
+  setInterval(async () => {
+    for (const projectId in projectDetailsCache) {
+      console.log(`Updating cached project details for project ID: ${projectId}`);
+      projectDetailsCache[projectId] = await getProjectDetailsWithPuppeteer(projectId);
+    }
+    saveCacheToFile(projectDetailsCacheFile, projectDetailsCache); // Save updated cache to file
+  }, 60 * 60 * 1000); // Update every hour
+
+  // Update user projects cache every hour
+  setInterval(async () => {
+    for (const username in userProjectsCache) {
+      console.log(`Updating cached projects for user: ${username}`);
+      userProjectsCache[username] = await getUserProjectsWithPuppeteer(username);
+    }
+    saveCacheToFile(userProjectsCacheFile, userProjectsCache); // Save updated cache to file
+  }, 60 * 60 * 1000); // Update every hour
+}
+
+// -------------------------
+// NEW ENDPOINT: /api/load
+// -------------------------
+// Make sure you are already importing and setting up:
+// import axios from 'axios';
+// import useragent from 'express-useragent';
+// app.use(useragent.express());
+
+app.get('/api/load', async (req, res) => {
+  try {
+    // Get IP address (may be behind a proxy or load balancer)
+    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+
+    // The express-useragent middleware populates req.useragent
+    const { os, browser, platform, source } = req.useragent;
+
+    // Get the page being accessed from the query param ?page=/path
+    const page = req.query.page || 'unknown';
+
+    // Lookup location for the IP address (using ip-api.com as an example)
+    const locationResponse = await axios.get(`http://ip-api.com/json/${ip}`);
+    const locationData = locationResponse.data;
+
+    // Log the info on the server
+    console.log('--- /api/load called ---');
+    console.log('IP Address:', ip);
+    console.log('Device/OS:', os);
+    console.log('Browser:', browser);
+    console.log('Platform:', platform);
+    console.log('Full User-Agent String:', source);
+    console.log('Accessed page:', page);
+    console.log('Location Data:', locationData);
+
+    // Send a response with the data
+    res.json({
+      message: 'Load endpoint data logged successfully',
+      ip,
+      device: os,
+      browser,
+      page,
+      location: locationData,
+    });
+  } catch (error) {
+    console.error('Error in /api/load:', error);
+    res.status(500).json({ error: 'Failed to process load request' });
+  }
+});
+
+
 // API route to fetch user projects
 app.get('/api/artstation/:username', async (req, res) => {
   const { username } = req.params;
@@ -251,16 +307,15 @@ app.get('/api/update-projects', async (req, res) => {
         }
       }
     }
-    saveCacheToFile(userProjectsCacheFile, userProjectsCache); // Save updated user projects cache to file
-    saveCacheToFile(projectDetailsCacheFile, projectDetailsCache); // Save updated project details cache to file
+    saveCacheToFile(userProjectsCacheFile, userProjectsCache); // Save updated user projects cache
+    saveCacheToFile(projectDetailsCacheFile, projectDetailsCache); // Save updated project details cache
     res.status(200).json({ message: 'Projects and project details updated successfully' });
   } catch (error) {
     console.error('Error updating cached projects:', error);
     res.status(500).json({ error: 'Failed to update projects and project details' });
   }
 });
-
-
+//git config --global user.email "you@example.com"
 // API route to clear all cached data
 app.get('/api/clear-cache', (req, res) => {
   try {
