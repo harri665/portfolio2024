@@ -96,14 +96,14 @@ const ArtStationProject = () => {
           </p>
           <p className="text-lg text-gray-400">Published: <span className="font-bold text-white">{new Date(project.published_at).toLocaleDateString()}</span></p>
           <p className="mt-4">
-            <a
+            {/* <a
               href={project.permalink}
               target="_blank"
               rel="noopener noreferrer"
               className="text-xl text-blue-400 underline hover:text-blue-600 transition-colors duration-300"
             >
               View on ArtStation
-            </a>
+            </a> */}
           </p>
         </div>
 
