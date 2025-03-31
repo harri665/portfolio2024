@@ -9,6 +9,7 @@ services:
       - NODE_ENV=production
     depends_on:
       - backend
+    restart: always
 
   backend:
     image: harri665/portfolio-backend:latest
