@@ -12,7 +12,7 @@ function MainRoutes() {
   useEffect(() => {
     // Whenever the path changes, call /api/load
     const page = location.pathname; // e.g. '/', '/projects/abc123'
-    fetch(`http://localhost:3005/api/load?page=${encodeURIComponent(page)}`)
+    fetch(`https://artstation.harrison-martin.com/api/load?page=${encodeURIComponent(page)}`)
       .then((res) => res.json())
       .then((data) => console.log("Load endpoint data:", data))
       .catch((error) => console.error("Error calling /api/load:", error));
@@ -35,7 +35,7 @@ function AdminLogs() {
 
   useEffect(() => {
     // Fetch logs from your server's /api/logs
-    fetch('http://localhost:3005/api/logs')
+    fetch('https://artstation.harrison-martin.com/api/logs')
       .then((response) => response.json())
       .then((data) => {
         console.log('Fetched logs:', data);
