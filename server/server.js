@@ -5,8 +5,6 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
-
-// NEW imports
 import axios from 'axios';
 import useragent from 'express-useragent';
 
@@ -17,8 +15,6 @@ const PORT = process.env.PORT || 3005;
 
 app.use(cors());
 app.use(express.json());
-
-// Enable express-useragent middleware to parse user-agent details
 app.use(useragent.express());
 
 function ensureCacheFileExists(filePath) {
@@ -35,7 +31,6 @@ ensureCacheFileExists(videoLinkCacheFile);
 ensureCacheFileExists(userProjectsCacheFile);
 ensureCacheFileExists(projectDetailsCacheFile);
 
-// Load cache from files
 let videoLinkCache = loadCacheFromFile(videoLinkCacheFile);
 let userProjectsCache = loadCacheFromFile(userProjectsCacheFile);
 let projectDetailsCache = loadCacheFromFile(projectDetailsCacheFile);
@@ -48,7 +43,6 @@ function loadCacheFromFile(filePath) {
       console.error(`Error loading cache from file ${filePath}:`, error);
     }
   }
-  // Return an empty object if parsing fails or file doesn't exist
   return {};
 }
 
@@ -69,13 +63,10 @@ async function getDirectVideoLink(embedUrl) {
 
   try {
     await page.goto(embedUrl, { waitUntil: 'networkidle2' });
-
-    // Extract the direct video link from the video source element
     const videoUrl = await page.evaluate(() => {
       const videoElement = document.querySelector('video source');
       return videoElement ? videoElement.src : null;
     });
-
     return videoUrl || null;
   } catch (error) {
     console.error('Error extracting direct video link:', error);
@@ -85,9 +76,7 @@ async function getDirectVideoLink(embedUrl) {
   }
 }
 
-// Function to fetch user projects by username
 async function getUserProjectsWithPuppeteer(username) {
-  // Check if the user projects are already cached
   if (userProjectsCache[username]) {
     console.log('Returning cached user projects for:', username);
     return userProjectsCache[username];
@@ -105,13 +94,12 @@ async function getUserProjectsWithPuppeteer(username) {
 
     const html = await page.content();
     const $ = cheerio.load(html);
-
     const jsonText = $('pre').text();
 
     if (jsonText) {
       const data = JSON.parse(jsonText);
-      userProjectsCache[username] = data; // Cache the user projects
-      saveCacheToFile(userProjectsCacheFile, userProjectsCache); // Save cache to file
+      userProjectsCache[username] = data;
+      saveCacheToFile(userProjectsCacheFile, userProjectsCache);
       console.log('Successfully extracted and cached user projects:', data);
       return data;
     } else {
@@ -126,9 +114,7 @@ async function getUserProjectsWithPuppeteer(username) {
   }
 }
 
-// Function to fetch project details by project ID
 async function getProjectDetailsWithPuppeteer(projectId) {
-  // Check if the video link is already cached
   if (projectDetailsCache[projectId]) {
     console.log('Returning cached project details for:', projectId);
     return projectDetailsCache[projectId];
@@ -146,40 +132,32 @@ async function getProjectDetailsWithPuppeteer(projectId) {
 
     const html = await page.content();
     const $ = cheerio.load(html);
-
     const jsonText = $('pre').text();
 
     if (jsonText) {
       const data = JSON.parse(jsonText);
 
-      // Iterate through assets to find embedded players and replace them with direct video links
       for (let asset of data.assets) {
         if (asset.has_embedded_player && asset.player_embedded) {
           const embedUrlMatch = asset.player_embedded.match(/src='(.*?)'/);
           if (embedUrlMatch && embedUrlMatch[1]) {
             const embedUrl = embedUrlMatch[1];
-            
-            // Check if we have already cached the direct link for this asset
             if (!videoLinkCache[embedUrl]) {
               console.log(`Fetching direct video link for embed URL: ${embedUrl}`);
               const directVideoUrl = await getDirectVideoLink(embedUrl);
               if (directVideoUrl) {
-                // Cache the direct link for this embed URL
                 videoLinkCache[embedUrl] = directVideoUrl;
                 asset.player_embedded = directVideoUrl;
               }
             } else {
-              // Use the cached link if available
               asset.player_embedded = videoLinkCache[embedUrl];
             }
           }
         }
       }
 
-      // Cache the entire project details with replaced direct links
       projectDetailsCache[projectId] = data;
-      saveCacheToFile(projectDetailsCacheFile, projectDetailsCache); // Save cache to file
-
+      saveCacheToFile(projectDetailsCacheFile, projectDetailsCache);
       console.log('Successfully extracted and cached project details:', data);
       return data;
     } else {
@@ -194,23 +172,22 @@ async function getProjectDetailsWithPuppeteer(projectId) {
   }
 }
 
-// Function to update user projects cache every hour
 function scheduleUserProjectsCacheUpdate() {
   setInterval(async () => {
     for (const projectId in projectDetailsCache) {
       console.log(`Updating cached project details for project ID: ${projectId}`);
       projectDetailsCache[projectId] = await getProjectDetailsWithPuppeteer(projectId);
     }
-    saveCacheToFile(projectDetailsCacheFile, projectDetailsCache); // Save updated cache to file
-  }, 60 * 60 * 1000); // Update every hour
+    saveCacheToFile(projectDetailsCacheFile, projectDetailsCache);
+  }, 60 * 60 * 1000);
 
   setInterval(async () => {
     for (const username in userProjectsCache) {
       console.log(`Updating cached projects for user: ${username}`);
       userProjectsCache[username] = await getUserProjectsWithPuppeteer(username);
     }
-    saveCacheToFile(userProjectsCacheFile, userProjectsCache); // Save updated cache to file
-  }, 60 * 60 * 1000); // Update every hour
+    saveCacheToFile(userProjectsCacheFile, userProjectsCache);
+  }, 60 * 60 * 1000);
 }
 
 // -------------------------
@@ -219,18 +196,12 @@ function scheduleUserProjectsCacheUpdate() {
 app.get('/api/load', async (req, res) => {
   try {
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-
-    // The express-useragent middleware populates req.useragent
     const { os, browser, platform, source } = req.useragent;
-
-    // Get the page being accessed from the query param ?page=/path
     const page = req.query.page || 'unknown';
 
-    // Lookup location for the IP address
     const locationResponse = await axios.get(`http://ip-api.com/json/${ip}`);
     const locationData = locationResponse.data;
 
-    // Log to the console (for quick visibility)
     console.log('--- /api/load called ---');
     console.log('IP Address:', ip);
     console.log('Device/OS:', os);
@@ -240,20 +211,14 @@ app.get('/api/load', async (req, res) => {
     console.log('Accessed page:', page);
     console.log('Location Data:', locationData);
 
-    // Also log to a JSON file
     const logFilePath = path.join(process.cwd(), 'loadLogs.json');
-
-    // If loadLogs.json does not exist, create it as an empty array
     if (!fs.existsSync(logFilePath)) {
       fs.writeFileSync(logFilePath, JSON.stringify([], null, 2));
     }
 
     const timeStamp = new Date().toISOString();
 
-    // Read existing logs
     const logs = JSON.parse(fs.readFileSync(logFilePath, 'utf-8'));
-
-    // Push the new log entry
     logs.push({
       timestamp: timeStamp,
       ip,
@@ -264,11 +229,8 @@ app.get('/api/load', async (req, res) => {
       pageAccessed: page,
       location: locationData,
     });
-
-    // Save the updated logs array back into loadLogs.json
     fs.writeFileSync(logFilePath, JSON.stringify(logs, null, 2));
 
-    // Send a response with the data
     res.json({
       message: 'Load endpoint data logged successfully',
       ip,
@@ -283,13 +245,33 @@ app.get('/api/load', async (req, res) => {
   }
 });
 
-// API route to fetch user projects
+// -------------------------
+// NEW ENDPOINT: /api/logs
+// -------------------------
+// Retrieves the entire logs.json file as JSON
+app.get('/api/logs', (req, res) => {
+  try {
+    const logFilePath = path.join(process.cwd(), 'loadLogs.json');
+    if (!fs.existsSync(logFilePath)) {
+      // If no log file exists yet, return empty array
+      return res.json([]);
+    }
+
+    const logs = JSON.parse(fs.readFileSync(logFilePath, 'utf-8'));
+    res.json(logs);
+  } catch (error) {
+    console.error('Error in /api/logs:', error);
+    res.status(500).json({ error: 'Failed to retrieve logs' });
+  }
+});
+
+// -------------------------
+// Existing endpoints
+// -------------------------
 app.get('/api/artstation/:username', async (req, res) => {
   const { username } = req.params;
-
   try {
     const projects = await getUserProjectsWithPuppeteer(username);
-
     if (projects) {
       res.json(projects);
     } else {
@@ -301,13 +283,10 @@ app.get('/api/artstation/:username', async (req, res) => {
   }
 });
 
-// API route to fetch project details by ID
 app.get('/api/project/:projectId', async (req, res) => {
   const { projectId } = req.params;
-
   try {
     const projectDetails = await getProjectDetailsWithPuppeteer(projectId);
-
     if (projectDetails) {
       res.json(projectDetails);
     } else {
@@ -319,7 +298,6 @@ app.get('/api/project/:projectId', async (req, res) => {
   }
 });
 
-// API route to update all cached user projects
 app.get('/api/update-projects', async (req, res) => {
   try {
     for (const username in userProjectsCache) {
@@ -335,8 +313,8 @@ app.get('/api/update-projects', async (req, res) => {
         }
       }
     }
-    saveCacheToFile(userProjectsCacheFile, userProjectsCache); // Save updated user projects cache
-    saveCacheToFile(projectDetailsCacheFile, projectDetailsCache); // Save updated project details cache
+    saveCacheToFile(userProjectsCacheFile, userProjectsCache);
+    saveCacheToFile(projectDetailsCacheFile, projectDetailsCache);
     res.status(200).json({ message: 'Projects and project details updated successfully' });
   } catch (error) {
     console.error('Error updating cached projects:', error);
@@ -344,7 +322,6 @@ app.get('/api/update-projects', async (req, res) => {
   }
 });
 
-// API route to clear all cached data
 app.get('/api/clear-cache', (req, res) => {
   try {
     videoLinkCache = {};
@@ -365,5 +342,5 @@ app.get('/api/clear-cache', (req, res) => {
 // Start the server
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
-  scheduleUserProjectsCacheUpdate(); // Start the cache update scheduler
+  scheduleUserProjectsCacheUpdate();
 });
