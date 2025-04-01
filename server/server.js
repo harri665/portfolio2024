@@ -21,10 +21,22 @@ app.use(express.json());
 // Enable express-useragent middleware to parse user-agent details
 app.use(useragent.express());
 
+// Helper to ensure a cache file exists (create it if it doesn't)
+function ensureCacheFileExists(filePath) {
+  if (!fs.existsSync(filePath)) {
+    fs.writeFileSync(filePath, JSON.stringify({}, null, 2));
+  }
+}
+
 // Cache file paths
 const videoLinkCacheFile = path.join(process.cwd(), 'videoLinkCache.json');
 const userProjectsCacheFile = path.join(process.cwd(), 'userProjectsCache.json');
 const projectDetailsCacheFile = path.join(process.cwd(), 'projectDetailsCache.json');
+
+// Ensure all cache files exist before loading
+ensureCacheFileExists(videoLinkCacheFile);
+ensureCacheFileExists(userProjectsCacheFile);
+ensureCacheFileExists(projectDetailsCacheFile);
 
 // Load cache from files
 let videoLinkCache = loadCacheFromFile(videoLinkCacheFile);
@@ -39,6 +51,7 @@ function loadCacheFromFile(filePath) {
       console.error(`Error loading cache from file ${filePath}:`, error);
     }
   }
+  // Return an empty object if parsing fails or file doesn't exist
   return {};
 }
 
@@ -209,11 +222,6 @@ function scheduleUserProjectsCacheUpdate() {
 // -------------------------
 // NEW ENDPOINT: /api/load
 // -------------------------
-// Make sure you are already importing and setting up:
-// import axios from 'axios';
-// import useragent from 'express-useragent';
-// app.use(useragent.express());
-
 app.get('/api/load', async (req, res) => {
   try {
     // Get IP address (may be behind a proxy or load balancer)
@@ -225,11 +233,11 @@ app.get('/api/load', async (req, res) => {
     // Get the page being accessed from the query param ?page=/path
     const page = req.query.page || 'unknown';
 
-    // Lookup location for the IP address (using ip-api.com as an example)
+    // Lookup location for the IP address
     const locationResponse = await axios.get(`http://ip-api.com/json/${ip}`);
     const locationData = locationResponse.data;
 
-    // Log the info on the server
+    // Log to the console (for quick visibility)
     console.log('--- /api/load called ---');
     console.log('IP Address:', ip);
     console.log('Device/OS:', os);
@@ -238,6 +246,34 @@ app.get('/api/load', async (req, res) => {
     console.log('Full User-Agent String:', source);
     console.log('Accessed page:', page);
     console.log('Location Data:', locationData);
+
+    // Also log to a JSON file
+    const logFilePath = path.join(process.cwd(), 'loadLogs.json');
+
+    // If loadLogs.json does not exist, create it as an empty array
+    if (!fs.existsSync(logFilePath)) {
+      fs.writeFileSync(logFilePath, JSON.stringify([], null, 2));
+    }
+
+    const timeStamp = new Date().toISOString();
+
+    // Read existing logs
+    const logs = JSON.parse(fs.readFileSync(logFilePath, 'utf-8'));
+
+    // Push the new log entry
+    logs.push({
+      timestamp: timeStamp,
+      ip,
+      device: os,
+      browser,
+      platform,
+      userAgent: source,
+      pageAccessed: page,
+      location: locationData,
+    });
+
+    // Save the updated logs array back into loadLogs.json
+    fs.writeFileSync(logFilePath, JSON.stringify(logs, null, 2));
 
     // Send a response with the data
     res.json({
@@ -253,7 +289,6 @@ app.get('/api/load', async (req, res) => {
     res.status(500).json({ error: 'Failed to process load request' });
   }
 });
-
 
 // API route to fetch user projects
 app.get('/api/artstation/:username', async (req, res) => {
@@ -315,7 +350,7 @@ app.get('/api/update-projects', async (req, res) => {
     res.status(500).json({ error: 'Failed to update projects and project details' });
   }
 });
-//git config --global user.email "you@example.com"
+
 // API route to clear all cached data
 app.get('/api/clear-cache', (req, res) => {
   try {
