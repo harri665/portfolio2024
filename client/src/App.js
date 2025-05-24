@@ -14,7 +14,7 @@ function MainRoutes() {
     const page = location.pathname; // e.g. '/', '/projects/abc123'
     fetch(`https://artstation.harrison-martin.com/api/load?page=${encodeURIComponent(page)}`)
       .then((res) => res.json())
-      .then((data) => console.log("Load endpoint data:", data))
+      // .then((data) => console.log("Load endpoint data:", data))
       .catch((error) => console.error("Error calling /api/load:", error));
   }, [location]);
 
