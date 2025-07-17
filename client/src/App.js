@@ -4,6 +4,7 @@ import { HashRouter as Router, Routes, Route, useLocation } from 'react-router-d
 import Homepage from './Components/Homepage/Homepage';
 import ProjectDetails from './Components/ProjectDetails/ProjectDetails';
 import LogsViewer from './Components/Admin/Admin';
+import ContactPage from './Components/Contact/ContactPage';
 
 function MainRoutes() {
   const location = useLocation();
@@ -22,6 +23,7 @@ function MainRoutes() {
       <Route path="/projects/:hashId" element={<ProjectDetails />} />
       {/* The /admin route is just a placeholder; you can rename it as needed */}
       <Route path="/admin" element={<AdminLogs />} />
+      <Route path="/contact" element={<ContactPage />} />
     </Routes>
   );
 }
