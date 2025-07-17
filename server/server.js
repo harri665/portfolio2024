@@ -7,11 +7,31 @@ import fs from 'fs';
 import path from 'path';
 import axios from 'axios';
 import useragent from 'express-useragent';
+// --- NEW IMPORTS ---
+import { Client, GatewayIntentBits } from 'discord.js';
+import 'dotenv/config'; // Loads .env file contents into process.env
 
 puppeteer.use(StealthPlugin());
 
 const app = express();
 const PORT = process.env.PORT || 3005;
+
+// --- DISCORD BOT SETUP ---
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.DirectMessages
+  ]
+});
+
+// Log in the bot using the token from your .env file
+client.login(process.env.DISCORD_BOT_TOKEN);
+
+client.once('ready', () => {
+  console.log(`✅ Logged in to Discord as ${client.user.tag}!`);
+});
+// --- END DISCORD BOT SETUP ---
+
 
 app.use(cors());
 app.use(express.json());
@@ -203,7 +223,43 @@ function scheduleUserProjectsCacheUpdate() {
 }
 
 // -------------------------
-// NEW ENDPOINT: /api/load
+// NEW DISCORD DM ENDPOINT
+// -------------------------
+app.post('/api/discord/dm', async (req, res) => {
+  const { message } = req.body;
+
+  if (!message) {
+    return res.status(400).json({ error: 'Missing message in request body.' });
+  }
+
+  try {
+    // Fetch the user by their ID
+    const user = await client.users.fetch("336913971900710913");
+    if (!user) {
+      return res.status(404).json({ error: 'Discord user not found.' });
+    }
+
+    // Send the direct message
+    await user.send(message);
+
+    console.log(`Successfully sent DM to user `);
+    res.status(200).json({ success: `Message sent to user.` });
+
+  } catch (error) {
+    console.error('Failed to send Discord DM:', error);
+    // Provide more specific feedback if possible
+    if (error.code === 10013) { // Unknown User
+         return res.status(404).json({ error: 'Discord user not found.' });
+    }
+    if (error.code === 50007) { // Cannot send messages to this user
+        return res.status(403).json({ error: 'Cannot send message to this user. They may have DMs disabled or the bot does not share a server with them.' });
+    }
+    res.status(500).json({ error: 'An internal error occurred while trying to send the message.' });
+  }
+});
+
+// -------------------------
+// /api/load Endpoint
 // -------------------------
 app.get('/api/load', async (req, res) => {
   try {
@@ -262,17 +318,14 @@ app.get('/api/load', async (req, res) => {
 });
 
 // -------------------------
-// NEW ENDPOINT: /api/logs
+// /api/logs Endpoint
 // -------------------------
-// Retrieves the entire logs.json file as JSON
 app.get('/api/logs', (req, res) => {
   try {
     const logFilePath = path.join(process.cwd(), 'loadLogs.json');
     if (!fs.existsSync(logFilePath)) {
-      // If no log file exists yet, return empty array
       return res.json([]);
     }
-
     const logs = JSON.parse(fs.readFileSync(logFilePath, 'utf-8'));
     res.json(logs);
   } catch (error) {
@@ -282,7 +335,7 @@ app.get('/api/logs', (req, res) => {
 });
 
 // -------------------------
-// Existing endpoints
+// Existing ArtStation endpoints
 // -------------------------
 app.get('/api/artstation/:username', async (req, res) => {
   const { username } = req.params;
@@ -357,6 +410,6 @@ app.get('/api/clear-cache', (req, res) => {
 
 // Start the server
 app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+  console.log(`🚀 Server is running on port ${PORT}`);
   scheduleUserProjectsCacheUpdate();
 });

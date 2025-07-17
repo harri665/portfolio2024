@@ -2,6 +2,7 @@ import React from "react";
 import DistortedTorusScene from "./DistortedTorusScene";
 import { motion } from "framer-motion"; // Import Framer Motion
 import ArtStationProjects from "./Artstationprojects";
+import Buttons from "./Buttons"; // Import the buttons component
 
 export default function Homepage() {
   return (
@@ -34,76 +35,66 @@ function HeroSection() {
         <p className="text-xl mt-4 font-light tracking-wide text-white">
           Computer Scientist and 3D Generalist
         </p>
-        <motion.button
-          className="mt-8 px-8 py-3 bg-white text-gray-900 rounded-full shadow-xl hover:bg-gray-100 transition-all duration-300"
-          whileHover={{ scale: 1.1 }}
-          onClick={() => {
-            const projectsElement = document.getElementById('projects');
-            if (projectsElement) {
-              projectsElement.scrollIntoView({ behavior: 'smooth' });
-            }
-          }}
-        >
-          Explore My Work
-        </motion.button>
+        <Buttons/>
       </motion.div>
     </div>
   );
 }
-
 function AboutSection() {
+  // By defining the skills in an array, it's easier to add, remove, or change them later.
+  const skills = [
+    "Computer Science Undergrad",
+    "3D Generalist",
+    "Creative Technologist", // Replaced the duplicate "3D Generalist"
+  ];
+
   return (
     <motion.div
-      className="py-20 px-10 lg:px-24 bg-gray-900 text-white text-center"
+      className="py-20 px-10 lg:px-24 bg-gray-900 text-white"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ delay: 0.5, duration: 1 }}
     >
-      <h2 className="text-5xl font-bold mb-10 tracking-tight">
+      <h2 className="text-5xl font-bold mb-10 tracking-tight text-center">
         About Harrison Martin
       </h2>
-      <p className="text-lg leading-relaxed max-w-3xl mx-auto font-light">
-        Hello! I’m Harrison Martin, a passionate software engineer with
-        expertise in full-stack development and 3D printing technologies. My
-        experience includes building high-performance web applications using
-        modern frameworks like Node.js, React, and MongoDB, as well as solving
-        complex 3D printing challenges such as G-code generation and printer
-        configuration. I am proficient in multiple programming languages,
-        including C++, Python, and JavaScript, allowing me to create scalable
-        solutions across diverse platforms. Additionally, I have hands-on
-        experience with 3D modeling tools like Blender and Substance 3D Suite,
-        where I develop immersive visual content and animations. Currently, I am
-        pursuing a degree in Software Development at the University of Colorado,
-        Boulder, while contributing to the CU Sounding Rocket Laboratory and
-        serving as VP at CU 3D. My dedication to learning and problem-solving
-        drives my passion for technology and innovation.
-      </p>
+      <div className="flex flex-col lg:flex-row items-center lg:items-start lg:space-x-10">
+        {/* Image on the left */}
+        <div className="flex-shrink-0 mb-6 lg:mb-0">
+          <img
+            src="/HarrisonProfessional.jpg"
+            alt="Harrison Martin"
+            className="rounded-lg shadow-xl w-64 h-64 object-cover"
+          />
+        </div>
 
-      {/* Placeholder for an image */}
-      <div className="mt-10 flex justify-center">
-        <img
-          src="/HarrisonProfessional.jpg"
-          alt="Placeholder"
-          className="rounded-lg shadow-xl"
-        />
+        {/* Text on the right */}
+        <p className="text-lg leading-relaxed max-w-3xl font-light">
+          Harrison Martin is a passionate Computer Scientist and 3D Generalist
+          with a keen eye for detail and a drive for innovation. With a strong
+          foundation in computer science and a creative flair for 3D artistry,
+          Harrison bridges the gap between technology and art, delivering
+          captivating projects that inspire and engage.
+        </p>
       </div>
 
-      <div className="mt-10 flex justify-center space-x-6">
-        <motion.div
-          className="bg-gray-800 p-6 rounded-lg shadow-xl transition-all transform"
-          whileHover={{ scale: 1.05, backgroundColor: "#4A5568" }}
-        >
-          {/* Icon Placeholder */}
-          <p className="font-semibold text-white">Computer Science Undergrad</p>
-        </motion.div>
-        <motion.div
-          className="bg-gray-800 p-6 rounded-lg shadow-xl transition-all transform"
-          whileHover={{ scale: 1.05, backgroundColor: "#4A5568" }}
-        >
-          {/* Icon Placeholder */}
-
-          <p className="font-semibold text-white">3D Generalist</p>
-        </motion.div>
+      {/* --- IMPROVED SKILLS SECTION --- */}
+      {/* CHANGED HERE:
+        - `flex-wrap` allows items to wrap to the next line on smaller screens.
+        - `gap-6` is a modern replacement for `space-x-6` that adds spacing 
+          both horizontally and vertically, which is perfect for wrapped items.
+      */}
+      <div className="mt-12 flex flex-wrap justify-center gap-6">
+        {skills.map((skill, index) => (
+          <motion.div
+            key={index} // A unique key is crucial for lists in React
+            className="bg-gray-800 p-6 rounded-lg shadow-xl"
+            whileHover={{ scale: 1.05, backgroundColor: "#4A5568" }}
+            transition={{ type: "spring", stiffness: 300 }} // Added a smoother transition
+          >
+            <p className="font-semibold text-white text-center">{skill}</p>
+          </motion.div>
+        ))}
       </div>
     </motion.div>
   );
