@@ -27,7 +27,6 @@ const client = new Client({
 // Log in the bot using the token from your .env file
 client.login(process.env.DISCORD_BOT_TOKEN);
 
-// client.login("NTIwMDI2ODcxNDY4MTMwMzE2.G5kSbJ.pIhn5xUfm8TczjwXPF-XnAmApD_83zBJTTFIQg");
 
 client.once('ready', () => {
   console.log(`✅ Logged in to Discord as ${client.user.tag}!`);
