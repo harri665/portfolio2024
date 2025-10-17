@@ -7,7 +7,7 @@ services:
       - "3004:80" # Serve the frontend on port 80
     environment:
       - NODE_ENV=production
-      - DISCORD_BOT_TOKEN="NTIwMDI2ODcxNDY4MTMwMzE2.G5kSbJ.pIhn5xUfm8TczjwXPF-XnAmApD_83zBJTTFIQg"
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
     depends_on:
       - backend
     restart: always
