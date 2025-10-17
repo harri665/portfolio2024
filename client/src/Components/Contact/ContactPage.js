@@ -58,7 +58,7 @@ const ContactPage = () => {
     { href: "mailto:harrison.d.martin@gmail.com", Icon: MailIcon, label: "Email", subtext: "harrison.d.martin@gmail.com" },
     { href: "tel:3038842648", Icon: PhoneIcon, label: "Phone", subtext: "303-884-2648" },
     { href: "https://www.linkedin.com/in/harrison-martin-27/", Icon: LinkedinIcon, label: "LinkedIn", subtext: "Harrison Martin" },
-    { href: "https://github.com/your-username", Icon: GithubIcon, label: "GitHub", subtext: "your-username" },
+    { href: "https://github.com/harri665", Icon: GithubIcon, label: "GitHub", subtext: "harri665" },
   ];
 
   const [formData, setFormData] = useState({ name: '', email: '', message: '', phone: '' });

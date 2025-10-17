@@ -79,20 +79,16 @@ function AboutSection() {
       </div>
 
       {/* --- IMPROVED SKILLS SECTION --- */}
-      {/* CHANGED HERE:
-        - `flex-wrap` allows items to wrap to the next line on smaller screens.
-        - `gap-6` is a modern replacement for `space-x-6` that adds spacing 
-          both horizontally and vertically, which is perfect for wrapped items.
-      */}
       <div className="mt-12 flex flex-wrap justify-center gap-6">
         {skills.map((skill, index) => (
           <motion.div
-            key={index} // A unique key is crucial for lists in React
-            className="bg-gray-800 p-6 rounded-lg shadow-xl"
-            whileHover={{ scale: 1.05, backgroundColor: "#4A5568" }}
-            transition={{ type: "spring", stiffness: 300 }} // Added a smoother transition
+            key={index}
+            className="bg-gray-800/50 border border-gray-700 px-8 py-4 rounded-lg"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.7 + index * 0.1, duration: 0.6 }}
           >
-            <p className="font-semibold text-white text-center">{skill}</p>
+            <p className="font-light text-gray-300 text-center text-lg">{skill}</p>
           </motion.div>
         ))}
       </div>

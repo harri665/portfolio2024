@@ -1,211 +1,296 @@
 import React, { useState, useEffect, useRef } from "react";
-import { useParams } from "react-router-dom";
-import ReactPlayer from 'react-player';
-import { motion } from 'framer-motion';
-import { FaEye, FaHeart, FaArrowLeft } from 'react-icons/fa';
+import { useParams, useNavigate } from "react-router-dom";
+import ReactPlayer from "react-player";
+import { motion } from "framer-motion";
+import { FaArrowLeft } from "react-icons/fa";
 
 const ArtStationProject = () => {
-  const { hashId } = useParams(); // Get the hashId from the route parameter
-
+  const { hashId } = useParams();
+  const navigate = useNavigate();
   const [project, setProject] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const assetRefs = useRef({}); // Store refs for each asset
+  const assetRefs = useRef({});
 
   useEffect(() => {
-    // Fetch data for the specific project using the passed hash ID
     const fetchProject = async () => {
       try {
-        const response = await fetch(`https://artstation.harrison-martin.com/api/project/${hashId}`);
-        if (!response.ok) {
-          throw new Error("Network response was not ok");
-        }
+        const response = await fetch(
+          `https://artstation.harrison-martin.com/api/project/${hashId}`
+        );
+        if (!response.ok) throw new Error("Failed to load project");
         const data = await response.json();
         setProject(data);
-        setLoading(false);
       } catch (err) {
         setError(err.message);
+      } finally {
         setLoading(false);
       }
     };
-
     fetchProject();
-  }, [hashId]); // Refetch if the hashId changes
+  }, [hashId]);
 
   useEffect(() => {
-    // Scroll to the asset if the URL contains a fragment identifier
-    const scrollToAsset = () => {
-      const fullHash = window.location.hash;
-      const assetId = fullHash.split("#")[2]; // Extract the assetId after the second '#'
-
-      if (assetId && assetRefs.current[assetId]) {
-        // Scroll the asset into view
-        setTimeout(() => {
-          const assetElement = assetRefs.current[assetId];
-          assetElement.scrollIntoView({ behavior: "smooth", block: "center" });
-
-          // Highlight the asset using Tailwind CSS classes for a modern glowing effect
-          assetElement.classList.add("ring-4", "ring-blue-600", "ring-offset-4", "ring-offset-gray-900", "animate-pulse");
-          setTimeout(() => {
-            assetElement.classList.remove("ring-4", "ring-blue-900", "ring-offset-4", "ring-offset-gray-900", "animate-pulse");
-          }, 4000); // Remove highlight after 2 seconds
-        }, 500); // Delay to ensure the element is rendered
-      }
-    };
-
     if (!loading && project) {
-      scrollToAsset();
+      const assetId = window.location.hash.split("#")[2];
+      if (assetId && assetRefs.current[assetId]) {
+        const el = assetRefs.current[assetId];
+        setTimeout(() => {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          el.classList.add("ring-4", "ring-cyan-400", "animate-pulse");
+          setTimeout(() => el.classList.remove("ring-4", "ring-cyan-400", "animate-pulse"), 3000);
+        }, 500);
+      }
     }
   }, [loading, project]);
 
-  if (loading) {
-    return <div className="text-center text-white">Loading...</div>;
-  }
+  if (loading)
+    return (
+      <motion.div 
+        className="flex justify-center items-center h-screen bg-black text-gray-400 text-lg"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+      >
+        <motion.div
+          animate={{ 
+            scale: [1, 1.2, 1],
+            opacity: [0.5, 1, 0.5]
+          }}
+          transition={{ 
+            duration: 1.5, 
+            repeat: Infinity,
+            ease: "easeInOut"
+          }}
+        >
+          Loading...
+        </motion.div>
+      </motion.div>
+    );
 
-  if (error) {
-    return <div className="text-center text-red-500">Error: {error}</div>;
-  }
+  if (error)
+    return (
+      <motion.div 
+        className="flex justify-center items-center h-screen bg-black text-red-500 text-lg"
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.5 }}
+      >
+        {error}
+      </motion.div>
+    );
 
-  if (!project) {
-    return null;
-  }
+  if (!project) return null;
+
+  // Animation variants
+  const sidebarVariants = {
+    hidden: { x: -100, opacity: 0 },
+    visible: { 
+      x: 0, 
+      opacity: 1,
+      transition: { 
+        type: "spring",
+        stiffness: 100,
+        damping: 20,
+        staggerChildren: 0.1,
+        delayChildren: 0.2
+      }
+    }
+  };
+
+  const itemVariants = {
+    hidden: { x: -20, opacity: 0 },
+    visible: { 
+      x: 0, 
+      opacity: 1,
+      transition: { type: "spring", stiffness: 100 }
+    }
+  };
+
+  const mainVariants = {
+    hidden: { opacity: 0, y: 20 },
+    visible: { 
+      opacity: 1, 
+      y: 0,
+      transition: { 
+        duration: 0.8,
+        ease: [0.6, -0.05, 0.01, 0.99]
+      }
+    }
+  };
+
+  const assetContainerVariants = {
+    hidden: { opacity: 0 },
+    visible: {
+      opacity: 1,
+      transition: {
+        staggerChildren: 0.1,
+        delayChildren: 0.3
+      }
+    }
+  };
+
+  const assetVariants = {
+    hidden: { opacity: 0, y: 30, scale: 0.95 },
+    visible: { 
+      opacity: 1, 
+      y: 0,
+      scale: 1,
+      transition: {
+        type: "spring",
+        stiffness: 100,
+        damping: 15
+      }
+    }
+  };
 
   return (
-    <div className="flex flex-col md:flex-row bg-gray-900 text-white min-h-screen">
-      {/* Sidebar for Project Details and Software Used */}
-      <motion.div
-        initial={{ x: -300 }}
-        animate={{ x: 0 }}
-        transition={{ duration: 0.5 }}
-        className="w-full md:w-1/4 bg-gray-800 p-6 shadow-lg"
+    <div className="min-h-screen bg-[#020202] text-gray-200 flex flex-col md:flex-row">
+      {/* Sidebar */}
+      <motion.aside
+        variants={sidebarVariants}
+        initial="hidden"
+        animate="visible"
+        className="w-full md:w-1/4 p-8 bg-gradient-to-b from-[#0a0a0a] to-[#141414] border-r border-white/5 backdrop-blur-lg"
       >
-        <button
-          onClick={() => window.location.href = '/'}
-          className="mb-6 flex items-center text-lg text-blue-400 underline hover:text-blue-600 transition-colors duration-300"
+        <motion.button
+          onClick={() => navigate(-1)}
+          className="mb-8 flex items-center text-cyan-400 hover:text-white transition-colors"
+          variants={itemVariants}
+          whileHover={{ x: -5, scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
         >
           <FaArrowLeft className="mr-2" /> Back
-        </button>
-        {/* Project details */}
-        <div className="mb-12">
-          <h2 className="text-3xl font-semibold mb-4">Project Details</h2>
-          <p className="text-lg text-gray-400 flex items-center">
-            <FaEye className="mr-2" /> Views: <span className="font-bold text-white ml-2">{project.views_count}</span>
-          </p>
-          <p className="text-lg text-gray-400 flex items-center">
-            <FaHeart className="mr-2" /> Likes: <span className="font-bold text-white ml-2">{project.likes_count}</span>
-          </p>
-          <p className="text-lg text-gray-400">Published: <span className="font-bold text-white">{new Date(project.published_at).toLocaleDateString()}</span></p>
-          <p className="mt-4">
-            {/* <a
-              href={project.permalink}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xl text-blue-400 underline hover:text-blue-600 transition-colors duration-300"
-            >
-              View on ArtStation
-            </a> */}
-          </p>
-        </div>
+        </motion.button>
 
-        {/* Software used */}
-        <div className="mb-12">
-          <h2 className="text-3xl font-semibold mb-4">Software Used</h2>
-          <div className="flex flex-wrap gap-6">
-            {project.software_items.map((software, index) => (
+        <motion.div className="mb-8" variants={itemVariants}>
+          <p className="text-gray-400">Published: {new Date(project.published_at).toLocaleDateString()}</p>
+        </motion.div>
+
+        <motion.div className="mt-10" variants={itemVariants}>
+          <h2 className="text-xl font-semibold mb-3 text-white">Description</h2>
+          <motion.div
+            className="text-gray-400 text-sm leading-relaxed mb-8"
+            dangerouslySetInnerHTML={{
+              __html: project.description_html || "<p>No description available.</p>",
+            }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.4, duration: 0.6 }}
+          />
+        </motion.div>
+
+        <motion.div className="mt-8" variants={itemVariants}>
+          <h2 className="text-xl font-semibold mb-3 text-white">Software</h2>
+          <div className="flex flex-wrap gap-2">
+            {project.software_items.map((s, i) => (
               <motion.div
-                key={index}
-                className="flex items-center gap-4 p-4 bg-gray-700 rounded-lg shadow-sm"
-                whileHover={{ scale: 1.05 }}
+                key={i}
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: 0.5 + i * 0.05, type: "spring", stiffness: 200 }}
+                whileHover={{ scale: 1.1, rotate: 3 }}
+                whileTap={{ scale: 0.95 }}
+                className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg p-2 backdrop-blur-md"
               >
-                <img src={software.icon_url} alt={software.name} className="w-12 h-12" />
-                <p className="text-lg font-semibold text-white">{software.name}</p>
+                <img src={s.icon_url} alt={s.name} className="w-6 h-6" />
+                <p className="text-xs font-medium text-gray-200">{s.name}</p>
               </motion.div>
             ))}
           </div>
-        </div>
-      </motion.div>
+        </motion.div>
+      </motion.aside>
 
-      {/* Main content */}
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.01 }}
-        className="w-full md:w-3/4 p-8"
+      {/* Main Content */}
+      <motion.main
+        variants={mainVariants}
+        initial="hidden"
+        animate="visible"
+        className="flex-1 p-10 overflow-y-auto"
       >
-        <h1 className="text-5xl font-bold mb-6 text-center md:text-left">{project.title}</h1>
-        <div className="text-gray-400 mb-8 text-center md:text-left">
-          <div dangerouslySetInnerHTML={{ __html: project.description_html || '<p>No description available.</p>' }} />
-        </div>
-
-        {/* Project cover with max width, max height, and aspect ratio preservation */}
-        <motion.div
-          className="mb-12 mx-auto flex justify-center"
-          whileHover={{ scale: 1.05 }}
+        <motion.h1 
+          className="text-5xl font-bold text-white mb-6 tracking-tight"
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3, duration: 0.6, ease: "easeOut" }}
         >
-          <img
+          {project.title}
+        </motion.h1>
+
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 0.4, duration: 0.6, ease: "easeOut" }}
+          whileHover={{ 
+            scale: 1.02,
+            boxShadow: "0 0 50px rgba(0,255,255,0.15)",
+            transition: { duration: 0.3 }
+          }}
+          className="rounded-2xl overflow-hidden shadow-[0_0_40px_rgba(0,255,255,0.05)] mb-10 max-h-[800px] flex items-center justify-center bg-black/20"
+        >
+          <motion.img
             src={project.cover_url}
             alt={project.title}
-            className="w-full max-w-4xl max-h-96 h-auto object-contain rounded-lg shadow-2xl"
+            className="w-full h-full object-contain rounded-2xl max-h-[800px]"
+            initial={{ scale: 1.1, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ delay: 0.5, duration: 0.8, ease: "easeOut" }}
           />
         </motion.div>
 
-        {/* Project assets (images, videos) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-8 mb-16">
-          {project.assets.map((asset, index) => (
-            <motion.div
-              key={asset.id}
-              ref={(el) => (assetRefs.current[asset.id] = el)} // Assign ref to each asset
-              id={asset.id} // Assign the asset ID for scrolling purposes
-              className="rounded-lg overflow-hidden bg-gray-800 shadow-md"
-              whileHover={{ scale: 1.05 }}
-            >
-              {asset.asset_type === "image" && (
-                <img
-                  src={asset.image_url}
-                  alt={`Asset ${index}`}
-                  className="w-full h-auto rounded-lg"
-                />
-              )}
-              {asset.asset_type === "video_clip" && asset.player_embedded && (
-                <ReactPlayer
-                  url={asset.player_embedded} // Using the direct video URL from the JSON response
-                  controls={true}
-                  width="100%"
-                  height="100%"
-                  playing={true} // Auto-play the video
-                  muted={true} // Mute the video
-                  loop={true} // Repeat the video
-                  className="rounded-lg"
-                />
-              )}
-            </motion.div>
-          ))}
-        </div>
-
-        {/* User info */}
-        <motion.div
-          className="flex items-center p-6 bg-gray-800 rounded-lg shadow-lg"
-          whileHover={{ scale: 1.05 }}
+        <motion.div 
+          className="grid grid-cols-1 sm:grid-cols-2 gap-8"
+          variants={assetContainerVariants}
+          initial="hidden"
+          animate="visible"
         >
-          <img
-            src={project.user.large_avatar_url}
-            alt={project.user.full_name}
-            className="w-20 h-20 rounded-full shadow-xl"
-          />
-          <div className="ml-6">
-            <h2 className="text-3xl font-bold text-white">{project.user.full_name}</h2>
-            <p className="text-lg text-gray-400">{project.user.headline}</p>
-            <a
-              href={project.user.permalink}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-lg text-blue-400 underline hover:text-blue-600 transition-colors duration-300"
-            >
-              View profile
-            </a>
-          </div>
+          {project.assets
+            .filter((a) => {
+              // Only include assets that have valid content
+              if (a.asset_type === "image" && a.image_url) return true;
+              if (a.asset_type === "video_clip" && a.player_embedded) return true;
+              return false;
+            })
+            .map((a, i) => (
+              <motion.div
+                key={a.id}
+                ref={(el) => (assetRefs.current[a.id] = el)}
+                variants={assetVariants}
+                whileHover={{ 
+                  scale: 1.03,
+                  y: -5,
+                  boxShadow: "0 10px 30px rgba(0,0,0,0.3)",
+                  transition: { 
+                    type: "spring", 
+                    stiffness: 300, 
+                    damping: 20 
+                  }
+                }}
+                className="rounded-xl bg-white/5 border border-white/10 overflow-hidden backdrop-blur-sm max-h-[600px] flex items-center justify-center group"
+              >
+                {a.asset_type === "image" ? (
+                  <motion.img 
+                    src={a.image_url} 
+                    alt={`Asset ${i}`} 
+                    className="w-full h-full object-contain max-h-[600px]"
+                    whileHover={{ scale: 1.05 }}
+                    transition={{ duration: 0.4, ease: "easeOut" }}
+                  />
+                ) : a.asset_type === "video_clip" && a.player_embedded ? (
+                  <ReactPlayer
+                    url={a.player_embedded}
+                    controls
+                    width="100%"
+                    height="100%"
+                    muted
+                    loop
+                    playing
+                  />
+                ) : null}
+              </motion.div>
+            ))}
         </motion.div>
-      </motion.div>
+      </motion.main>
     </div>
   );
 };
