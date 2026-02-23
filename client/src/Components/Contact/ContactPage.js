@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
+import { apiUrl } from '../../utils/api';
 
 //==============================================================================
 // 1. SVG Icons for Social Links & Actions
@@ -65,10 +66,6 @@ const ContactPage = () => {
   const [status, setStatus] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const apiBaseUrl = process.env.NODE_ENV === 'production'
-    ? 'https://artstation.harrison-martin.com/api'
-    : 'http://localhost:3005/api';
-
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData(prevData => ({ ...prevData, [name]: value }));
@@ -103,7 +100,7 @@ const ContactPage = () => {
     `;
 
     try {
-      const response = await fetch(`${apiBaseUrl}/discord/dm`, {
+      const response = await fetch(apiUrl('/discord/dm'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

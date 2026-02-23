@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import ReactPlayer from "react-player";
 import { motion } from "framer-motion";
 import { FaArrowLeft } from "react-icons/fa";
+import { apiUrl } from "../../utils/api";
 
 const ArtStationProject = () => {
   const { hashId } = useParams();
@@ -16,7 +17,7 @@ const ArtStationProject = () => {
     const fetchProject = async () => {
       try {
         const response = await fetch(
-          `https://artstation.harrison-martin.com/api/project/${hashId}`
+          apiUrl(`/project/${hashId}`)
         );
         if (!response.ok) throw new Error("Failed to load project");
         const data = await response.json();
