@@ -7,7 +7,7 @@ import Buttons from "./Buttons";
 import SubdomainNav from "./SubdomainNav";
 import { SITE_MODES } from "../../utils/siteMode";
 
-export default function Homepage() {
+export default function ArtHomePage() {
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#08090c] text-white">
       <SubdomainNav currentMode={SITE_MODES.ART} />
@@ -25,39 +25,23 @@ export default function Homepage() {
 
 function HeroSection() {
   return (
-    <section className="relative min-h-[88vh] overflow-hidden pt-28 sm:pt-32">
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0">
-        <div className="absolute inset-x-0 top-0 h-[78vh] opacity-24">
-          <DistortedTorusScene variant="art" className="h-full w-full" />
-        </div>
-        <div className="absolute inset-0 bg-gradient-to-b from-[#08090c]/5 via-[#08090c]/58 to-[#08090c]" />
-        <div className="absolute left-[-3rem] top-24 h-56 w-56 rounded-full bg-rose-500/20 blur-3xl" />
-        <div className="absolute right-[6%] top-20 h-64 w-64 rounded-full bg-orange-400/18 blur-3xl" />
-        <div className="absolute bottom-[10%] left-[35%] h-72 w-72 rounded-full bg-violet-400/14 blur-3xl" />
-      </div>
+    <div className="relative h-[90vh] flex items-center justify-center overflow-hidden">
+      {/* Background Torus Scene */}
+      <DistortedTorusScene />
 
-      <div className="relative z-10 mx-auto flex w-full max-w-7xl items-center px-4 pb-10 sm:px-8">
-        <motion.div
-          className="w-full rounded-[2rem]  p-7 text-center sm:p-10"
-          initial={{ opacity: 0, y: 24 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.75 }}
-        >
-          <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-white/50">
-            Art Portfolio
-          </p>
-          <h1 className="text-4xl font-semibold tracking-tight text-white sm:text-6xl lg:text-7xl">
-            Harrison Martin
-          </h1>
-          <p className="mx-auto mt-4 max-w-3xl text-base leading-relaxed text-white/65 sm:text-lg">
-            3D generalist and creative technologist focused on form, lighting,
-            and polished visual storytelling.
-          </p>
-          <div className="mx-auto mt-6 h-px w-24 bg-white/10" />
-          <Buttons />
-        </motion.div>
-      </div>
-    </section>
+      {/* Hero Text Content with animations */}
+      <motion.div
+        className="absolute text-center z-10"
+        initial={{ opacity: 0, y: 50 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 1 }}
+      >
+        <h1 className="text-7xl font-extrabold tracking-tight text-white">
+          Harrison Martin
+        </h1>
+        <Buttons/>
+      </motion.div>
+    </div>
   );
 }
 
