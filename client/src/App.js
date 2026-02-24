@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { HashRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
 
-import Homepage from './Components/Homepage/Homepage';
-import RootLandingPage from './Components/Homepage/RootLandingPage';
-import CSProjectsPage from './Components/Homepage/CSProjectsPage';
+import ArtHomePage from './Components/Homepage/ArtHomePage';
+import RootHomePage from './Components/Homepage/RootHomePage';
+import CSHomePage from './Components/Homepage/CSHomePage';
 import ProjectDetails from './Components/ProjectDetails/ProjectDetails';
 import LogsViewer from './Components/Admin/Admin';
 import ContactPage from './Components/Contact/ContactPage';
@@ -24,17 +24,17 @@ function MainRoutes({ siteMode }) {
       .catch((error) => console.error("Error calling /api/load:", error));
   }, [location]);
 
-  const homepageComponentByMode = {
-    [SITE_MODES.ROOT]: <RootLandingPage />,
-    [SITE_MODES.CS]: <CSProjectsPage />,
-    [SITE_MODES.ART]: <Homepage />,
+  const homePageByMode = {
+    [SITE_MODES.ROOT]: <RootHomePage />,
+    [SITE_MODES.CS]: <CSHomePage />,
+    [SITE_MODES.ART]: <ArtHomePage />,
   };
 
   return (
     <Routes>
       <Route
         path="/"
-        element={homepageComponentByMode[siteMode] || <RootLandingPage />}
+        element={homePageByMode[siteMode] || <RootHomePage />}
       />
       <Route path="/projects/:hashId" element={<ProjectDetails />} />
       {/* The /admin route is just a placeholder; you can rename it as needed */}
