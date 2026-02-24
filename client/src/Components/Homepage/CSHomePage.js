@@ -37,7 +37,7 @@ function sortRepos(repos) {
   });
 }
 
-export default function CSProjectsPage() {
+export default function CSHomePage() {
   const [repos, setRepos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -83,33 +83,18 @@ export default function CSProjectsPage() {
     return () => controller.abort();
   }, []);
 
+
+
+
+
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#08090c] text-white">
-      <TorusBackdrop />
+      {/* <TorusBackdrop /> */}
       <SubdomainNav currentMode={SITE_MODES.CS} />
+      <HeroSection />
 
       <main className="relative z-10 mx-auto max-w-7xl px-4 pb-20 pt-32 sm:px-8">
-      <div className="relative z-10 mx-auto flex w-full max-w-7xl items-center px-4 pb-10 sm:px-8">
-        <motion.div
-          className="w-full rounded-[2rem]  p-7 text-center sm:p-10"
-          initial={{ opacity: 0, y: 24 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.75 }}
-        >
-          <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-white/50">
-            Art Portfolio
-          </p>
-          <h1 className="text-4xl font-semibold tracking-tight text-white sm:text-6xl lg:text-7xl">
-            Harrison Martin
-          </h1>
-          <p className="mx-auto mt-4 max-w-3xl text-base leading-relaxed text-white/65 sm:text-lg">
-            3D generalist and creative technologist focused on form, lighting,
-            and polished visual storytelling.
-          </p>
-          <div className="mx-auto mt-6 h-px w-24 bg-white/10" />
-          <Buttons />
-        </motion.div>
-      </div>
+
 
         {loading && <StateCard tone="neutral">Loading GitHub projects...</StateCard>}
         {error && <StateCard tone="error">{error}</StateCard>}
@@ -255,13 +240,24 @@ function TorusBackdrop() {
   );
 }
 
-function CsBackground() {
+function HeroSection() {
   return (
-    <div aria-hidden="true" className="pointer-events-none absolute inset-0">
-      <div className="absolute left-[-3rem] top-24 h-52 w-52 rounded-full bg-sky-500/22 blur-3xl" />
-      <div className="absolute right-[5%] top-28 h-60 w-60 rounded-full bg-blue-500/18 blur-3xl" />
-      <div className="absolute bottom-[15%] left-[40%] h-72 w-72 rounded-full bg-cyan-400/14 blur-3xl" />
-      <div className="absolute inset-0 opacity-12 [background-image:radial-gradient(circle_at_1px_1px,rgba(255,255,255,0.55)_1px,transparent_0)] [background-size:20px_20px]" />
+    <div className="relative h-[90vh] flex items-center justify-center overflow-hidden">
+      {/* Background Torus Scene */}
+        <DistortedTorusScene variant="cs" className="h-full w-full" />
+
+      {/* Hero Text Content with animations */}
+      <motion.div
+        className="absolute text-center z-10"
+        initial={{ opacity: 0, y: 50 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 1 }}
+      >
+        <h1 className="text-7xl font-extrabold tracking-tight text-white">
+          Harrison Martin
+        </h1>
+        <Buttons />
+      </motion.div>
     </div>
   );
 }
