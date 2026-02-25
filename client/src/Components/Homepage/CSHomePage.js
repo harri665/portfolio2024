@@ -9,6 +9,22 @@ import { SITE_MODES } from '../../utils/siteMode';
 
 const GITHUB_USERNAME = 'harri665';
 
+// Toggle this on to only show the repositories listed below.
+// Entries can be either:
+// - 'repo-name' (matches repos owned by GITHUB_USERNAME)
+// - 'owner/repo-name' (supports repos not owned by GITHUB_USERNAME)
+const REPO_WHITELIST = {
+  enabled: true,
+  caseSensitive: false,
+  preserveListedOrder: true,
+  repoNames: [
+    'OpenGL-Star-Simulation',
+    'MadixOutdoors3DWebsite',
+    'MurderMysteryCH/MurderMysteryV2',
+    // 'someone-else/cool-repo',
+  ],
+};
+
 function formatDate(value) {
   if (!value) {
     return 'Unknown';
@@ -35,6 +51,137 @@ function sortRepos(repos) {
     const bDate = new Date(b.pushed_at).getTime();
     return bDate - aDate;
   });
+}
+
+function normalizeRepoName(name, caseSensitive) {
+  return caseSensitive ? String(name || '') : String(name || '').toLowerCase();
+}
+
+function getRepoMatchKeys(repo, caseSensitive) {
+  return [
+    normalizeRepoName(repo?.name, caseSensitive),
+    normalizeRepoName(repo?.full_name, caseSensitive),
+  ].filter(Boolean);
+}
+
+function getWhitelistEntries(whitelistConfig = REPO_WHITELIST) {
+  return Array.isArray(whitelistConfig?.repoNames)
+    ? whitelistConfig.repoNames
+        .map((entry) => String(entry || '').trim())
+        .filter(Boolean)
+    : [];
+}
+
+function getExternalWhitelistEntries(whitelistConfig = REPO_WHITELIST) {
+  return getWhitelistEntries(whitelistConfig).filter((entry) => entry.includes('/'));
+}
+
+function getRepoOrderIndex(repo, lookup, whitelistConfig) {
+  const keys = getRepoMatchKeys(repo, whitelistConfig.caseSensitive);
+
+  for (const key of keys) {
+    if (lookup.has(key)) {
+      return lookup.get(key);
+    }
+  }
+
+  return Number.MAX_SAFE_INTEGER;
+}
+
+function applyRepoWhitelist(repos, whitelistConfig = REPO_WHITELIST) {
+  if (!whitelistConfig?.enabled) {
+    return repos;
+  }
+
+  const listedNames = getWhitelistEntries(whitelistConfig);
+
+  if (listedNames.length === 0) {
+    return [];
+  }
+
+  const lookup = new Map(
+    listedNames.map((name, index) => [
+      normalizeRepoName(name, whitelistConfig.caseSensitive),
+      index,
+    ])
+  );
+
+  const filtered = repos.filter((repo) =>
+    getRepoMatchKeys(repo, whitelistConfig.caseSensitive).some((key) => lookup.has(key))
+  );
+
+  if (!whitelistConfig.preserveListedOrder) {
+    return filtered;
+  }
+
+  return [...filtered].sort((a, b) => {
+    const aIndex = getRepoOrderIndex(a, lookup, whitelistConfig);
+    const bIndex = getRepoOrderIndex(b, lookup, whitelistConfig);
+
+    if (aIndex !== bIndex) {
+      return aIndex - bIndex;
+    }
+
+    return new Date(b.pushed_at).getTime() - new Date(a.pushed_at).getTime();
+  });
+}
+
+async function fetchRepoByFullName(fullName, signal) {
+  const response = await fetch(`https://api.github.com/repos/${fullName}`, {
+    signal,
+    headers: {
+      Accept: 'application/vnd.github+json',
+    },
+  });
+
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error(`Repository not found: ${fullName}`);
+    }
+
+    if (response.status === 403) {
+      throw new Error(`GitHub API rate limit reached while loading ${fullName}`);
+    }
+
+    throw new Error(`Failed to load repository ${fullName} (${response.status})`);
+  }
+
+  return response.json();
+}
+
+async function fetchExternalWhitelistedRepos(whitelistConfig, signal) {
+  const externalEntries = getExternalWhitelistEntries(whitelistConfig);
+
+  if (!whitelistConfig?.enabled || externalEntries.length === 0) {
+    return [];
+  }
+
+  const results = await Promise.all(
+    externalEntries.map(async (fullName) => {
+      try {
+        const repo = await fetchRepoByFullName(fullName, signal);
+        return repo?.fork ? null : repo;
+      } catch (error) {
+        console.error(error.message || `Failed to fetch ${fullName}`, error);
+        return null;
+      }
+    })
+  );
+
+  return results.filter(Boolean);
+}
+
+function mergeRepos(primaryRepos, additionalRepos) {
+  const merged = new Map();
+
+  [...primaryRepos, ...additionalRepos].forEach((repo) => {
+    const key = repo.full_name || `${repo.owner?.login || 'unknown'}/${repo.name}`;
+    if (!merged.has(key)) {
+      merged.set(key, repo);
+    }
+  });
+
+  return Array.from(merged.values());
 }
 
 export default function CSHomePage() {
@@ -66,7 +213,16 @@ export default function CSHomePage() {
         }
 
         const data = await response.json();
-        setRepos(sortRepos(data.filter((repo) => !repo.fork)));
+        const publicOwnedRepos = data.filter((repo) => !repo.fork);
+        const externalWhitelistedRepos = await fetchExternalWhitelistedRepos(
+          REPO_WHITELIST,
+          controller.signal
+        );
+        const combinedRepos = mergeRepos(publicOwnedRepos, externalWhitelistedRepos);
+        const sortedRepos = sortRepos(combinedRepos);
+        const visibleRepos = applyRepoWhitelist(sortedRepos);
+
+        setRepos(visibleRepos);
       } catch (err) {
         if (err.name === 'AbortError') {
           return;
@@ -93,13 +249,21 @@ export default function CSHomePage() {
       <SubdomainNav currentMode={SITE_MODES.CS} />
       <HeroSection />
 
-      <main className="relative z-10 mx-auto max-w-7xl px-4 pb-20 pt-32 sm:px-8">
+      <main className="relative z-10 mx-auto max-w-7xl px-4 pb-20 sm:px-8">
 
 
         {loading && <StateCard tone="neutral">Loading GitHub projects...</StateCard>}
         {error && <StateCard tone="error">{error}</StateCard>}
 
-        {!loading && !error && (
+        {!loading && !error && repos.length === 0 && (
+          <StateCard tone="neutral">
+            {REPO_WHITELIST.enabled
+              ? 'No repositories matched your whitelist. Use repo-name or owner/repo-name entries in REPO_WHITELIST.repoNames.'
+              : 'No repositories found.'}
+          </StateCard>
+        )}
+
+        {!loading && !error && repos.length > 0 && (
           <motion.section
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
