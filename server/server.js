@@ -22,12 +22,18 @@ const client = new Client({
   ]
 });
 
-client.login(process.env.DISCORD_BOT_TOKEN);
-
-client.once('ready', () => {
-  console.log(`✅ Logged in to Discord as ${client.user.tag}!`);
-});
-
+try {
+  if(!process.env.DISCORD_BOT_TOKEN) {
+    throw new Error('DISCORD_BOT_TOKEN is not defined in the environment variables.');
+  } else {
+    client.login(process.env.DISCORD_BOT_TOKEN);
+    client.once('ready', () => {
+      console.log(`✅ Logged in to Discord as ${client.user.tag}!`);
+    });
+  }
+} catch (error) {
+  console.error('Failed to log in to Discord:', error);
+}
 
 app.use(cors());
 app.use(express.json());
