@@ -2569,5 +2569,549 @@
     "hash_id": "EVn2mv",
     "visible": true,
     "is_promotional": false
+  },
+  "YG6eN3": {
+    "liked": false,
+    "tags": [
+      "Heist",
+      "Horse",
+      "Cowboy",
+      "train",
+      "animation",
+      "short",
+      "NoAI"
+    ],
+    "hide_as_adult": false,
+    "visible_on_artstation": true,
+    "assets": [
+      {
+        "has_image": true,
+        "has_embedded_player": true,
+        "player_embedded": "https://cdn.artstation.com/p/video_sources/002/577/185/timeline-16.mp4",
+        "oembed": {
+          "width": 1920,
+          "height": 1080,
+          "provider_name": "ArtStation"
+        },
+        "id": 87345448,
+        "title": null,
+        "title_formatted": "",
+        "image_url": "https://cdna.artstation.com/p/assets/video_clips/images/087/345/448/large/harri-thumb.jpg?1745531223",
+        "width": 1920,
+        "height": 1080,
+        "position": 0,
+        "asset_type": "video_clip",
+        "viewport_constraint_type": "constrained"
+      },
+      {
+        "has_image": false,
+        "has_embedded_player": false,
+        "player_embedded": null,
+        "oembed": null,
+        "id": 87345632,
+        "title": null,
+        "title_formatted": "",
+        "image_url": "https://cdna.artstation.com/p/assets/covers/images/087/345/632/large/harri-harri-timeline-17-frame-at-0m5s.jpg?1745531768",
+        "width": 1920,
+        "height": 1080,
+        "position": 0,
+        "asset_type": "cover",
+        "viewport_constraint_type": "constrained"
+      },
+      {
+        "has_image": true,
+        "has_embedded_player": true,
+        "player_embedded": "https://cdn.artstation.com/p/video_sources/002/577/190/timeline-17.mp4",
+        "oembed": {
+          "width": 1920,
+          "height": 1080,
+          "provider_name": "ArtStation"
+        },
+        "id": 87345460,
+        "title": null,
+        "title_formatted": "",
+        "image_url": "https://cdna.artstation.com/p/assets/video_clips/images/087/345/460/large/harri-thumb.jpg?1745531277",
+        "width": 1920,
+        "height": 1080,
+        "position": 1,
+        "asset_type": "video_clip",
+        "viewport_constraint_type": "constrained"
+      },
+      {
+        "has_image": true,
+        "has_embedded_player": true,
+        "player_embedded": "https://cdn.artstation.com/p/video_sources/002/577/197/timeline-18.mp4",
+        "oembed": {
+          "width": 1920,
+          "height": 1080,
+          "provider_name": "ArtStation"
+        },
+        "id": 87345528,
+        "title": null,
+        "title_formatted": "",
+        "image_url": "https://cdna.artstation.com/p/assets/video_clips/images/087/345/528/large/harri-thumb.jpg?1745531532",
+        "width": 1920,
+        "height": 1080,
+        "position": 2,
+        "asset_type": "video_clip",
+        "viewport_constraint_type": "constrained"
+      },
+      {
+        "has_image": true,
+        "has_embedded_player": true,
+        "player_embedded": "https://cdn.artstation.com/p/video_sources/002/577/203/timeline-19.mp4",
+        "oembed": {
+          "width": 1920,
+          "height": 878,
+          "provider_name": "ArtStation"
+        },
+        "id": 87345541,
+        "title": null,
+        "title_formatted": "",
+        "image_url": "https://cdnb.artstation.com/p/assets/video_clips/images/087/345/541/large/harri-thumb.jpg?1745531567",
+        "width": 1920,
+        "height": 878,
+        "position": 3,
+        "asset_type": "video_clip",
+        "viewport_constraint_type": "constrained"
+      },
+      {
+        "has_image": true,
+        "has_embedded_player": true,
+        "player_embedded": "https://cdn.artstation.com/p/video_sources/002/577/207/timeline-20.mp4",
+        "oembed": {
+          "width": 1920,
+          "height": 1244,
+          "provider_name": "ArtStation"
+        },
+        "id": 87345590,
+        "title": null,
+        "title_formatted": "",
+        "image_url": "https://cdna.artstation.com/p/assets/video_clips/images/087/345/590/large/harri-thumb.jpg?1745531652",
+        "width": 1920,
+        "height": 1244,
+        "position": 4,
+        "asset_type": "video_clip",
+        "viewport_constraint_type": "constrained"
+      },
+      {
+        "has_image": true,
+        "has_embedded_player": true,
+        "player_embedded": "https://cdn.artstation.com/p/video_sources/002/577/215/timeline-21.mp4",
+        "oembed": {
+          "width": 1920,
+          "height": 1012,
+          "provider_name": "ArtStation"
+        },
+        "id": 87345603,
+        "title": null,
+        "title_formatted": "",
+        "image_url": "https://cdnb.artstation.com/p/assets/video_clips/images/087/345/603/large/harri-thumb.jpg?1745531692",
+        "width": 1920,
+        "height": 1012,
+        "position": 5,
+        "asset_type": "video_clip",
+        "viewport_constraint_type": "constrained"
+      }
+    ],
+    "collections": [],
+    "user": {
+      "followed": false,
+      "following_back": false,
+      "blocked": false,
+      "is_staff": false,
+      "is_plus_member": false,
+      "is_studio_account": false,
+      "is_school_account": false,
+      "id": 1472254,
+      "username": "harr1",
+      "headline": "I just enjoy 3D art ",
+      "full_name": "Harri",
+      "permalink": "https://www.artstation.com/harr1",
+      "medium_avatar_url": "https://cdna.artstation.com/p/users/avatars/001/472/254/medium/712569197465d666574c1e6088e8d5e0.jpg?1685992015",
+      "large_avatar_url": "https://cdna.artstation.com/p/users/avatars/001/472/254/large/712569197465d666574c1e6088e8d5e0.jpg?1685992015",
+      "small_cover_url": "https://cdna.artstation.com/p/users/covers/001/472/254/small/11f2795c90f5ecb15465b0ee08802d60.jpg?1686034559",
+      "pro_member": false
+    },
+    "medium": null,
+    "mediums": [],
+    "categories": [],
+    "software_items": [
+      {
+        "icon_url": "https://cdna.artstation.com/p/softwares/icons/000/000/008/default/blender_icon_1024x1024.png?1570478232",
+        "name": "Blender"
+      },
+      {
+        "icon_url": "https://cdna.artstation.com/p/softwares/icons/000/000/018/default/Houdini.png?1424684347",
+        "name": "Houdini"
+      },
+      {
+        "icon_url": "https://cdnb.artstation.com/p/softwares/icons/000/000/041/default/pt_appicon_noshadow_512.png?1627397594",
+        "name": "Substance 3D Painter"
+      },
+      {
+        "icon_url": "https://cdnb.artstation.com/p/softwares/icons/000/000/125/default/premiere-pro.png?1608144421",
+        "name": "Premiere"
+      },
+      {
+        "icon_url": "https://cdnb.artstation.com/p/softwares/icons/000/000/003/default/aftereffects.png?1608144443",
+        "name": "After Effects"
+      }
+    ],
+    "id": 20364687,
+    "user_id": 1472254,
+    "title": "Train Heist Short Animation",
+    "description": "<p></p>",
+    "description_html": "<p></p>",
+    "created_at": "2025-04-24T16:56:12.687-05:00",
+    "updated_at": "2025-10-11T14:27:06.815-05:00",
+    "views_count": 19,
+    "likes_count": 2,
+    "comments_count": 2,
+    "permalink": "https://www.artstation.com/artwork/YG6eN3",
+    "cover_url": "https://cdna.artstation.com/p/assets/covers/images/087/345/632/medium/harri-harri-timeline-17-frame-at-0m5s.jpg?1745531768",
+    "published_at": "2025-04-24T16:56:12.680-05:00",
+    "editor_pick": false,
+    "adult_content": false,
+    "admin_adult_content": false,
+    "slug": "train-heist-short-animation-d4f495fa-2f1d-4dbc-845a-80c9baada33f",
+    "suppressed": false,
+    "hash_id": "YG6eN3",
+    "visible": true,
+    "is_promotional": false
+  },
+  "Bkl5Yr": {
+    "liked": false,
+    "tags": [],
+    "hide_as_adult": false,
+    "visible_on_artstation": true,
+    "assets": [
+      {
+        "has_image": true,
+        "has_embedded_player": false,
+        "player_embedded": null,
+        "oembed": null,
+        "id": 91843023,
+        "title": "",
+        "title_formatted": "",
+        "image_url": "https://cdnb.artstation.com/p/assets/images/images/091/843/023/large/harri-0118.webp?1757968844",
+        "width": 1080,
+        "height": 1920,
+        "position": 0,
+        "asset_type": "image",
+        "viewport_constraint_type": "constrained"
+      },
+      {
+        "has_image": true,
+        "has_embedded_player": true,
+        "player_embedded": "https://cdn.artstation.com/p/video_sources/002/836/250/finalartstation.mp4",
+        "oembed": {
+          "width": 1920,
+          "height": 3414,
+          "provider_name": "ArtStation"
+        },
+        "id": 91843012,
+        "title": null,
+        "title_formatted": "",
+        "image_url": "https://cdna.artstation.com/p/assets/video_clips/images/091/843/012/large/harri-thumb.jpg?1757968787",
+        "width": 1920,
+        "height": 3414,
+        "position": 1,
+        "asset_type": "video_clip",
+        "viewport_constraint_type": "constrained"
+      },
+      {
+        "has_image": true,
+        "has_embedded_player": true,
+        "player_embedded": "https://cdn.artstation.com/p/video_sources/002/836/249/finalartstationjustheart.mp4",
+        "oembed": {
+          "width": 1920,
+          "height": 3414,
+          "provider_name": "ArtStation"
+        },
+        "id": 91843006,
+        "title": null,
+        "title_formatted": "",
+        "image_url": "https://cdna.artstation.com/p/assets/video_clips/images/091/843/006/large/harri-thumb.jpg?1757968754",
+        "width": 1920,
+        "height": 3414,
+        "position": 2,
+        "asset_type": "video_clip",
+        "viewport_constraint_type": "constrained"
+      }
+    ],
+    "collections": [],
+    "user": {
+      "followed": false,
+      "following_back": false,
+      "blocked": false,
+      "is_staff": false,
+      "is_plus_member": false,
+      "is_studio_account": false,
+      "is_school_account": false,
+      "id": 1472254,
+      "username": "harr1",
+      "headline": "I just enjoy 3D art ",
+      "full_name": "Harri",
+      "permalink": "https://www.artstation.com/harr1",
+      "medium_avatar_url": "https://cdna.artstation.com/p/users/avatars/001/472/254/medium/712569197465d666574c1e6088e8d5e0.jpg?1685992015",
+      "large_avatar_url": "https://cdna.artstation.com/p/users/avatars/001/472/254/large/712569197465d666574c1e6088e8d5e0.jpg?1685992015",
+      "small_cover_url": "https://cdna.artstation.com/p/users/covers/001/472/254/small/11f2795c90f5ecb15465b0ee08802d60.jpg?1686034559",
+      "pro_member": false
+    },
+    "medium": null,
+    "mediums": [],
+    "categories": [],
+    "software_items": [
+      {
+        "icon_url": "https://cdna.artstation.com/p/softwares/icons/000/000/018/default/Houdini.png?1424684347",
+        "name": "Houdini"
+      },
+      {
+        "icon_url": "https://cdna.artstation.com/p/softwares/icons/000/000/046/default/zBrush3.png?1505488078",
+        "name": "ZBrush"
+      },
+      {
+        "icon_url": "https://cdna.artstation.com/p/softwares/icons/000/000/008/default/blender_icon_1024x1024.png?1570478232",
+        "name": "Blender"
+      }
+    ],
+    "id": 20915481,
+    "user_id": 1472254,
+    "title": "Beating Heart on Fire",
+    "description": "<p></p>",
+    "description_html": "<p></p>",
+    "created_at": "2025-07-31T14:49:05.805-05:00",
+    "updated_at": "2025-10-18T19:14:28.207-05:00",
+    "views_count": 7,
+    "likes_count": 2,
+    "comments_count": 0,
+    "permalink": "https://www.artstation.com/artwork/Bkl5Yr",
+    "cover_url": "https://cdnb.artstation.com/p/assets/images/images/091/843/023/medium/harri-0118.webp?1757968844",
+    "published_at": "2025-09-15T15:41:09.412-05:00",
+    "editor_pick": false,
+    "adult_content": false,
+    "admin_adult_content": false,
+    "slug": "heart-on-fire-10",
+    "suppressed": false,
+    "hash_id": "Bkl5Yr",
+    "visible": true,
+    "is_promotional": false
+  },
+  "8Bvxdn": {
+    "liked": false,
+    "tags": [],
+    "hide_as_adult": false,
+    "visible_on_artstation": true,
+    "assets": [
+      {
+        "has_image": true,
+        "has_embedded_player": false,
+        "player_embedded": null,
+        "oembed": null,
+        "id": 91763703,
+        "title": "",
+        "title_formatted": "",
+        "image_url": "https://cdnb.artstation.com/p/assets/images/images/091/763/703/large/harri-screenshot-2025-09-12-140418.webp?1757707477",
+        "width": 1920,
+        "height": 1080,
+        "position": 0,
+        "asset_type": "image",
+        "viewport_constraint_type": "constrained"
+      },
+      {
+        "has_image": true,
+        "has_embedded_player": true,
+        "player_embedded": "https://cdn.artstation.com/p/video_sources/002/831/515/inprofess70frames.mp4",
+        "oembed": {
+          "width": 1920,
+          "height": 1080,
+          "provider_name": "ArtStation"
+        },
+        "id": 91761847,
+        "title": null,
+        "title_formatted": "",
+        "image_url": "https://cdnb.artstation.com/p/assets/video_clips/images/091/761/847/large/harri-thumb.jpg?1757702940",
+        "width": 1920,
+        "height": 1080,
+        "position": 1,
+        "asset_type": "video_clip",
+        "viewport_constraint_type": "constrained"
+      },
+      {
+        "has_image": true,
+        "has_embedded_player": false,
+        "player_embedded": null,
+        "oembed": null,
+        "id": 85196901,
+        "title": "",
+        "title_formatted": "",
+        "image_url": "https://cdnb.artstation.com/p/assets/images/images/085/196/901/large/harri-untitled-mantra-ipr-0040.jpg?1740197075",
+        "width": 1280,
+        "height": 720,
+        "position": 2,
+        "asset_type": "image",
+        "viewport_constraint_type": "constrained"
+      },
+      {
+        "has_image": true,
+        "has_embedded_player": true,
+        "player_embedded": "https://cdn.artstation.com/p/video_sources/002/577/228/timeline-sun1.mp4",
+        "oembed": {
+          "width": 1920,
+          "height": 1080,
+          "provider_name": "ArtStation"
+        },
+        "id": 87345916,
+        "title": null,
+        "title_formatted": "",
+        "image_url": "https://cdna.artstation.com/p/assets/video_clips/images/087/345/916/large/harri-thumb.jpg?1745532641",
+        "width": 1920,
+        "height": 1080,
+        "position": 3,
+        "asset_type": "video_clip",
+        "viewport_constraint_type": "constrained"
+      },
+      {
+        "has_image": true,
+        "has_embedded_player": true,
+        "player_embedded": "https://cdn.artstation.com/p/video_sources/002/446/324/blueexport1.mp4",
+        "oembed": {
+          "width": 1920,
+          "height": 1080,
+          "provider_name": "ArtStation"
+        },
+        "id": 85032571,
+        "title": null,
+        "title_formatted": "",
+        "image_url": "https://cdnb.artstation.com/p/assets/video_clips/images/085/032/571/large/harri-thumb.jpg?1739815327",
+        "width": 1920,
+        "height": 1080,
+        "position": 4,
+        "asset_type": "video_clip",
+        "viewport_constraint_type": "constrained"
+      },
+      {
+        "has_image": true,
+        "has_embedded_player": false,
+        "player_embedded": null,
+        "oembed": null,
+        "id": 85032550,
+        "title": "",
+        "title_formatted": "",
+        "image_url": "https://cdna.artstation.com/p/assets/images/images/085/032/550/large/harri-screenshot-2025-02-17-110045.jpg?1739815288",
+        "width": 726,
+        "height": 639,
+        "position": 5,
+        "asset_type": "image",
+        "viewport_constraint_type": "constrained"
+      },
+      {
+        "has_image": true,
+        "has_embedded_player": true,
+        "player_embedded": "https://cdn.artstation.com/p/video_sources/002/577/229/timeline-sun2.mp4",
+        "oembed": {
+          "width": 1920,
+          "height": 1080,
+          "provider_name": "ArtStation"
+        },
+        "id": 87345929,
+        "title": null,
+        "title_formatted": "",
+        "image_url": "https://cdnb.artstation.com/p/assets/video_clips/images/087/345/929/large/harri-thumb.jpg?1745532671",
+        "width": 1920,
+        "height": 1080,
+        "position": 6,
+        "asset_type": "video_clip",
+        "viewport_constraint_type": "constrained"
+      },
+      {
+        "has_image": true,
+        "has_embedded_player": false,
+        "player_embedded": null,
+        "oembed": null,
+        "id": 85044261,
+        "title": "",
+        "title_formatted": "",
+        "image_url": "https://cdnb.artstation.com/p/assets/images/images/085/044/261/large/harri-screenshot-2025-02-17-173509.jpg?1739838915",
+        "width": 647,
+        "height": 456,
+        "position": 7,
+        "asset_type": "image",
+        "viewport_constraint_type": "constrained"
+      },
+      {
+        "has_image": true,
+        "has_embedded_player": true,
+        "player_embedded": "https://cdn.artstation.com/p/video_sources/002/250/894/ixpe.mp4",
+        "oembed": {
+          "width": 1920,
+          "height": 1080,
+          "provider_name": "ArtStation"
+        },
+        "id": 81398985,
+        "title": null,
+        "title_formatted": "",
+        "image_url": "https://cdnb.artstation.com/p/assets/video_clips/images/081/398/985/large/harri-thumb.jpg?1730157778",
+        "width": 1920,
+        "height": 1080,
+        "position": 8,
+        "asset_type": "video_clip",
+        "viewport_constraint_type": "constrained"
+      }
+    ],
+    "collections": [],
+    "user": {
+      "followed": false,
+      "following_back": false,
+      "blocked": false,
+      "is_staff": false,
+      "is_plus_member": false,
+      "is_studio_account": false,
+      "is_school_account": false,
+      "id": 1472254,
+      "username": "harr1",
+      "headline": "I just enjoy 3D art ",
+      "full_name": "Harri",
+      "permalink": "https://www.artstation.com/harr1",
+      "medium_avatar_url": "https://cdna.artstation.com/p/users/avatars/001/472/254/medium/712569197465d666574c1e6088e8d5e0.jpg?1685992015",
+      "large_avatar_url": "https://cdna.artstation.com/p/users/avatars/001/472/254/large/712569197465d666574c1e6088e8d5e0.jpg?1685992015",
+      "small_cover_url": "https://cdna.artstation.com/p/users/covers/001/472/254/small/11f2795c90f5ecb15465b0ee08802d60.jpg?1686034559",
+      "pro_member": false
+    },
+    "medium": null,
+    "mediums": [],
+    "categories": [],
+    "software_items": [
+      {
+        "icon_url": "https://cdna.artstation.com/p/softwares/icons/000/000/018/default/Houdini.png?1424684347",
+        "name": "Houdini"
+      },
+      {
+        "icon_url": "https://cdna.artstation.com/p/softwares/icons/000/000/008/default/blender_icon_1024x1024.png?1570478232",
+        "name": "Blender"
+      }
+    ],
+    "id": 19320511,
+    "user_id": 1472254,
+    "title": "IXPE Data Visualization ",
+    "description": "<p>This project utilizes data provided by NASA's IXPE Safelight, courtesy of LASP, to visualize the magnetic field of a neutron star. Houdini's VDB editing capabilities were employed to create a smoke field, while its interpolation tools were used to generate additional points based on the provided data. These points were integrated into the smoke field and simulation to achieve a comprehensive particle simulation that accurately reflects the data. Blender was then used for rendering, ensuring a high-quality visual representation of the results.</p>",
+    "description_html": "<p>This project utilizes data provided by NASA's IXPE Safelight, courtesy of LASP, to visualize the magnetic field of a neutron star. Houdini's VDB editing capabilities were employed to create a smoke field, while its interpolation tools were used to generate additional points based on the provided data. These points were integrated into the smoke field and simulation to achieve a comprehensive particle simulation that accurately reflects the data. Blender was then used for rendering, ensuring a high-quality visual representation of the results.</p>",
+    "created_at": "2024-10-28T18:24:00.668-05:00",
+    "updated_at": "2025-09-12T15:04:57.532-05:00",
+    "views_count": 17,
+    "likes_count": 4,
+    "comments_count": 0,
+    "permalink": "https://www.artstation.com/artwork/8Bvxdn",
+    "cover_url": "https://cdnb.artstation.com/p/assets/images/images/091/763/703/medium/harri-screenshot-2025-09-12-140418.webp?1757707477",
+    "published_at": "2024-10-28T18:24:00.664-05:00",
+    "editor_pick": false,
+    "adult_content": false,
+    "admin_adult_content": false,
+    "slug": "ixpe-data-visualization",
+    "suppressed": false,
+    "hash_id": "8Bvxdn",
+    "visible": true,
+    "is_promotional": false
   }
 }
