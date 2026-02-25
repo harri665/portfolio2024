@@ -17,9 +17,9 @@ import { motion, AnimatePresence } from 'framer-motion';
  * @param {string} [props.className] - Additional Tailwind CSS classes for custom styling.
  */
 const ActionButton = ({ children, onClick, className = '', href, to }) => {
-  const baseClasses = "px-8 py-3 rounded-full font-semibold shadow-xl transition-colors duration-300 inline-block text-center";
+  const baseClasses = "inline-flex items-center justify-center rounded-full px-6 py-3 text-sm font-semibold tracking-tight transition-all duration-300 text-center shadow-[0_12px_28px_rgba(0,0,0,0.28)]";
   const motionProps = {
-    whileHover: { scale: 1.05 },
+    whileHover: { scale: 1.02, y: -1 },
     whileTap: { scale: 0.95 },
     transition: { type: "spring", stiffness: 400, damping: 17 }
   };
@@ -86,14 +86,14 @@ const Buttons = () => {
       <div className="mt-8 flex flex-col sm:flex-row justify-center items-center gap-4">
         <ActionButton
           onClick={() => scrollToSection('projects')}
-          className="bg-white text-gray-900 hover:bg-gray-200"
+          className="bg-[#0a84ff] text-white hover:bg-[#2997ff]"
         >
           Explore My Work
         </ActionButton>
         {/* UPDATED: This now uses <Link> for smooth client-side navigation */}
         <ActionButton
           to="/contact"
-          className="bg-gray-700 text-white hover:bg-gray-600"
+          className="border border-white/12 bg-white/5 text-white hover:bg-white/10"
         >
           Contact Me
         </ActionButton>
@@ -113,7 +113,7 @@ const Buttons = () => {
               {/* UPDATED: This floating button also uses <Link> */}
               <ActionButton
                 to="/contact"
-                className="bg-white text-gray-900 hover:bg-gray-200 !px-6"
+                className="bg-[#14161b]/90 text-white backdrop-blur-xl hover:bg-[#1a1d23] !px-6 border border-white/10"
               >
                 Contact Me
               </ActionButton>

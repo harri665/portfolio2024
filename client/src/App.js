@@ -1,27 +1,41 @@
 import React, { useEffect, useState } from 'react';
 import { HashRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
 
-import Homepage from './Components/Homepage/Homepage';
+import ArtHomePage from './Components/Homepage/ArtHomePage';
+import RootHomePage from './Components/Homepage/RootHomePage';
+import CSHomePage from './Components/Homepage/CSHomePage';
 import ProjectDetails from './Components/ProjectDetails/ProjectDetails';
 import LogsViewer from './Components/Admin/Admin';
 import ContactPage from './Components/Contact/ContactPage';
+import { apiUrl } from './utils/api';
+import { detectSiteMode, SITE_MODES } from './utils/siteMode';
 
 // A helper component that uses useLocation()
-function MainRoutes() {
+function MainRoutes({ siteMode }) {
   const location = useLocation();
 
   useEffect(() => {
     // Whenever the path changes, call /api/load
-    const page = location.pathname; // e.g. '/', '/projects/abc123'
-    fetch(`https://artstation.harrison-martin.com/api/load?page=${encodeURIComponent(page)}`)
+    const host = typeof window !== 'undefined' ? window.location.hostname : 'unknown-host';
+    const page = `${host}${location.pathname}`; // e.g. 'cs.harrison-martin.com/'
+    fetch(apiUrl(`/load?page=${encodeURIComponent(page)}`))
       .then((res) => res.json())
       // .then((data) => console.log("Load endpoint data:", data))
       .catch((error) => console.error("Error calling /api/load:", error));
   }, [location]);
 
+  const homePageByMode = {
+    [SITE_MODES.ROOT]: <RootHomePage />,
+    [SITE_MODES.CS]: <CSHomePage />,
+    [SITE_MODES.ART]: <ArtHomePage />,
+  };
+
   return (
     <Routes>
-      <Route path="/" element={<Homepage />} />
+      <Route
+        path="/"
+        element={homePageByMode[siteMode] || <RootHomePage />}
+      />
       <Route path="/projects/:hashId" element={<ProjectDetails />} />
       {/* The /admin route is just a placeholder; you can rename it as needed */}
       <Route path="/admin" element={<AdminLogs />} />
@@ -37,7 +51,7 @@ function AdminLogs() {
 
   useEffect(() => {
     // Fetch logs from your server's /api/logs
-    fetch('https://artstation.harrison-martin.com/api/logs')
+    fetch(apiUrl('/logs'))
       .then((response) => response.json())
       .then((data) => {
         console.log('Fetched logs:', data);
@@ -51,9 +65,11 @@ function AdminLogs() {
 }
 
 export default function App() {
+  const siteMode = detectSiteMode();
+
   return (
     <Router>
-      <MainRoutes />
+      <MainRoutes siteMode={siteMode} />
     </Router>
   );
 }

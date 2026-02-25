@@ -3,11 +3,34 @@ import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { useInView } from 'react-intersection-observer';
 
+function toPlainText(htmlOrText = '') {
+  return htmlOrText
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function truncateText(text, maxLength = 120) {
+  if (!text) {
+    return '';
+  }
+
+  if (text.length <= maxLength) {
+    return text;
+  }
+
+  return `${text.slice(0, maxLength).trim()}...`;
+}
+
 const ArtStationProjects = () => {
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [visibleProjectsCount, setVisibleProjectsCount] = useState(6); // 2 rows initially (3 projects per row)
+  const [visibleProjectsCount, setVisibleProjectsCount] = useState(8); // 2 rows initially (4 projects per row)
   const { ref, inView } = useInView({ triggerOnce: true, threshold: 0.2 });
 
   useEffect(() => {
@@ -31,10 +54,24 @@ const ArtStationProjects = () => {
                 throw new Error('Failed to fetch project details');
               }
               const details = await detailsResponse.json();
-              return { ...project, software_items: details.software_items };
+              const descriptionPreview = truncateText(
+                toPlainText(details.description_html || details.description || ''),
+                140
+              );
+
+              return {
+                ...project,
+                software_items: details.software_items,
+                description_preview:
+                  descriptionPreview || 'View project breakdown and process assets.',
+              };
             } catch (err) {
               console.error('Error fetching project details:', err);
-              return { ...project, software_items: [] };
+              return {
+                ...project,
+                software_items: [],
+                description_preview: 'View project breakdown and process assets.',
+              };
             }
           })
         );
@@ -50,69 +87,34 @@ const ArtStationProjects = () => {
   }, []);
 
   const loadMoreProjects = () => {
-    setVisibleProjectsCount((prevCount) => prevCount + 6);
-  };
-
-  // Animation variants for container
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    visible: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.15,
-        delayChildren: 0.2
-      }
-    }
-  };
-
-  // Animation variants for project cards
-  const cardVariants = {
-    hidden: { 
-      opacity: 0, 
-      y: 50,
-      scale: 0.9
-    },
-    visible: { 
-      opacity: 1, 
-      y: 0,
-      scale: 1,
-      transition: {
-        type: "spring",
-        damping: 15,
-        stiffness: 100,
-        duration: 0.6
-      }
-    }
+    setVisibleProjectsCount((prevCount) => prevCount + 8);
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-900 via-gray-800 to-gray-900 text-white py-10">
+    <div className="min-h-screen text-white ">
       <motion.h1 
-        className="text-5xl font-bold text-center mb-10 tracking-wide"
+        className="text-4xl sm:text-5xl font-semibold text-center mb-10 tracking-tight"
         initial={{ opacity: 0, y: -50 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ 
-          duration: 0.8, 
-          ease: [0.6, -0.05, 0.01, 0.99]
-        }}
+        transition={{ duration: 0.6, ease: 'easeInOut' }}
       >
-        Projects:
+        Projects: 
       </motion.h1>
       {loading ? (
         <motion.div
-          className="text-center text-lg"
-          initial={{ opacity: 0, scale: 0.8 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.5, ease: "easeOut" }}
+          className="mx-auto max-w-xl rounded-2xl border border-white/10 bg-white/5 px-6 py-10 text-center text-lg text-white/75 backdrop-blur-xl"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.8, ease: 'easeInOut' }}
         >
           Loading...
         </motion.div>
       ) : error ? (
         <motion.div
-          className="text-center text-lg text-red-500"
-          initial={{ opacity: 0, scale: 0.8 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.5, ease: "easeOut" }}
+          className="mx-auto max-w-xl rounded-2xl border border-red-300/20 bg-red-500/10 px-6 py-10 text-center text-lg text-red-200 backdrop-blur-xl"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.8, ease: 'easeInOut' }}
         >
           {error}
         </motion.div>
@@ -120,154 +122,93 @@ const ArtStationProjects = () => {
         <>
           <motion.div 
             ref={ref}
-            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8 px-6"
-            variants={containerVariants}
-            initial="hidden"
-            animate={inView ? "visible" : "hidden"}
+            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-1 "
+            initial={{ opacity: 0 }}
+            animate={inView ? { opacity: 1 } : { opacity: 1 }}
+            transition={{ duration: 0.8, staggerChildren: 0.2, ease: 'easeInOut' }}
           >
-            {projects.slice(0, visibleProjectsCount).map((project, index) => (
+            {projects.slice(0, visibleProjectsCount).map((project) => (
               <motion.div 
                 key={project.id} 
-                className="relative rounded-lg shadow-2xl overflow-hidden group"
-                variants={cardVariants}
-                whileHover={{ 
-                  scale: 1.05,
-                  y: -8,
-                  transition: { 
-                    type: "spring", 
-                    stiffness: 300, 
-                    damping: 20 
-                  }
-                }}
-                whileTap={{ scale: 0.98 }}
+                className="group relative rounded-lg border border-white/10 bg-[#0f1116] shadow-[0_18px_45px_rgba(0,0,0,0.32)] overflow-hidden transition-transform duration-300"
+                initial={{ opacity: 0, y: 30 }}
+                animate={{ opacity: 1, y: 0 }}
+                whileHover={{ scale: 1.5, y: -4, zIndex: 999}}
+                whileTap={{ scale: 0.95 }}
+                transition={{ duration: 0.1, ease: 'easeOut' }}
               >
-                <motion.div 
-                  className="absolute top-0 right-0 flex gap-2 p-2 bg-black bg-opacity-50 rounded-bl-lg z-10"
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.3 + index * 0.1 }}
-                >
-                  {project.software_items && project.software_items.map((software, idx) => (
-                    <motion.img 
-                      key={idx} 
-                      src={software.icon_url} 
-                      alt={software.name} 
-                      className="w-6 h-6"
-                      whileHover={{ scale: 1.2, rotate: 5 }}
-                      transition={{ type: "spring", stiffness: 400 }}
-                    />
+                <div className="absolute top-0 right-0 z-10 flex gap-2 p-2 bg-[#0f1116]/70 backdrop-blur-xl border-l border-b border-white/10 rounded-bl-lg">
+                  {project.software_items && project.software_items.map((software, index) => (
+                    <img key={index} src={software.icon_url} alt={software.name} className="w-6 h-6" />
                   ))}
-                </motion.div>
+                </div>
                 <Link to={`/projects/${project.hash_id}`} className="block w-full h-full">
-                  <motion.div className="relative overflow-hidden">
-                    <motion.img 
-                      src={project.cover.thumb_url} 
-                      alt={project.title || 'ArtStation Project Image'} 
-                      className="object-cover w-full h-full"
-                      whileHover={{ scale: 1.1 }}
-                      transition={{ duration: 0.4, ease: "easeOut" }}
-                    />
-                    <motion.div 
-                      className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent opacity-0 group-hover:opacity-100"
-                      transition={{ duration: 0.3 }}
-                    />
-                  </motion.div>
-                  <motion.div 
-                    className="absolute inset-0 flex flex-col justify-end p-5"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    transition={{ delay: 0.2 }}
-                  >
-                    <svg className="absolute bottom-0 left-0 w-60 h-60 pointer-events-none" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
-                      <defs>
-                        <linearGradient id={`grad-${project.id}`} x1="0%" y1="0%" x2="100%" y2="100%">
-                          <stop offset="0%" style={{ stopColor: '#ff7e5f', stopOpacity: 1 }} />
-                          <stop offset="100%" style={{ stopColor: '#feb47b', stopOpacity: 1 }} />
-                        </linearGradient>
-                      </defs>
-                      <g fill={`url(#grad-${project.id})`}>
-                        <circle cx="80" cy="130" r="25" opacity="0.9" />
-                        <circle cx="90" cy="160" r="40" opacity="0.7" />
-                        <circle cx="120" cy="150" r="30" opacity="0.8" />
-                        <circle cx="40" cy="165" r="40" opacity="0.6" />
-                      </g>
-                    </svg>
-                    <motion.h2 
-                      className="text-2xl font-semibold mb-2 tracking-wide text-white relative z-10"
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: 0.3, duration: 0.5, ease: "easeOut" }}
-                    >
-                      {project.title}
-                    </motion.h2>
-                    <motion.div 
-                      className="text-sm text-blue-400 font-medium underline relative z-10"
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: 0.4, duration: 0.5, ease: "easeOut" }}
-                      whileHover={{ x: 5 }}
-                    >
-                      View Details →
-                    </motion.div>
-                  </motion.div>
+                  <motion.img 
+                    src={project.cover.thumb_url} 
+                    alt={project.title || 'ArtStation Project Image'} 
+                    className="object-cover w-full h-full"
+                    whileHover={{ scale: 1.03 }}
+                    transition={{ duration: 0.5, ease: 'easeOut' }}
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent" />
+                  <div className="absolute inset-0 flex flex-col justify-end p-5">
+                    <div className="pointer-events-none absolute inset-x-6 bottom-10 h-16 rounded-full bg-gradient-to-r from-transparent via-[#0a84ff]/35 to-transparent blur-2xl opacity-80" />
+                    <div className="relative z-10 rounded-2xl border border-white/10 p-4 shadow-[0_14px_28px_rgba(0,0,0,0.28)] backdrop-blur-lg transition-colors duration-300 group-hover:bg-[#0b0d12]/55">
+                      <motion.h2 
+                        className="md:text-sm sm:text-2xl font-semibold mb-2 tracking-tight text-white"
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.6, ease: 'easeOut' }}
+                      >
+                        {project.title}
+                      </motion.h2>
+                      <motion.div 
+                        className="text-xs text-[#4da3ff] font-semibold"
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.6, ease: 'easeOut', delay: 0.1 }}
+                      >
+                        View Details
+                      </motion.div>
+                      <p className="mt-2 overflow-hidden text-[11px] leading-relaxed text-white/75 opacity-0 max-h-0 transition-all duration-300 ease-out group-hover:opacity-100 group-hover:max-h-24">
+                        {project.description_preview}
+                      </p>
+                    </div>
+                  </div>
                 </Link>
               </motion.div>
             ))}
           </motion.div>
           {visibleProjectsCount < projects.length && (
-            <motion.div 
-              className="relative text-center mt-10"
-              initial={{ opacity: 0, y: 30 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3, duration: 0.6 }}
-            >
+            <div className="relative text-center mt-10">
               <motion.div
-                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8 px-6 opacity-20 relative"
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 0.2, scale: 1 }}
-                transition={{ duration: 0.8, ease: 'easeOut' }}
+                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 px-6 opacity-20 relative"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.8, ease: 'easeInOut' }}
               >
-                {projects.slice(visibleProjectsCount, visibleProjectsCount + 3).map((project, index) => (
-                  index < 3 && ( // Ensure only one row is displayed
-                    <motion.div 
-                      key={project.id} 
-                      className="relative rounded-lg shadow-2xl overflow-hidden"
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 0.2, y: 0 }}
-                      transition={{ delay: index * 0.1, duration: 0.5 }}
-                    >
+                {projects.slice(visibleProjectsCount, visibleProjectsCount + 4).map((project, index) => (
+                  index < 4 && ( // Ensure only one row is displayed
+                    <div key={project.id} className="relative rounded-lg border border-white/10 shadow-[0_18px_45px_rgba(0,0,0,0.28)] overflow-hidden">
                       <Link to={`/projects/${project.hash_id}`} className="block w-full h-full">
                         <img 
                           src={project.cover.thumb_url} 
                           alt={project.title || 'ArtStation Project Image'} 
-                          className="object-cover w-full h-full"
+                          className="object-cover w-full h-full opacity-20"
                         />
                       </Link>
-                    </motion.div>
+                    </div>
                   )
                 ))}
               </motion.div>
-              <motion.button 
+              <button 
                 onClick={loadMoreProjects}
-                className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg transition duration-300 relative z-20 mt-4"
+                className="bg-[#0a84ff] hover:bg-[#2997ff] text-white font-semibold py-3 px-8 rounded-full transition duration-300 relative z-20 mt-4 shadow-[0_12px_24px_rgba(10,132,255,0.28)]"
                 style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }}
-                whileHover={{ 
-                  scale: 1.05,
-                  boxShadow: "0 0 25px rgba(59, 130, 246, 0.5)"
-                }}
-                whileTap={{ scale: 0.95 }}
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ 
-                  delay: 0.5, 
-                  type: "spring", 
-                  stiffness: 200, 
-                  damping: 15 
-                }}
               >
                 Load More
-              </motion.button>
-            </motion.div>
+              </button>
+            </div>
           )}
         </>
       )}

@@ -25,11 +25,20 @@ const client = new Client({
 });
 
 // Log in the bot using the token from your .env file
-client.login(process.env.DISCORD_BOT_TOKEN);
+try {
+  if(!process.env.DISCORD_BOT_TOKEN) {
+    throw new Error('DISCORD_BOT_TOKEN is not defined in the environment variables.');
+  } else {
+    client.login(process.env.DISCORD_BOT_TOKEN);
+    client.once('ready', () => {
+      console.log(`✅ Logged in to Discord as ${client.user.tag}!`);
+    });
+  }
+} catch (error) {
+  console.error('Failed to log in to Discord:', error);
+}
 
-client.once('ready', () => {
-  console.log(`✅ Logged in to Discord as ${client.user.tag}!`);
-});
+
 // --- END DISCORD BOT SETUP ---
 
 
