@@ -3,20 +3,44 @@ import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { useInView } from 'react-intersection-observer';
 
-import { apiUrl } from '../../utils/api';
+function toPlainText(htmlOrText = '') {
+  return htmlOrText
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function truncateText(text, maxLength = 120) {
+  if (!text) {
+    return '';
+  }
+
+  if (text.length <= maxLength) {
+    return text;
+  }
+
+  return `${text.slice(0, maxLength).trim()}...`;
+}
 
 const ArtStationProjects = () => {
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [visibleProjectsCount, setVisibleProjectsCount] = useState(6);
-  const { ref, inView } = useInView({ triggerOnce: true, threshold: 0.15 });
+  const [visibleProjectsCount, setVisibleProjectsCount] = useState(8); // 2 rows initially (4 projects per row)
+  const { ref, inView } = useInView({ triggerOnce: true, threshold: 0.2 });
 
   useEffect(() => {
     const fetchProjects = async () => {
       try {
-        const response = await fetch(apiUrl('/artstation/harr1'));
-
+        const apiBaseUrl = process.env.NODE_ENV === 'development' 
+          ? 'https://artstation.harrison-martin.com/api/artstation/harr1' 
+          : 'https://artstation.harrison-martin.com/api/artstation/harr1'; //http://localhost:3005/api/artstation/harr1
+        const response = await fetch(apiBaseUrl);
+        
         if (!response.ok) {
           throw new Error('Network response was not ok');
         }
@@ -25,22 +49,35 @@ const ArtStationProjects = () => {
         const projectsWithDetails = await Promise.all(
           data.data.map(async (project) => {
             try {
-              const detailsResponse = await fetch(apiUrl(`/project/${project.hash_id}`));
+              const detailsResponse = await fetch(`https://artstation.harrison-martin.com/api/project/${project.hash_id}`);
               if (!detailsResponse.ok) {
                 throw new Error('Failed to fetch project details');
               }
               const details = await detailsResponse.json();
-              return { ...project, software_items: details.software_items };
+              const descriptionPreview = truncateText(
+                toPlainText(details.description_html || details.description || ''),
+                140
+              );
+
+              return {
+                ...project,
+                software_items: details.software_items,
+                description_preview:
+                  descriptionPreview || 'View project breakdown and process assets.',
+              };
             } catch (err) {
               console.error('Error fetching project details:', err);
-              return { ...project, software_items: [] };
+              return {
+                ...project,
+                software_items: [],
+                description_preview: 'View project breakdown and process assets.',
+              };
             }
           })
         );
-
         setProjects(projectsWithDetails);
-      } catch (fetchError) {
-        setError(fetchError.message);
+      } catch (error) {
+        setError(error.message);
       } finally {
         setLoading(false);
       }
@@ -50,161 +87,133 @@ const ArtStationProjects = () => {
   }, []);
 
   const loadMoreProjects = () => {
-    setVisibleProjectsCount((prevCount) => prevCount + 6);
-  };
-
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    visible: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.08,
-        delayChildren: 0.08,
-      },
-    },
-  };
-
-  const cardVariants = {
-    hidden: {
-      opacity: 0,
-      y: 18,
-    },
-    visible: {
-      opacity: 1,
-      y: 0,
-      transition: {
-        type: 'spring',
-        damping: 18,
-        stiffness: 120,
-      },
-    },
+    setVisibleProjectsCount((prevCount) => prevCount + 8);
   };
 
   return (
-    <section className="rounded-[2rem] border border-white/10 bg-white/5 p-5 shadow-[0_18px_55px_rgba(0,0,0,0.28)] backdrop-blur-xl sm:p-7">
-      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/48">
-            Selected Work
-          </p>
-          <motion.h2
-            className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-4xl"
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
-          >
-            ArtStation projects
-          </motion.h2>
-          <p className="mt-3 max-w-2xl text-sm leading-relaxed text-white/65 sm:text-base">
-            Project breakdowns with detail pages, process assets, and software
-            used in each piece.
-          </p>
-        </div>
-
-        {!loading && !error && (
-          <div className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-white/65">
-            {projects.length} projects
-          </div>
-        )}
-      </div>
-
+    <div className="min-h-screen text-white ">
+      <motion.h1 
+        className="text-4xl sm:text-5xl font-semibold text-center mb-10 tracking-tight"
+        initial={{ opacity: 0, y: -50 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6, ease: 'easeInOut' }}
+      >
+        Projects: 
+      </motion.h1>
       {loading ? (
-        <StateMessage>Loading projects...</StateMessage>
+        <motion.div
+          className="mx-auto max-w-xl rounded-2xl border border-white/10 bg-white/5 px-6 py-10 text-center text-lg text-white/75 backdrop-blur-xl"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.8, ease: 'easeInOut' }}
+        >
+          Loading...
+        </motion.div>
       ) : error ? (
-        <StateMessage tone="error">{error}</StateMessage>
+        <motion.div
+          className="mx-auto max-w-xl rounded-2xl border border-red-300/20 bg-red-500/10 px-6 py-10 text-center text-lg text-red-200 backdrop-blur-xl"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.8, ease: 'easeInOut' }}
+        >
+          {error}
+        </motion.div>
       ) : (
         <>
-          <motion.div
+          <motion.div 
             ref={ref}
-            className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3"
-            variants={containerVariants}
-            initial="hidden"
-            animate={inView ? 'visible' : 'hidden'}
+            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-1 "
+            initial={{ opacity: 0 }}
+            animate={inView ? { opacity: 1 } : { opacity: 1 }}
+            transition={{ duration: 0.8, staggerChildren: 0.2, ease: 'easeInOut' }}
           >
             {projects.slice(0, visibleProjectsCount).map((project) => (
-              <motion.article
-                key={project.id}
-                variants={cardVariants}
-                whileHover={{ y: -3 }}
-                className="group relative overflow-hidden rounded-[1.5rem] border border-white/10 bg-[#111318] shadow-[0_14px_40px_rgba(0,0,0,0.32)]"
+              <motion.div 
+                key={project.id} 
+                className="group relative rounded-lg border border-white/10 bg-[#0f1116] shadow-[0_18px_45px_rgba(0,0,0,0.32)] overflow-hidden transition-transform duration-300"
+                initial={{ opacity: 0, y: 30 }}
+                animate={{ opacity: 1, y: 0 }}
+                whileHover={{ scale: 1.5, y: -4, zIndex: 999}}
+                whileTap={{ scale: 0.95 }}
+                transition={{ duration: 0.1, ease: 'easeOut' }}
               >
-                <Link to={`/projects/${project.hash_id}`} className="block h-full">
-                  <div className="relative aspect-[4/3] overflow-hidden bg-[#16181e]">
-                    <motion.img
-                      src={project.cover.thumb_url}
-                      alt={project.title || 'ArtStation Project Image'}
-                      className="h-full w-full object-cover"
-                      whileHover={{ scale: 1.03 }}
-                      transition={{ duration: 0.4, ease: 'easeOut' }}
-                    />
-                    <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/55 via-black/10 to-white/5 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
-
-                    {Array.isArray(project.software_items) && project.software_items.length > 0 && (
-                      <div className="absolute right-3 top-3 flex max-w-[70%] flex-wrap justify-end gap-1.5 rounded-2xl border border-white/12 bg-[#0f1115]/65 p-2 shadow-[0_8px_24px_rgba(0,0,0,0.35)] backdrop-blur-xl">
-                        {project.software_items.slice(0, 5).map((software, idx) => (
-                          <img
-                            key={`${project.id}-software-${idx}`}
-                            src={software.icon_url}
-                            alt={software.name}
-                            title={software.name}
-                            className="h-5 w-5 rounded"
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="flex flex-col p-5">
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/45">
-                      Art Project
-                    </p>
-                    <h3 className="mt-2 text-xl font-semibold tracking-tight text-white">
-                      {project.title}
-                    </h3>
-                    <div className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-[#4da3ff]">
-                      View Details
-                      <span aria-hidden="true">-&gt;</span>
+                <div className="absolute top-0 right-0 z-10 flex gap-2 p-2 bg-[#0f1116]/70 backdrop-blur-xl border-l border-b border-white/10 rounded-bl-lg">
+                  {project.software_items && project.software_items.map((software, index) => (
+                    <img key={index} src={software.icon_url} alt={software.name} className="w-6 h-6" />
+                  ))}
+                </div>
+                <Link to={`/projects/${project.hash_id}`} className="block w-full h-full">
+                  <motion.img 
+                    src={project.cover.thumb_url} 
+                    alt={project.title || 'ArtStation Project Image'} 
+                    className="object-cover w-full h-full"
+                    whileHover={{ scale: 1.03 }}
+                    transition={{ duration: 0.5, ease: 'easeOut' }}
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent" />
+                  <div className="absolute inset-0 flex flex-col justify-end p-5">
+                    <div className="pointer-events-none absolute inset-x-6 bottom-10 h-16 rounded-full bg-gradient-to-r from-transparent via-[#0a84ff]/35 to-transparent blur-2xl opacity-80" />
+                    <div className="relative z-10 rounded-2xl border border-white/10 p-4 shadow-[0_14px_28px_rgba(0,0,0,0.28)] backdrop-blur-lg transition-colors duration-300 group-hover:bg-[#0b0d12]/55">
+                      <motion.h2 
+                        className="md:text-sm sm:text-2xl font-semibold mb-2 tracking-tight text-white"
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.6, ease: 'easeOut' }}
+                      >
+                        {project.title}
+                      </motion.h2>
+                      <motion.div 
+                        className="text-xs text-[#4da3ff] font-semibold"
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.6, ease: 'easeOut', delay: 0.1 }}
+                      >
+                        View Details
+                      </motion.div>
+                      <p className="mt-2 overflow-hidden text-[11px] leading-relaxed text-white/75 opacity-0 max-h-0 transition-all duration-300 ease-out group-hover:opacity-100 group-hover:max-h-24">
+                        {project.description_preview}
+                      </p>
                     </div>
                   </div>
                 </Link>
-              </motion.article>
+              </motion.div>
             ))}
           </motion.div>
-
           {visibleProjectsCount < projects.length && (
-            <div className="mt-8 flex justify-center">
-              <motion.button
+            <div className="relative text-center mt-10">
+              <motion.div
+                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 px-6 opacity-20 relative"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.8, ease: 'easeInOut' }}
+              >
+                {projects.slice(visibleProjectsCount, visibleProjectsCount + 4).map((project, index) => (
+                  index < 4 && ( // Ensure only one row is displayed
+                    <div key={project.id} className="relative rounded-lg border border-white/10 shadow-[0_18px_45px_rgba(0,0,0,0.28)] overflow-hidden">
+                      <Link to={`/projects/${project.hash_id}`} className="block w-full h-full">
+                        <img 
+                          src={project.cover.thumb_url} 
+                          alt={project.title || 'ArtStation Project Image'} 
+                          className="object-cover w-full h-full opacity-20"
+                        />
+                      </Link>
+                    </div>
+                  )
+                ))}
+              </motion.div>
+              <button 
                 onClick={loadMoreProjects}
-                className="rounded-full bg-[#0a84ff] px-5 py-3 text-sm font-semibold text-white shadow-[0_10px_22px_rgba(10,132,255,0.28)] transition-colors hover:bg-[#2997ff]"
-                whileHover={{ y: -1, scale: 1.01 }}
-                whileTap={{ scale: 0.98 }}
+                className="bg-[#0a84ff] hover:bg-[#2997ff] text-white font-semibold py-3 px-8 rounded-full transition duration-300 relative z-20 mt-4 shadow-[0_12px_24px_rgba(10,132,255,0.28)]"
+                style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }}
               >
                 Load More
-              </motion.button>
+              </button>
             </div>
           )}
         </>
       )}
-    </section>
+    </div>
   );
 };
-
-function StateMessage({ children, tone = 'neutral' }) {
-  const toneClasses =
-    tone === 'error'
-      ? 'border-red-300/20 bg-red-500/10 text-red-200'
-      : 'border-white/10 bg-white/5 text-white/65';
-
-  return (
-    <motion.div
-      className={`rounded-2xl border px-5 py-10 text-center text-sm font-medium ${toneClasses}`}
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.3 }}
-    >
-      {children}
-    </motion.div>
-  );
-}
 
 export default ArtStationProjects;
