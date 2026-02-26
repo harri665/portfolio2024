@@ -2,20 +2,28 @@ version: '3.8'
 
 services:
   frontend:
-    image: harri665/portfolio-frontend:latest
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    image: portfolio-frontend:local
     ports:
       - "3004:80" # Serve the frontend on port 80
     environment:
       - NODE_ENV=production
-      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
     depends_on:
       - backend
     restart: always
 
   backend:
-    image: harri665/portfolio-backend:latest
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    image: portfolio-backend:local
     ports:
       - "3005:3005"
     environment:
       - NODE_ENV=production
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - GITHUB_CACHE_TTL_MS=${GITHUB_CACHE_TTL_MS:-1800000}
     restart: always

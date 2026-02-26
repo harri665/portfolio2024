@@ -6,6 +6,7 @@ import Buttons from "./Buttons";
 import SubdomainNav from './SubdomainNav';
 import DistortedTorusScene from './DistortedTorusScene';
 import { SITE_MODES } from '../../utils/siteMode';
+import { apiUrl } from '../../utils/api';
 
 const GITHUB_USERNAME = 'harri665';
 
@@ -35,6 +36,15 @@ function formatDate(value) {
     month: 'short',
     day: 'numeric',
   });
+}
+
+async function getResponseErrorMessage(response, fallbackMessage) {
+  try {
+    const data = await response.json();
+    return data?.error || fallbackMessage;
+  } catch {
+    return fallbackMessage;
+  }
 }
 
 function normalizeHomepage(url) {
@@ -127,12 +137,10 @@ function applyRepoWhitelist(repos, whitelistConfig = REPO_WHITELIST) {
 }
 
 async function fetchRepoByFullName(fullName, signal) {
-  const response = await fetch(`https://api.github.com/repos/${fullName}`, {
-    signal,
-    headers: {
-      Accept: 'application/vnd.github+json',
-    },
-  });
+  const response = await fetch(
+    apiUrl(`/github/repo?full_name=${encodeURIComponent(fullName)}`),
+    { signal }
+  );
 
   if (!response.ok) {
     if (response.status === 404) {
@@ -143,7 +151,12 @@ async function fetchRepoByFullName(fullName, signal) {
       throw new Error(`GitHub API rate limit reached while loading ${fullName}`);
     }
 
-    throw new Error(`Failed to load repository ${fullName} (${response.status})`);
+    throw new Error(
+      await getResponseErrorMessage(
+        response,
+        `Failed to load repository ${fullName} (${response.status})`
+      )
+    );
   }
 
   return response.json();
@@ -194,22 +207,27 @@ export default function CSHomePage() {
 
     async function fetchRepositories() {
       try {
-        const response = await fetch(
-          `https://api.github.com/users/${GITHUB_USERNAME}/repos?per_page=100&type=owner&sort=updated`,
-          {
-            signal: controller.signal,
-            headers: {
-              Accept: 'application/vnd.github+json',
-            },
-          }
-        );
+        const params = new URLSearchParams({
+          owner: GITHUB_USERNAME,
+          per_page: '100',
+          type: 'owner',
+          sort: 'updated',
+        });
+        const response = await fetch(apiUrl(`/github/repos?${params.toString()}`), {
+          signal: controller.signal,
+        });
 
         if (!response.ok) {
           if (response.status === 403) {
             throw new Error('GitHub API rate limit reached. Please try again in a bit.');
           }
 
-          throw new Error(`Failed to load GitHub projects (${response.status})`);
+          throw new Error(
+            await getResponseErrorMessage(
+              response,
+              `Failed to load GitHub projects (${response.status})`
+            )
+          );
         }
 
         const data = await response.json();
