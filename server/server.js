@@ -57,16 +57,19 @@ function ensureCacheFileExists(filePath) {
 const videoLinkCacheFile = path.join(process.cwd(), 'videoLinkCache.json');
 const userProjectsCacheFile = path.join(process.cwd(), 'userProjectsCache.json');
 const projectDetailsCacheFile = path.join(process.cwd(), 'projectDetailsCache.json');
+const githubRepoCacheFile = path.join(process.cwd(), 'githubRepoCache.json');
 
 // Ensure all cache files exist before loading
 ensureCacheFileExists(videoLinkCacheFile);
 ensureCacheFileExists(userProjectsCacheFile);
 ensureCacheFileExists(projectDetailsCacheFile);
+ensureCacheFileExists(githubRepoCacheFile);
 
 // Load the caches
 let videoLinkCache = loadCacheFromFile(videoLinkCacheFile);
 let userProjectsCache = loadCacheFromFile(userProjectsCacheFile);
 let projectDetailsCache = loadCacheFromFile(projectDetailsCacheFile);
+let githubRepoCache = loadCacheFromFile(githubRepoCacheFile);
 
 function loadCacheFromFile(filePath) {
   if (fs.existsSync(filePath)) {
@@ -85,6 +88,133 @@ function saveCacheToFile(filePath, cache) {
   } catch (error) {
     console.error(`Error saving cache to file ${filePath}:`, error);
   }
+}
+
+const GITHUB_CACHE_TTL_MS = Number(process.env.GITHUB_CACHE_TTL_MS || 30 * 60 * 1000);
+
+function ensureGitHubRepoCacheShape() {
+  if (!githubRepoCache || typeof githubRepoCache !== 'object' || Array.isArray(githubRepoCache)) {
+    githubRepoCache = {};
+  }
+
+  if (!githubRepoCache.repoLists || typeof githubRepoCache.repoLists !== 'object') {
+    githubRepoCache.repoLists = {};
+  }
+
+  if (!githubRepoCache.repos || typeof githubRepoCache.repos !== 'object') {
+    githubRepoCache.repos = {};
+  }
+}
+
+ensureGitHubRepoCacheShape();
+
+function saveGitHubRepoCache() {
+  ensureGitHubRepoCacheShape();
+  saveCacheToFile(githubRepoCacheFile, githubRepoCache);
+}
+
+function getGitHubHeaders() {
+  const headers = {
+    Accept: 'application/vnd.github+json',
+    'User-Agent': 'harrison-martin-portfolio-server',
+  };
+
+  if (process.env.GITHUB_TOKEN) {
+    headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+  }
+
+  return headers;
+}
+
+function isGitHubCacheEntryFresh(entry) {
+  if (!entry || typeof entry !== 'object' || !entry.fetchedAt || !('data' in entry)) {
+    return false;
+  }
+
+  const fetchedAtMs = new Date(entry.fetchedAt).getTime();
+  if (!Number.isFinite(fetchedAtMs)) {
+    return false;
+  }
+
+  return Date.now() - fetchedAtMs < GITHUB_CACHE_TTL_MS;
+}
+
+function getGitHubCacheEntry(cacheGroup, key) {
+  ensureGitHubRepoCacheShape();
+  return githubRepoCache[cacheGroup]?.[key];
+}
+
+function setGitHubCacheEntry(cacheGroup, key, data) {
+  ensureGitHubRepoCacheShape();
+  githubRepoCache[cacheGroup][key] = {
+    fetchedAt: new Date().toISOString(),
+    data,
+  };
+  saveGitHubRepoCache();
+}
+
+async function fetchGitHubRepoListFromApi({
+  owner,
+  perPage = 100,
+  type = 'owner',
+  sort = 'updated',
+}) {
+  const response = await axios.get(`https://api.github.com/users/${owner}/repos`, {
+    params: {
+      per_page: perPage,
+      type,
+      sort,
+    },
+    headers: getGitHubHeaders(),
+  });
+
+  return response.data;
+}
+
+async function fetchGitHubRepoFromApi(fullName) {
+  const [owner, repo] = String(fullName).split('/');
+  const response = await axios.get(`https://api.github.com/repos/${owner}/${repo}`, {
+    headers: getGitHubHeaders(),
+  });
+
+  return response.data;
+}
+
+async function getGitHubRepoList({
+  owner,
+  perPage = 100,
+  type = 'owner',
+  sort = 'updated',
+  forceRefresh = false,
+}) {
+  const cacheKey = [owner, perPage, type, sort].join('|').toLowerCase();
+  const cachedEntry = getGitHubCacheEntry('repoLists', cacheKey);
+
+  if (!forceRefresh && isGitHubCacheEntryFresh(cachedEntry)) {
+    console.log(`Returning cached GitHub repo list for ${owner}`);
+    return cachedEntry.data;
+  }
+
+  const repos = await fetchGitHubRepoListFromApi({ owner, perPage, type, sort });
+  setGitHubCacheEntry('repoLists', cacheKey, repos);
+
+  return repos;
+}
+
+async function getGitHubRepoByFullName(fullName, { forceRefresh = false } = {}) {
+  const normalizedFullName = String(fullName || '').trim();
+  const cacheKey = normalizedFullName.toLowerCase();
+  const cachedEntry = getGitHubCacheEntry('repos', cacheKey);
+
+  if (!forceRefresh && isGitHubCacheEntryFresh(cachedEntry)) {
+    console.log(`Returning cached GitHub repo for ${normalizedFullName}`);
+    return cachedEntry.data;
+  }
+
+  const repo = await fetchGitHubRepoFromApi(normalizedFullName);
+  setGitHubCacheEntry('repos', cacheKey, repo);
+
+  return repo;
 }
 
 // Helper function to extract direct video link from embed URL
@@ -344,6 +474,65 @@ app.get('/api/logs', (req, res) => {
 });
 
 // -------------------------
+// GitHub repository endpoints (cached)
+// -------------------------
+app.get('/api/github/repos', async (req, res) => {
+  const owner = String(req.query.owner || '').trim();
+  const perPage = Number(req.query.per_page || 100);
+  const type = String(req.query.type || 'owner').trim();
+  const sort = String(req.query.sort || 'updated').trim();
+  const forceRefresh =
+    req.query.refresh === '1' || String(req.query.refresh || '').toLowerCase() === 'true';
+
+  if (!owner) {
+    return res.status(400).json({ error: 'Missing required query param: owner' });
+  }
+
+  try {
+    const repos = await getGitHubRepoList({
+      owner,
+      perPage: Number.isFinite(perPage) && perPage > 0 ? Math.min(perPage, 100) : 100,
+      type,
+      sort,
+      forceRefresh,
+    });
+
+    res.json(repos);
+  } catch (error) {
+    const status = error.response?.status || 500;
+    const message = error.response?.data?.message || `Failed to fetch GitHub repos for ${owner}`;
+
+    console.error('Error in GitHub repos API route:', error.message || error);
+    res.status(status).json({ error: message });
+  }
+});
+
+app.get('/api/github/repo', async (req, res) => {
+  const fullName = String(req.query.full_name || '').trim();
+  const forceRefresh =
+    req.query.refresh === '1' || String(req.query.refresh || '').toLowerCase() === 'true';
+
+  if (!fullName) {
+    return res.status(400).json({ error: 'Missing required query param: full_name' });
+  }
+
+  if (!/^[^/\s]+\/[^/\s]+$/.test(fullName)) {
+    return res.status(400).json({ error: 'full_name must be in \"owner/repo\" format' });
+  }
+
+  try {
+    const repo = await getGitHubRepoByFullName(fullName, { forceRefresh });
+    res.json(repo);
+  } catch (error) {
+    const status = error.response?.status || 500;
+    const message = error.response?.data?.message || `Failed to fetch GitHub repo ${fullName}`;
+
+    console.error('Error in GitHub repo API route:', error.message || error);
+    res.status(status).json({ error: message });
+  }
+});
+
+// -------------------------
 // Existing ArtStation endpoints
 // -------------------------
 app.get('/api/artstation/:username', async (req, res) => {
@@ -405,10 +594,12 @@ app.get('/api/clear-cache', (req, res) => {
     videoLinkCache = {};
     userProjectsCache = {};
     projectDetailsCache = {};
+    githubRepoCache = { repoLists: {}, repos: {} };
 
     saveCacheToFile(videoLinkCacheFile, videoLinkCache);
     saveCacheToFile(userProjectsCacheFile, userProjectsCache);
     saveCacheToFile(projectDetailsCacheFile, projectDetailsCache);
+    saveGitHubRepoCache();
 
     res.status(200).json({ message: 'All caches cleared successfully' });
   } catch (error) {
