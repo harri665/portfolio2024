@@ -18,3 +18,10 @@ jobs:
     
     - name: Build the client Docker image
       run: docker build ./client --file client/Dockerfile --tag portfolio-frontend:ci
+
+    - name: Trigger Portainer stack webhook
+      if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+      run: |
+        curl --fail --show-error --silent \
+          -X POST \
+          "https://portainer.harrison-martin.com/api/stacks/webhooks/003ab175-65a3-4f09-9fc2-42e2cf8160ce"
