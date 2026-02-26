@@ -19,7 +19,22 @@ function MainRoutes({ siteMode }) {
     const host = typeof window !== 'undefined' ? window.location.hostname : 'unknown-host';
     const page = `${host}${location.pathname}`; // e.g. 'cs.harrison-martin.com/'
     fetch(apiUrl(`/load?page=${encodeURIComponent(page)}`))
-      .then((res) => res.json())
+      .then(async (res) => {
+        const contentType = res.headers.get('content-type') || '';
+        const bodyText = await res.text();
+
+        if (!res.ok) {
+          throw new Error(`Load request failed (${res.status}): ${bodyText.slice(0, 120)}`);
+        }
+
+        if (!contentType.includes('application/json')) {
+          throw new Error(
+            `Load request returned non-JSON (${contentType || 'unknown'}): ${bodyText.slice(0, 120)}`
+          );
+        }
+
+        return JSON.parse(bodyText);
+      })
       // .then((data) => console.log("Load endpoint data:", data))
       .catch((error) => console.error("Error calling /api/load:", error));
   }, [location]);
