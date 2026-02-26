@@ -1,4 +1,4 @@
-const DEFAULT_PROD_API_BASE = 'https://art.harrison-martin.com/api';
+const DEFAULT_PROD_API_BASE = 'https://artstation.harrison-martin.com/api';
 const DEFAULT_DEV_API_BASE = 'http://localhost:3005/api';
 
 function stripTrailingSlash(value) {
@@ -18,11 +18,10 @@ export function getApiBaseUrl() {
 
   if (typeof window !== 'undefined') {
     const hostname = window.location.hostname.toLowerCase();
-    const isArtHost =
-      hostname.startsWith('art.') ||
-      hostname.startsWith('artstation.');
+    const isApiHost = hostname.startsWith('artstation.');
 
-    if (isArtHost) {
+    // The backend is deployed on the artstation subdomain.
+    if (isApiHost) {
       return `${window.location.protocol}//${window.location.host}/api`;
     }
   }
