@@ -13,6 +13,11 @@ services:
     depends_on:
       - backend
     restart: always
+    labels:
+      - "traefik.http.routers.my-service.rule=Host(`harrison-martin.com`)"
+      - "traefik.http.routers.my-service.entryPoints=web,websecure"
+      - "traefik.http.routers.my-service.tls=true"  # Enable TLS (HTTPS)
+      - "traefik.http.routers.my-service.tls.certresolver=myresolver"
 
   backend:
     build:
@@ -27,3 +32,8 @@ services:
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - GITHUB_CACHE_TTL_MS=${GITHUB_CACHE_TTL_MS:-1800000}
     restart: always
+    labels:
+      - "traefik.http.routers.my-service.rule=Host(`artstation.harrison-martin.com`)"
+      - "traefik.http.routers.my-service.entryPoints=web,websecure"
+      - "traefik.http.routers.my-service.tls=true"  # Enable TLS (HTTPS)
+      - "traefik.http.routers.my-service.tls.certresolver=myresolver"
