@@ -362,6 +362,13 @@ function scheduleUserProjectsCacheUpdate() {
 }
 
 // -------------------------
+// Health check endpoint
+// -------------------------
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
+
+// -------------------------
 // NEW DISCORD DM ENDPOINT
 // -------------------------
 app.post('/api/discord/dm', async (req, res) => {
