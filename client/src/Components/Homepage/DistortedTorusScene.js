@@ -53,7 +53,7 @@ const SCENE_PRESETS = {
   hub: {
     shape: {
       type: 'box',
-      args: [0.5, 0.3, 5, 32, 2],
+      args: [0.5, 0.3, 10, 32, 2],
       baseRotation: [0.2, 0, 0],
       tiltSpeed: 0.28,
       tiltAmplitude: 0.06,

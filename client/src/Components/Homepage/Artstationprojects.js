@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { useInView } from 'react-intersection-observer';
+import { apiUrl } from '../../utils/api';
 
 function toPlainText(htmlOrText = '') {
   return htmlOrText
@@ -36,11 +37,8 @@ const ArtStationProjects = () => {
   useEffect(() => {
     const fetchProjects = async () => {
       try {
-        const apiBaseUrl = process.env.NODE_ENV === 'development' 
-          ? 'https://artstation.harrison-martin.com/api/artstation/harr1' 
-          : 'https://artstation.harrison-martin.com/api/artstation/harr1'; //http://localhost:3005/api/artstation/harr1
-        const response = await fetch(apiBaseUrl);
-        
+        const response = await fetch(apiUrl('/artstation/harr1'));
+
         if (!response.ok) {
           throw new Error('Network response was not ok');
         }
@@ -49,7 +47,7 @@ const ArtStationProjects = () => {
         const projectsWithDetails = await Promise.all(
           data.data.map(async (project) => {
             try {
-              const detailsResponse = await fetch(`https://artstation.harrison-martin.com/api/project/${project.hash_id}`);
+              const detailsResponse = await fetch(apiUrl(`/project/${project.hash_id}`));
               if (!detailsResponse.ok) {
                 throw new Error('Failed to fetch project details');
               }
