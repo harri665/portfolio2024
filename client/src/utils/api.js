@@ -26,7 +26,7 @@ export function getApiBaseUrl() {
     }
   }
 
-  return DEFAULT_PROD_API_BASE;
+  return '/api';
 }
 
 export function apiUrl(pathname = '') {
