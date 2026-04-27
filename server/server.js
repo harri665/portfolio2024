@@ -403,7 +403,7 @@ app.post('/api/discord/dm', async (req, res) => {
 app.get('/api/load', async (req, res) => {
   try {
     // Get IP address (may be behind a proxy or load balancer)
-    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
     const { os, browser, platform, source } = req.useragent;
     const page = req.query.page || 'unknown';
 
