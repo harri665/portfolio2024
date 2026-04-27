@@ -342,6 +342,10 @@ function scheduleUserProjectsCacheUpdate() {
   }, 60 * 60 * 1000);
 }
 
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
+
 app.post('/api/discord/dm', async (req, res) => {
   const { message } = req.body;
 
