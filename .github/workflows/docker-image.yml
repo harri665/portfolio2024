@@ -24,4 +24,4 @@ jobs:
       run: |
         curl --fail --show-error --silent \
           -X POST \
-          "https://portainer.harrison-martin.com/api/stacks/webhooks/003ab175-65a3-4f09-9fc2-42e2cf8160ce"
+          "https://portainer.harrison-martin.com/api/stacks/webhooks/5801b3e2-fcba-4271-aaa5-b362d3e482b0"

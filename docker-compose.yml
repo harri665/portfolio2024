@@ -8,6 +8,11 @@ services:
     image: portfolio-frontend:local
     ports:
       - "3004:80" # Serve the frontend on port 80
+    labels:
+      - "traefik.http.routers.my-service.rule=Host(`harrison-martin.com`)"
+      - "traefik.http.routers.my-service.entryPoints=web,websecure"
+      - "traefik.http.routers.my-service.tls=true"  # Enable TLS (HTTPS)
+      - "traefik.http.routers.my-service.tls.certresolver=myresolver"
     environment:
       - NODE_ENV=production
     depends_on:
@@ -19,6 +24,11 @@ services:
       context: ./server
       dockerfile: Dockerfile
     image: portfolio-backend:local
+    labels:
+      - "traefik.http.routers.my-service.rule=Host(`artstation.harrison-martin.com`)"
+      - "traefik.http.routers.my-service.entryPoints=web,websecure"
+      - "traefik.http.routers.my-service.tls=true"  # Enable TLS (HTTPS)
+      - "traefik.http.routers.my-service.tls.certresolver=myresolver"
     ports:
       - "3005:3005"
     environment:
@@ -27,3 +37,4 @@ services:
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - GITHUB_CACHE_TTL_MS=${GITHUB_CACHE_TTL_MS:-1800000}
     restart: always
+
