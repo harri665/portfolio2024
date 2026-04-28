@@ -1,298 +1,402 @@
-import React, { useState, useEffect, useRef } from "react";
-import { useParams, useNavigate } from "react-router-dom";
-import ReactPlayer from "react-player";
-import { motion } from "framer-motion";
-import { FaArrowLeft } from "react-icons/fa";
+import React, { useEffect, useRef, useState } from 'react';
+import { useParams } from 'react-router-dom';
+import ReactPlayer from 'react-player';
+import { motion } from 'framer-motion';
+import { FaArrowLeft } from 'react-icons/fa';
+
+import { apiUrl } from '../../utils/api';
+import { getSiteHref, SITE_MODES } from '../../utils/siteMode';
+
+function formatDate(value) {
+  if (!value) {
+    return 'Unknown';
+  }
+
+  return new Date(value).toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
+function validAssets(assets) {
+  return (assets || []).filter((asset) => {
+    if (asset.asset_type === 'image' && asset.image_url) {
+      return true;
+    }
+
+    if (asset.asset_type === 'video_clip' && asset.player_embedded) {
+      return true;
+    }
+
+    return false;
+  });
+}
+
+function getAssetDimensions(asset) {
+  const width = Number(asset?.width || asset?.oembed?.width || 0);
+  const height = Number(asset?.height || asset?.oembed?.height || 0);
+
+  if (!width || !height) {
+    return null;
+  }
+
+  return { width, height };
+}
+
+function getAssetAspectRatio(asset) {
+  const dimensions = getAssetDimensions(asset);
+
+  if (!dimensions) {
+    return null;
+  }
+
+  return dimensions.width / dimensions.height;
+}
+
+function getAssetSpanClasses(asset) {
+  const ratio = getAssetAspectRatio(asset);
+
+  if (!ratio) {
+    return asset.asset_type === 'video_clip'
+      ? 'md:col-span-2 xl:col-span-3'
+      : 'md:col-span-1 xl:col-span-2';
+  }
+
+  if (ratio >= 1.9) {
+    return 'md:col-span-2 xl:col-span-6';
+  }
+
+  if (ratio >= 1.2) {
+    return 'md:col-span-2 xl:col-span-3';
+  }
+
+  return 'md:col-span-1 xl:col-span-2';
+}
+
+function getAssetFrameProps(asset) {
+  const dimensions = getAssetDimensions(asset);
+
+  if (dimensions) {
+    return {
+      style: { aspectRatio: `${dimensions.width} / ${dimensions.height}` },
+      className: 'relative w-full bg-[#0d0f14]',
+    };
+  }
+
+  if (asset.asset_type === 'video_clip') {
+    return {
+      style: undefined,
+      className: 'relative w-full aspect-video bg-black',
+    };
+  }
+
+  return {
+    style: undefined,
+    className: 'relative w-full aspect-square bg-[#0d0f14]',
+  };
+}
 
 const ArtStationProject = () => {
   const { hashId } = useParams();
-  const navigate = useNavigate();
   const [project, setProject] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const assetRefs = useRef({});
 
   useEffect(() => {
-    const fetchProject = async () => {
+    async function fetchProject() {
       try {
-        const response = await fetch(
-          `https://artstation.harrison-martin.com/api/project/${hashId}`
-        );
-        if (!response.ok) throw new Error("Failed to load project");
+        const response = await fetch(apiUrl(`/project/${hashId}`));
+
+        if (!response.ok) {
+          throw new Error('Network response was not ok');
+        }
+
         const data = await response.json();
         setProject(data);
       } catch (err) {
-        setError(err.message);
+        setError(err.message || 'Failed to load project');
       } finally {
         setLoading(false);
       }
-    };
+    }
+
     fetchProject();
   }, [hashId]);
 
   useEffect(() => {
-    if (!loading && project) {
-      const assetId = window.location.hash.split("#")[2];
-      if (assetId && assetRefs.current[assetId]) {
-        const el = assetRefs.current[assetId];
-        setTimeout(() => {
-          el.scrollIntoView({ behavior: "smooth", block: "center" });
-          el.classList.add("ring-4", "ring-cyan-400", "animate-pulse");
-          setTimeout(() => el.classList.remove("ring-4", "ring-cyan-400", "animate-pulse"), 3000);
-        }, 500);
-      }
+    if (loading || !project) {
+      return;
     }
+
+    const fullHash = window.location.hash;
+    const assetId = fullHash.split('#')[2];
+
+    if (!assetId || !assetRefs.current[assetId]) {
+      return;
+    }
+
+    setTimeout(() => {
+      const assetElement = assetRefs.current[assetId];
+      assetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+      assetElement.classList.add(
+        'ring-4',
+        'ring-[#0a84ff]',
+        'ring-offset-4',
+        'ring-offset-[#08090c]',
+        'animate-pulse'
+      );
+
+      setTimeout(() => {
+        assetElement.classList.remove(
+          'ring-4',
+          'ring-[#0a84ff]',
+          'ring-offset-4',
+          'ring-offset-[#08090c]',
+          'animate-pulse'
+        );
+      }, 3500);
+    }, 500);
   }, [loading, project]);
 
-  if (loading)
+  if (loading) {
     return (
-      <motion.div 
-        className="flex justify-center items-center h-screen bg-black text-gray-400 text-lg"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-      >
-        <motion.div
-          animate={{ 
-            scale: [1, 1.2, 1],
-            opacity: [0.5, 1, 0.5]
-          }}
-          transition={{ 
-            duration: 1.5, 
-            repeat: Infinity,
-            ease: "easeInOut"
-          }}
-        >
-          Loading...
-        </motion.div>
-      </motion.div>
+      <div className="min-h-screen bg-[#08090c] px-4 py-24 text-white sm:px-8">
+        <div className="mx-auto max-w-3xl rounded-3xl border border-white/10 bg-white/5 px-6 py-12 text-center text-white/70 shadow-[0_16px_45px_rgba(0,0,0,0.35)] backdrop-blur-xl">
+          Loading project...
+        </div>
+      </div>
     );
+  }
 
-  if (error)
+  if (error) {
     return (
-      <motion.div 
-        className="flex justify-center items-center h-screen bg-black text-red-500 text-lg"
-        initial={{ opacity: 0, scale: 0.9 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.5 }}
-      >
-        {error}
-      </motion.div>
+      <div className="min-h-screen bg-[#08090c] px-4 py-24 text-white sm:px-8">
+        <div className="mx-auto max-w-3xl rounded-3xl border border-red-300/20 bg-red-500/10 px-6 py-12 text-center text-red-200 shadow-[0_16px_45px_rgba(0,0,0,0.35)] backdrop-blur-xl">
+          Error: {error}
+        </div>
+      </div>
     );
+  }
 
-  if (!project) return null;
+  if (!project) {
+    return null;
+  }
 
-  // Animation variants
-  const sidebarVariants = {
-    hidden: { x: -100, opacity: 0 },
-    visible: { 
-      x: 0, 
-      opacity: 1,
-      transition: { 
-        type: "spring",
-        stiffness: 100,
-        damping: 20,
-        staggerChildren: 0.1,
-        delayChildren: 0.2
-      }
-    }
-  };
-
-  const itemVariants = {
-    hidden: { x: -20, opacity: 0 },
-    visible: { 
-      x: 0, 
-      opacity: 1,
-      transition: { type: "spring", stiffness: 100 }
-    }
-  };
-
-  const mainVariants = {
-    hidden: { opacity: 0, y: 20 },
-    visible: { 
-      opacity: 1, 
-      y: 0,
-      transition: { 
-        duration: 0.8,
-        ease: [0.6, -0.05, 0.01, 0.99]
-      }
-    }
-  };
-
-  const assetContainerVariants = {
-    hidden: { opacity: 0 },
-    visible: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.1,
-        delayChildren: 0.3
-      }
-    }
-  };
-
-  const assetVariants = {
-    hidden: { opacity: 0, y: 30, scale: 0.95 },
-    visible: { 
-      opacity: 1, 
-      y: 0,
-      scale: 1,
-      transition: {
-        type: "spring",
-        stiffness: 100,
-        damping: 15
-      }
-    }
-  };
+  const softwareItems = project.software_items || [];
+  const assets = validAssets(project.assets);
 
   return (
-    <div className="min-h-screen bg-[#020202] text-gray-200 flex flex-col md:flex-row">
-      {/* Sidebar */}
-      <motion.aside
-        variants={sidebarVariants}
-        initial="hidden"
-        animate="visible"
-        className="w-full md:w-1/4 p-8 bg-gradient-to-b from-[#0a0a0a] to-[#141414] border-r border-white/5 backdrop-blur-lg"
-      >
-        <motion.button
-          onClick={() => navigate(-1)}
-          className="mb-8 flex items-center text-cyan-400 hover:text-white transition-colors"
-          variants={itemVariants}
-          whileHover={{ x: -5, scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
+    <div className="relative min-h-screen overflow-hidden bg-[#08090c] text-white">
+      <BackgroundDecor />
+
+      <div className="relative z-10 mx-auto max-w-7xl px-4 pb-20 pt-6 sm:px-8">
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35 }}
+          className="mb-6 flex items-center justify-between gap-3"
         >
-          <FaArrowLeft className="mr-2" /> Back
-        </motion.button>
+          <a
+            href={getSiteHref(SITE_MODES.ART)}
+            className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/5 px-4 py-2 text-sm font-semibold text-white/90 transition-colors hover:bg-white/10"
+          >
+            <FaArrowLeft className="text-xs" />
+            Back to Art
+          </a>
 
-        <motion.div className="mb-8" variants={itemVariants}>
-          <p className="text-gray-400">Published: {new Date(project.published_at).toLocaleDateString()}</p>
+          <div className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-medium text-white/65 sm:text-sm">
+            Published {formatDate(project.published_at)}
+          </div>
         </motion.div>
 
-        <motion.div className="mt-10" variants={itemVariants}>
-          <h2 className="text-xl font-semibold mb-3 text-white">Description</h2>
-          <motion.div
-            className="text-gray-400 text-sm leading-relaxed mb-8"
-            dangerouslySetInnerHTML={{
-              __html: project.description_html || "<p>No description available.</p>",
-            }}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.4, duration: 0.6 }}
+        <motion.section
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45 }}
+          className="mb-6 rounded-[1.75rem] border border-white/10 bg-white/5 p-6 shadow-[0_18px_45px_rgba(0,0,0,0.28)] backdrop-blur-xl sm:p-8"
+        >
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">
+            Art Project
+          </p>
+          <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-5xl">
+            {project.title}
+          </h1>
+        </motion.section>
+
+        <motion.section
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45, delay: 0.04 }}
+          whileHover={{ y: -2 }}
+          className="mb-6 rounded-[1.75rem] border border-white/10 bg-[#0f1116] p-4 shadow-[0_18px_45px_rgba(0,0,0,0.3)]"
+        >
+          <img
+            src={project.cover_url}
+            alt={project.title}
+            className="mx-auto w-full max-w-5xl max-h-[34rem] rounded-2xl object-contain"
           />
-        </motion.div>
+        </motion.section>
 
-        <motion.div className="mt-8" variants={itemVariants}>
-          <h2 className="text-xl font-semibold mb-3 text-white">Software</h2>
-          <div className="flex flex-wrap gap-2">
-            {project.software_items.map((s, i) => (
+        <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
+          <motion.section
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.45, delay: 0.08 }}
+            className="rounded-[1.75rem] border border-white/10 bg-white/5 p-6 shadow-[0_18px_45px_rgba(0,0,0,0.28)] backdrop-blur-xl sm:p-8"
+          >
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">
+              Overview
+            </p>
+            <div className="prose prose-invert prose-sm sm:prose-base mt-5 max-w-none text-white/75 prose-p:text-white/70 prose-a:text-[#4da3ff] prose-strong:text-white">
+              <div
+                dangerouslySetInnerHTML={{
+                  __html: project.description_html || '<p>No description available.</p>',
+                }}
+              />
+            </div>
+          </motion.section>
+
+          <motion.aside
+            initial={{ opacity: 0, x: 10 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.45, delay: 0.1 }}
+            className="lg:sticky lg:top-6"
+          >
+            <div className="rounded-[1.5rem] border border-white/10 bg-white/5 p-5 shadow-[0_18px_45px_rgba(0,0,0,0.32)] backdrop-blur-xl sm:p-6">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">
+                Software
+              </p>
+              <div className="mt-4 flex flex-wrap gap-2.5">
+                {softwareItems.length > 0 ? (
+                  softwareItems.map((software) => (
+                    <div
+                      key={`${software.name}-${software.id || software.icon_url}`}
+                      className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/85"
+                    >
+                      <img
+                        src={software.icon_url}
+                        alt={software.name}
+                        className="h-4 w-4 rounded-sm"
+                      />
+                      <span>{software.name}</span>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-white/60">No software metadata available.</p>
+                )}
+              </div>
+            </div>
+          </motion.aside>
+        </div>
+
+        <motion.section
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45, delay: 0.12 }}
+          className="mb-6 rounded-[1.75rem] border border-white/10 bg-white/5 p-5 shadow-[0_18px_45px_rgba(0,0,0,0.28)] backdrop-blur-xl sm:p-6"
+        >
+          <div className="mb-5 flex items-center justify-between gap-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">
+              Gallery
+            </p>
+            <p className="text-xs text-white/55 sm:text-sm">{assets.length} assets</p>
+          </div>
+
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-6">
+            {assets.map((asset, index) => (
               <motion.div
-                key={i}
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ delay: 0.5 + i * 0.05, type: "spring", stiffness: 200 }}
-                whileHover={{ scale: 1.1, rotate: 3 }}
-                whileTap={{ scale: 0.95 }}
-                className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg p-2 backdrop-blur-md"
+                key={asset.id}
+                ref={(el) => {
+                  assetRefs.current[asset.id] = el;
+                }}
+                id={asset.id}
+                whileHover={{ y: -2 }}
+                className={`overflow-hidden rounded-[1.25rem] border border-white/10 bg-[#101218] shadow-[0_14px_36px_rgba(0,0,0,0.28)] ${getAssetSpanClasses(asset)}`}
               >
-                <img src={s.icon_url} alt={s.name} className="w-6 h-6" />
-                <p className="text-xs font-medium text-gray-200">{s.name}</p>
+                {(() => {
+                  const frame = getAssetFrameProps(asset);
+
+                  return (
+                    <div className={frame.className} style={frame.style}>
+                      {asset.asset_type === 'image' ? (
+                        <img
+                          src={asset.image_url}
+                          alt={`Asset ${index + 1}`}
+                          className="h-full w-full object-contain"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <ReactPlayer
+                          url={asset.player_embedded}
+                          controls
+                          width="100%"
+                          height="100%"
+                          muted
+                          loop
+                          playing
+                        />
+                      )}
+                    </div>
+                  );
+                })()}
               </motion.div>
             ))}
           </div>
-        </motion.div>
-      </motion.aside>
+        </motion.section>
 
-      {/* Main Content */}
-      <motion.main
-        variants={mainVariants}
-        initial="hidden"
-        animate="visible"
-        className="flex-1 p-10 overflow-y-auto"
-      >
-        <motion.h1 
-          className="text-5xl font-bold text-white mb-6 tracking-tight"
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3, duration: 0.6, ease: "easeOut" }}
-        >
-          {project.title}
-        </motion.h1>
-
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 0.4, duration: 0.6, ease: "easeOut" }}
-          whileHover={{ 
-            scale: 1.02,
-            boxShadow: "0 0 50px rgba(0,255,255,0.15)",
-            transition: { duration: 0.3 }
-          }}
-          className="rounded-2xl overflow-hidden shadow-[0_0_40px_rgba(0,255,255,0.05)] mb-10 max-h-[800px] flex items-center justify-center bg-black/20"
-        >
-          <motion.img
-            src={project.cover_url}
-            alt={project.title}
-            className="w-full h-full object-contain rounded-2xl max-h-[800px]"
-            initial={{ scale: 1.1, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ delay: 0.5, duration: 0.8, ease: "easeOut" }}
-          />
-        </motion.div>
-
-        <motion.div 
-          className="grid grid-cols-1 sm:grid-cols-2 gap-8"
-          variants={assetContainerVariants}
-          initial="hidden"
-          animate="visible"
-        >
-          {project.assets
-            .filter((a) => {
-              // Only include assets that have valid content
-              if (a.asset_type === "image" && a.image_url) return true;
-              if (a.asset_type === "video_clip" && a.player_embedded) return true;
-              return false;
-            })
-            .map((a, i) => (
-              <motion.div
-                key={a.id}
-                ref={(el) => (assetRefs.current[a.id] = el)}
-                variants={assetVariants}
-                whileHover={{ 
-                  scale: 1.03,
-                  y: -5,
-                  boxShadow: "0 10px 30px rgba(0,0,0,0.3)",
-                  transition: { 
-                    type: "spring", 
-                    stiffness: 300, 
-                    damping: 20 
-                  }
-                }}
-                className="rounded-xl bg-white/5 border border-white/10 overflow-hidden backdrop-blur-sm max-h-[600px] flex items-center justify-center group"
-              >
-                {a.asset_type === "image" ? (
-                  <motion.img 
-                    src={a.image_url} 
-                    alt={`Asset ${i}`} 
-                    className="w-full h-full object-contain max-h-[600px]"
-                    whileHover={{ scale: 1.05 }}
-                    transition={{ duration: 0.4, ease: "easeOut" }}
-                  />
-                ) : a.asset_type === "video_clip" && a.player_embedded ? (
-                  <ReactPlayer
-                    url={a.player_embedded}
-                    controls
-                    width="100%"
-                    height="100%"
-                    muted
-                    loop
-                    playing
-                  />
-                ) : null}
-              </motion.div>
-            ))}
-        </motion.div>
-      </motion.main>
+        {project.user && (
+          <motion.section
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.45, delay: 0.14 }}
+            whileHover={{ y: -2 }}
+            className="rounded-[1.75rem] border border-white/10 bg-white/5 p-5 shadow-[0_18px_45px_rgba(0,0,0,0.28)] backdrop-blur-xl sm:p-6"
+          >
+            <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center">
+              <img
+                src={project.user.large_avatar_url}
+                alt={project.user.full_name}
+                className="h-16 w-16 rounded-full border border-white/10 object-cover shadow-[0_10px_24px_rgba(0,0,0,0.3)] sm:h-20 sm:w-20"
+              />
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">
+                  Artist
+                </p>
+                <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white">
+                  {project.user.full_name}
+                </h2>
+                <p className="mt-1 text-sm text-white/65 sm:text-base">
+                  {project.user.headline}
+                </p>
+                <a
+                  href={project.user.permalink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-3 inline-flex items-center rounded-full border border-white/12 bg-white/5 px-4 py-2 text-sm font-semibold text-white/90 transition-colors hover:bg-white/10"
+                >
+                  View Profile
+                </a>
+              </div>
+            </div>
+          </motion.section>
+        )}
+      </div>
     </div>
   );
 };
+
+function BackgroundDecor() {
+  return (
+    <div aria-hidden="true" className="pointer-events-none absolute inset-0">
+      <div className="absolute left-[-5rem] top-[12rem] h-60 w-60 rounded-full bg-sky-500/12 blur-3xl" />
+      <div className="absolute right-[8%] top-[8rem] h-72 w-72 rounded-full bg-indigo-500/10 blur-3xl" />
+      <div className="absolute bottom-[10%] left-[35%] h-80 w-80 rounded-full bg-cyan-400/8 blur-3xl" />
+      <div className="absolute inset-0 opacity-10 [background-image:radial-gradient(circle_at_1px_1px,rgba(255,255,255,0.75)_1px,transparent_0)] [background-size:22px_22px]" />
+    </div>
+  );
+}
 
 export default ArtStationProject;
