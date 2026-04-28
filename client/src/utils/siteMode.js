@@ -2,6 +2,7 @@ export const SITE_MODES = {
   ROOT: 'root',
   CS: 'cs',
   ART: 'art',
+  BLOG: 'blog',
 };
 
 const SITE_MODE_VALUES = new Set(Object.values(SITE_MODES));
@@ -47,12 +48,20 @@ export function detectSiteMode() {
     return SITE_MODES.ART;
   }
 
+  if (localhostSubdomain === 'blog') {
+    return SITE_MODES.BLOG;
+  }
+
   if (hostname.startsWith('cs.')) {
     return SITE_MODES.CS;
   }
 
   if (hostname.startsWith('art.') || hostname.startsWith('artstation.')) {
     return SITE_MODES.ART;
+  }
+
+  if (hostname.startsWith('blog.')) {
+    return SITE_MODES.BLOG;
   }
 
   return SITE_MODES.ROOT;
@@ -87,6 +96,7 @@ export function getSiteHref(mode) {
     [SITE_MODES.ROOT]: 'https://harrison-martin.com',
     [SITE_MODES.CS]: 'https://cs.harrison-martin.com',
     [SITE_MODES.ART]: 'https://art.harrison-martin.com',
+    [SITE_MODES.BLOG]: 'https://blog.harrison-martin.com',
   };
 
   return productionHosts[normalizedMode] || productionHosts[SITE_MODES.ROOT];

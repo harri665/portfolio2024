@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { HashRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
+import './App.css';
+import 'highlight.js/styles/atom-one-dark.css';
 
 import ArtHomePage from './Components/Homepage/ArtHomePage';
 import RootHomePage from './Components/Homepage/RootHomePage';
@@ -7,6 +9,10 @@ import CSHomePage from './Components/Homepage/CSHomePage';
 import ProjectDetails from './Components/ProjectDetails/ProjectDetails';
 import LogsViewer from './Components/Admin/Admin';
 import ContactPage from './Components/Contact/ContactPage';
+import BlogIndex from './Components/Blog/BlogIndex';
+import BlogPost from './Components/Blog/BlogPost';
+import BlogAdmin from './Components/Blog/Admin/BlogAdmin';
+import BlogPostEditor from './Components/Blog/Admin/BlogPostEditor';
 import { apiUrl } from './utils/api';
 import { detectSiteMode, SITE_MODES } from './utils/siteMode';
 
@@ -43,6 +49,7 @@ function MainRoutes({ siteMode }) {
     [SITE_MODES.ROOT]: <RootHomePage />,
     [SITE_MODES.CS]: <CSHomePage />,
     [SITE_MODES.ART]: <ArtHomePage />,
+    [SITE_MODES.BLOG]: <BlogIndex />,
   };
 
   return (
@@ -52,6 +59,10 @@ function MainRoutes({ siteMode }) {
         element={homePageByMode[siteMode] || <RootHomePage />}
       />
       <Route path="/projects/:hashId" element={<ProjectDetails />} />
+      <Route path="/posts/:slug" element={<BlogPost />} />
+      <Route path="/blog-admin" element={<BlogAdmin />} />
+      <Route path="/blog-admin/new" element={<BlogPostEditor />} />
+      <Route path="/blog-admin/edit/:slug" element={<BlogPostEditor />} />
       {/* The /admin route is just a placeholder; you can rename it as needed */}
       <Route path="/admin" element={<AdminLogs />} />
       <Route path="/contact" element={<ContactPage />} />
