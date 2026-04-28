@@ -699,6 +699,24 @@ app.get('/api/blog/posts/:slug', (req, res) => {
   }
 });
 
+// Sitemap — helps Google discover blog posts
+app.get('/sitemap.xml', (req, res) => {
+  try {
+    const posts = loadBlogPosts();
+    const base = 'https://blog.harrison-martin.com';
+    const urls = [
+      `<url><loc>${base}/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>`,
+      ...posts.map((p) =>
+        `<url><loc>${base}/posts/${encodeURIComponent(p.slug)}</loc>${p.date ? `<lastmod>${p.date}</lastmod>` : ''}<changefreq>monthly</changefreq><priority>0.8</priority></url>`
+      ),
+    ].join('\n  ');
+    res.setHeader('Content-Type', 'application/xml');
+    res.send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  ${urls}\n</urlset>`);
+  } catch (err) {
+    res.status(500).send('Failed to generate sitemap');
+  }
+});
+
 // ─── BLOG ADMIN ──────────────────────────────────────────────────────────────
 
 const ADMIN_KEY = process.env.ADMIN_KEY || 'test';
