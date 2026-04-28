@@ -1,21 +1,42 @@
 version: '3.8'
 
 services:
-  frontend:
-    image: harri665/portfolio-frontend:latest
-    ports:
-      - "3004:80" # Serve the frontend on port 80
-    environment:
-      - NODE_ENV=production
-      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
-    depends_on:
-      - backend
-    restart: always
-
-  backend:
-    image: harri665/portfolio-backend:latest
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: portfolio-server
     ports:
       - "3005:3005"
     environment:
       - NODE_ENV=production
-    restart: always
+      - PORT=3005
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - GITHUB_CACHE_TTL_MS=${GITHUB_CACHE_TTL_MS:-1800000}
+    networks:
+      - portfolio-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3005/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: portfolio-client
+    ports:
+      - "3004:80"
+    depends_on:
+      - server
+    networks:
+      - portfolio-network
+    restart: unless-stopped
+
+networks:
+  portfolio-network:
+    driver: bridge
