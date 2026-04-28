@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 import { SITE_MODES, getSiteHref } from '../../utils/siteMode';
 
 const navItems = [
-  { mode: SITE_MODES.ROOT, label: 'Home Hub' },
+  { mode: SITE_MODES.ROOT, label: 'Home Hub', hideOnMobile: true },
   { mode: SITE_MODES.CS, label: 'CS' },
   { mode: SITE_MODES.ART, label: 'Art' },
   { mode: SITE_MODES.BLOG, label: 'Blog' },
@@ -17,12 +17,12 @@ export default function SubdomainNav({ currentMode }) {
       <div className="mx-auto flex max-w-7xl items-center justify-between rounded-full border border-white/10 bg-[#0f1115]/72 px-3 py-2 shadow-[0_14px_40px_rgba(0,0,0,0.35)] backdrop-blur-2xl sm:px-4">
         <a
           href={getSiteHref(SITE_MODES.ROOT)}
-          className="px-2 text-[11px] font-semibold tracking-[0.2em] text-white/88 sm:text-xs"
+          className="hidden px-2 text-[11px] font-semibold tracking-[0.2em] text-white/88 sm:inline sm:text-xs"
         >
           HARRISON MARTIN
         </a>
 
-        <div className="flex items-center gap-1.5 sm:gap-2">
+        <div className="flex w-full items-center justify-between gap-1.5 sm:w-auto sm:justify-start sm:gap-2">
           {navItems.map((item) => {
             const isActive = item.mode === currentMode;
 
@@ -38,6 +38,7 @@ export default function SubdomainNav({ currentMode }) {
                   isActive
                     ? 'bg-white text-[#0b0c10] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.04)]'
                     : 'text-white/70 hover:bg-white/6 hover:text-white',
+                  item.hideOnMobile ? 'hidden sm:inline-flex' : '',
                 ].join(' ')}
               >
                 {item.label}
