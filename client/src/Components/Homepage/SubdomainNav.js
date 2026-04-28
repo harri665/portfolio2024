@@ -8,6 +8,7 @@ const navItems = [
   { mode: SITE_MODES.ROOT, label: 'Home Hub' },
   { mode: SITE_MODES.CS, label: 'CS' },
   { mode: SITE_MODES.ART, label: 'Art' },
+  { mode: SITE_MODES.BLOG, label: 'Blog' },
 ];
 
 export default function SubdomainNav({ currentMode }) {

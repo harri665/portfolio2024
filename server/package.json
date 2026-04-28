@@ -8,6 +8,8 @@
     "dotenv": "^17.2.0",
     "express": "^4.21.1",
     "express-useragent": "^1.0.15",
+    "gray-matter": "^4.0.3",
+    "multer": "^2.1.1",
     "node-fetch": "^3.3.2",
     "puppeteer": "^23.5.3",
     "puppeteer-extra": "^3.3.6",

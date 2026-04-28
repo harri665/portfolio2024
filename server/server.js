@@ -7,6 +7,9 @@ import fs from 'fs';
 import path from 'path';
 import axios from 'axios';
 import useragent from 'express-useragent';
+import matter from 'gray-matter';
+import { fileURLToPath } from 'url';
+import multer from 'multer';
 // --- NEW IMPORTS ---
 import { Client, GatewayIntentBits } from 'discord.js';
 import 'dotenv/config'; // Loads .env file contents into process.env
@@ -602,6 +605,7 @@ app.get('/api/clear-cache', (req, res) => {
     userProjectsCache = {};
     projectDetailsCache = {};
     githubRepoCache = { repoLists: {}, repos: {} };
+    blogPostsCache = null;
 
     saveCacheToFile(videoLinkCacheFile, videoLinkCache);
     saveCacheToFile(userProjectsCacheFile, userProjectsCache);
@@ -614,6 +618,255 @@ app.get('/api/clear-cache', (req, res) => {
     res.status(500).json({ error: 'Failed to clear caches' });
   }
 });
+
+// ─── BLOG ────────────────────────────────────────────────────────────────────
+
+const BLOG_POSTS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'blog', 'posts');
+const BLOG_IMAGES_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'blog', 'images');
+
+// Serve blog images as static files
+app.use('/api/blog/images', express.static(BLOG_IMAGES_DIR));
+
+let blogPostsCache = null;
+
+function estimateReadingTime(content) {
+  const words = content.trim().split(/\s+/).length;
+  const minutes = Math.ceil(words / 200);
+  return `${minutes} min read`;
+}
+
+function loadBlogPosts() {
+  if (!fs.existsSync(BLOG_POSTS_DIR)) return [];
+  const files = fs.readdirSync(BLOG_POSTS_DIR).filter((f) => f.endsWith('.md'));
+  return files
+    .map((file) => {
+      const slug = file.replace(/\.md$/, '');
+      const raw = fs.readFileSync(path.join(BLOG_POSTS_DIR, file), 'utf-8');
+      const { data, content } = matter(raw);
+      if (data.published === false) return null;
+      return {
+        slug,
+        title: data.title || slug,
+        date: data.date || null,
+        tags: Array.isArray(data.tags) ? data.tags : [],
+        description: data.description || '',
+        cover: data.cover || null,
+        readingTime: estimateReadingTime(content),
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+}
+
+app.get('/api/blog/posts', (req, res) => {
+  try {
+    if (!blogPostsCache) blogPostsCache = loadBlogPosts();
+    res.json(blogPostsCache);
+  } catch (err) {
+    console.error('Error loading blog posts:', err);
+    res.status(500).json({ error: 'Failed to load blog posts' });
+  }
+});
+
+app.get('/api/blog/posts/:slug', (req, res) => {
+  const { slug } = req.params;
+  if (!/^[a-zA-Z0-9_-]+$/.test(slug)) {
+    return res.status(400).json({ error: 'Invalid slug' });
+  }
+  const filePath = path.join(BLOG_POSTS_DIR, `${slug}.md`);
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'Post not found' });
+  }
+  try {
+    const raw = fs.readFileSync(filePath, 'utf-8');
+    const { data, content } = matter(raw);
+    if (data.published === false) return res.status(404).json({ error: 'Post not found' });
+    res.json({
+      meta: {
+        slug,
+        title: data.title || slug,
+        date: data.date || null,
+        tags: Array.isArray(data.tags) ? data.tags : [],
+        description: data.description || '',
+        cover: data.cover || null,
+        readingTime: estimateReadingTime(content),
+      },
+      content,
+    });
+  } catch (err) {
+    console.error('Error loading blog post:', err);
+    res.status(500).json({ error: 'Failed to load post' });
+  }
+});
+
+// ─── BLOG ADMIN ──────────────────────────────────────────────────────────────
+
+const ADMIN_KEY = process.env.ADMIN_KEY || 'test';
+
+function requireAdmin(req, res, next) {
+  if (req.headers['x-admin-key'] !== ADMIN_KEY) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
+}
+
+function loadBlogPostsAll() {
+  if (!fs.existsSync(BLOG_POSTS_DIR)) return [];
+  return fs.readdirSync(BLOG_POSTS_DIR)
+    .filter((f) => f.endsWith('.md'))
+    .map((file) => {
+      const slug = file.replace(/\.md$/, '');
+      const raw = fs.readFileSync(path.join(BLOG_POSTS_DIR, file), 'utf-8');
+      const { data, content } = matter(raw);
+      return {
+        slug,
+        title: data.title || slug,
+        date: data.date || null,
+        tags: Array.isArray(data.tags) ? data.tags : [],
+        description: data.description || '',
+        cover: data.cover || null,
+        published: data.published !== false,
+        readingTime: estimateReadingTime(content),
+      };
+    })
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+}
+
+// Verify admin key
+app.post('/api/admin/auth', (req, res) => {
+  if (req.headers['x-admin-key'] === ADMIN_KEY) res.json({ ok: true });
+  else res.status(401).json({ error: 'Invalid key' });
+});
+
+// List all posts including drafts
+app.get('/api/admin/blog/posts', requireAdmin, (req, res) => {
+  try {
+    res.json(loadBlogPostsAll());
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to load posts' });
+  }
+});
+
+// Get single post including drafts
+app.get('/api/admin/blog/posts/:slug', requireAdmin, (req, res) => {
+  const { slug } = req.params;
+  if (!/^[a-zA-Z0-9_-]+$/.test(slug)) return res.status(400).json({ error: 'Invalid slug' });
+  const filePath = path.join(BLOG_POSTS_DIR, `${slug}.md`);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Post not found' });
+  try {
+    const raw = fs.readFileSync(filePath, 'utf-8');
+    const { data, content } = matter(raw);
+    res.json({
+      meta: {
+        slug,
+        title: data.title || slug,
+        date: data.date || null,
+        tags: Array.isArray(data.tags) ? data.tags : [],
+        description: data.description || '',
+        cover: data.cover || null,
+        published: data.published !== false,
+      },
+      content,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to load post' });
+  }
+});
+
+// Create new post
+app.post('/api/admin/blog/posts', requireAdmin, (req, res) => {
+  const { slug, title, date, tags, description, cover, published, content } = req.body;
+  if (!slug || !/^[a-zA-Z0-9_-]+$/.test(slug)) return res.status(400).json({ error: 'Invalid slug' });
+  const filePath = path.join(BLOG_POSTS_DIR, `${slug}.md`);
+  if (fs.existsSync(filePath)) return res.status(409).json({ error: 'A post with that slug already exists' });
+  try {
+    if (!fs.existsSync(BLOG_POSTS_DIR)) fs.mkdirSync(BLOG_POSTS_DIR, { recursive: true });
+    const raw = matter.stringify(content || '', {
+      title: title || slug,
+      date: date || new Date().toISOString().split('T')[0],
+      tags: Array.isArray(tags) ? tags : [],
+      description: description || '',
+      ...(cover ? { cover } : {}),
+      published: published !== false,
+    });
+    fs.writeFileSync(filePath, raw, 'utf-8');
+    blogPostsCache = null;
+    res.status(201).json({ slug });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to create post' });
+  }
+});
+
+// Update existing post
+app.put('/api/admin/blog/posts/:slug', requireAdmin, (req, res) => {
+  const { slug } = req.params;
+  if (!/^[a-zA-Z0-9_-]+$/.test(slug)) return res.status(400).json({ error: 'Invalid slug' });
+  const filePath = path.join(BLOG_POSTS_DIR, `${slug}.md`);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Post not found' });
+  const { title, date, tags, description, cover, published, content } = req.body;
+  try {
+    const raw = matter.stringify(content || '', {
+      title: title || slug,
+      date: date || null,
+      tags: Array.isArray(tags) ? tags : [],
+      description: description || '',
+      ...(cover ? { cover } : {}),
+      published: published !== false,
+    });
+    fs.writeFileSync(filePath, raw, 'utf-8');
+    blogPostsCache = null;
+    res.json({ slug });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update post' });
+  }
+});
+
+// Delete post
+app.delete('/api/admin/blog/posts/:slug', requireAdmin, (req, res) => {
+  const { slug } = req.params;
+  if (!/^[a-zA-Z0-9_-]+$/.test(slug)) return res.status(400).json({ error: 'Invalid slug' });
+  const filePath = path.join(BLOG_POSTS_DIR, `${slug}.md`);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Post not found' });
+  try {
+    fs.unlinkSync(filePath);
+    blogPostsCache = null;
+    res.json({ deleted: slug });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete post' });
+  }
+});
+
+// List uploaded images
+app.get('/api/admin/blog/images', requireAdmin, (req, res) => {
+  try {
+    if (!fs.existsSync(BLOG_IMAGES_DIR)) return res.json([]);
+    const files = fs.readdirSync(BLOG_IMAGES_DIR)
+      .filter((f) => /\.(png|jpe?g|gif|webp|svg|avif)$/i.test(f))
+      .sort();
+    res.json(files);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to list images' });
+  }
+});
+
+// Upload blog image
+const imageUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      if (!fs.existsSync(BLOG_IMAGES_DIR)) fs.mkdirSync(BLOG_IMAGES_DIR, { recursive: true });
+      cb(null, BLOG_IMAGES_DIR);
+    },
+    filename: (req, file, cb) => cb(null, file.originalname),
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
+
+app.post('/api/admin/blog/images', requireAdmin, imageUpload.single('image'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  res.json({ filename: req.file.originalname });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 // Start the server
 app.listen(PORT, () => {
