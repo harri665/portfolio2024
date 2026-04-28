@@ -33,7 +33,7 @@ export function remarkWikiLinks({ apiBase = '' } = {}) {
           const label = labelRaw ? labelRaw.trim() : slug;
           parts.push({
             type: 'html',
-            value: `<a href="/#/posts/${encodeURIComponent(slug)}" class="blog-wiki-link">${label}</a>`,
+            value: `<a href="/posts/${encodeURIComponent(slug)}" class="blog-wiki-link">${label}</a>`,
           });
         }
 

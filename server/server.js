@@ -42,16 +42,20 @@ app.use(cors());
 app.use(express.json());
 app.use(useragent.express());
 
+// docker volume so it survives rebuilds
+const DATA_DIR = path.join(process.cwd(), 'data');
+fs.mkdirSync(DATA_DIR, { recursive: true });
+
 function ensureCacheFileExists(filePath) {
   if (!fs.existsSync(filePath)) {
     fs.writeFileSync(filePath, JSON.stringify({}, null, 2));
   }
 }
 
-const videoLinkCacheFile = path.join(process.cwd(), 'videoLinkCache.json');
-const userProjectsCacheFile = path.join(process.cwd(), 'userProjectsCache.json');
-const projectDetailsCacheFile = path.join(process.cwd(), 'projectDetailsCache.json');
-const githubRepoCacheFile = path.join(process.cwd(), 'githubRepoCache.json');
+const videoLinkCacheFile = path.join(DATA_DIR, 'videoLinkCache.json');
+const userProjectsCacheFile = path.join(DATA_DIR, 'userProjectsCache.json');
+const projectDetailsCacheFile = path.join(DATA_DIR, 'projectDetailsCache.json');
+const githubRepoCacheFile = path.join(DATA_DIR, 'githubRepoCache.json');
 
 ensureCacheFileExists(videoLinkCacheFile);
 ensureCacheFileExists(userProjectsCacheFile);
@@ -400,7 +404,7 @@ app.get('/api/load', async (req, res) => {
     console.log('Accessed page:', page);
     console.log('Location Data:', locationData);
 
-    const logFilePath = path.join(process.cwd(), 'loadLogs.json');
+    const logFilePath = path.join(DATA_DIR, 'loadLogs.json');
     if (!fs.existsSync(logFilePath)) {
       fs.writeFileSync(logFilePath, JSON.stringify([], null, 2));
     }
@@ -439,7 +443,7 @@ app.get('/api/load', async (req, res) => {
 // -------------------------
 app.get('/api/logs', (req, res) => {
   try {
-    const logFilePath = path.join(process.cwd(), 'loadLogs.json');
+    const logFilePath = path.join(DATA_DIR, 'loadLogs.json');
     if (!fs.existsSync(logFilePath)) {
       return res.json([]);
     }
@@ -833,6 +837,15 @@ app.post('/api/admin/blog/images', requireAdmin, imageUpload.single('image'), (r
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   res.json({ filename: req.file.originalname });
 });
+
+const CLIENT_BUILD = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'client', 'build');
+
+if (fs.existsSync(CLIENT_BUILD)) {
+  app.use(express.static(CLIENT_BUILD));
+  app.get(/^(?!\/api).*$/, (req, res) => {
+    res.sendFile(path.join(CLIENT_BUILD, 'index.html'));
+  });
+}
 
 app.listen(PORT, () => {
   console.log(`🚀 Server is running on port ${PORT}`);
