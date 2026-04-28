@@ -100,7 +100,7 @@ export default function RootHomePage() {
 function TorusBackdrop() {
   return (
     <div aria-hidden="true" className="pointer-events-none absolute inset-0">
-      <div className="absolute inset-x-0 top-[4.5rem] h-[72vh] opacity-60 sm:h-[86vh] sm:opacity-70">
+      <div className="absolute inset-x-0 top-0 h-[72vh] opacity-60 sm:h-[86vh] sm:opacity-70">
         <DistortedTorusScene
           variant="hub"
           className="h-full w-full"
