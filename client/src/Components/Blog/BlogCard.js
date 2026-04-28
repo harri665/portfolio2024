@@ -55,7 +55,7 @@ function nodeStyle(slug) {
 }
 
 export default function BlogCard({ post, index = 0 }) {
-  const style = nodeStyle(post.slug);
+  const style = NODE_STYLES[index % NODE_STYLES.length];
   const navigate = useNavigate();
 
   return (

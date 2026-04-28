@@ -197,6 +197,52 @@ function mergeRepos(primaryRepos, additionalRepos) {
   return Array.from(merged.values());
 }
 
+// ── Houdini node colour palette (mirrors BlogCard) ────────────────────────────
+const NODE_STYLES = [
+  {
+    header: 'bg-gradient-to-r from-[#0a4035] to-[#0d5045]',
+    border: 'border-[#1a6b5c]',
+    dot: 'bg-teal-400 shadow-[0_0_5px_rgba(45,212,191,0.7)]',
+    tag: 'border-teal-500/30 bg-teal-500/10 text-teal-300',
+    link: 'text-teal-400 hover:text-teal-300',
+    label: 'text-teal-300/70',
+    btn: 'border-teal-500/30 bg-teal-500/10 text-teal-300 hover:bg-teal-500/20',
+  },
+  {
+    header: 'bg-gradient-to-r from-[#4a2000] to-[#5c2a00]',
+    border: 'border-[#8b4500]',
+    dot: 'bg-orange-400 shadow-[0_0_5px_rgba(251,146,60,0.7)]',
+    tag: 'border-orange-500/30 bg-orange-500/10 text-orange-300',
+    link: 'text-orange-400 hover:text-orange-300',
+    label: 'text-orange-300/70',
+    btn: 'border-orange-500/30 bg-orange-500/10 text-orange-300 hover:bg-orange-500/20',
+  },
+  {
+    header: 'bg-gradient-to-r from-[#0a2a4a] to-[#0d3560]',
+    border: 'border-[#1a5090]',
+    dot: 'bg-blue-400 shadow-[0_0_5px_rgba(96,165,250,0.7)]',
+    tag: 'border-blue-500/30 bg-blue-500/10 text-blue-300',
+    link: 'text-blue-400 hover:text-blue-300',
+    label: 'text-blue-300/70',
+    btn: 'border-blue-500/30 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20',
+  },
+  {
+    header: 'bg-gradient-to-r from-[#2d0a4a] to-[#38105a]',
+    border: 'border-[#5a1a90]',
+    dot: 'bg-purple-400 shadow-[0_0_5px_rgba(192,132,252,0.7)]',
+    tag: 'border-purple-500/30 bg-purple-500/10 text-purple-300',
+    link: 'text-purple-400 hover:text-purple-300',
+    label: 'text-purple-300/70',
+    btn: 'border-purple-500/30 bg-purple-500/10 text-purple-300 hover:bg-purple-500/20',
+  },
+];
+
+function nodeStyle(name) {
+  let hash = 0;
+  for (const c of (name || '')) hash = (hash * 31 + c.charCodeAt(0)) & 0xffff;
+  return NODE_STYLES[hash % NODE_STYLES.length];
+}
+
 export default function CSHomePage() {
   const [repos, setRepos] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -262,7 +308,7 @@ export default function CSHomePage() {
 
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[#08090c] text-white">
+    <div className="houdini-canvas relative min-h-screen overflow-hidden text-white">
       {/* <TorusBackdrop /> */}
       <SubdomainNav currentMode={SITE_MODES.CS} />
       <HeroSection />
@@ -286,7 +332,7 @@ export default function CSHomePage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.1, duration: 0.45 }}
-            className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3"
+            className="grid grid-cols-1 gap-8 px-4 md:grid-cols-2 xl:grid-cols-3"
           >
             {repos.map((repo, index) => (
               <RepoCard key={repo.id} repo={repo} index={index} />
@@ -299,6 +345,7 @@ export default function CSHomePage() {
 }
 
 function RepoCard({ repo, index }) {
+  const style = NODE_STYLES[index % NODE_STYLES.length];
   const demoUrl = normalizeHomepage(repo.homepage);
 
   return (
@@ -306,71 +353,70 @@ function RepoCard({ repo, index }) {
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.02 * Math.min(index, 14), duration: 0.4 }}
-      whileHover={{ y: -3 }}
-      className="group relative overflow-hidden rounded-[1.5rem] border border-white/10 bg-white/5 p-5 shadow-[0_16px_45px_rgba(0,0,0,0.32)] backdrop-blur-xl"
+      whileHover={{ y: -2, boxShadow: '0 20px 50px rgba(0,0,0,0.5)' }}
+      className={`group relative overflow-visible rounded-lg border ${style.border} bg-[#1e2128] shadow-[0_8px_30px_rgba(0,0,0,0.4)]`}
     >
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-sky-400/12 via-white/5 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+      {/* Input port */}
+      <div className="absolute -left-[5px] top-1/2 z-10 h-2.5 w-2.5 -translate-y-1/2 rounded-full border-2 border-[#3a3d45] bg-[#1e2128] transition-colors group-hover:border-[#5a5d65]" />
+      {/* Output port */}
+      <div className="absolute -right-[5px] top-1/2 z-10 h-2.5 w-2.5 -translate-y-1/2 rounded-full border-2 border-[#3a3d45] bg-[#1e2128] transition-colors group-hover:border-[#5a5d65]" />
 
-      <div className="relative z-10 flex h-full flex-col">
-        <div className="mb-4 flex flex-wrap items-center gap-2">
-          {repo.language && (
-            <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs font-medium text-white/75">
-              {repo.language}
-            </span>
-          )}
-          <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs font-medium text-white/55">
-            Updated {formatDate(repo.pushed_at)}
+      {/* Node header */}
+      <div className={`${style.header} flex items-center justify-between gap-3 rounded-t-lg px-4 py-2.5`}>
+        <div className="flex items-center gap-2 min-w-0">
+          <div className={`h-2 w-2 shrink-0 rounded-full ${style.dot}`} />
+          <span className={`font-mono text-[10px] font-semibold uppercase tracking-[0.18em] ${style.label}`}>
+            {repo.language || 'repository'}
           </span>
-          {repo.archived && (
-            <span className="rounded-full border border-amber-300/20 bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-200">
-              Archived
-            </span>
-          )}
         </div>
+        <span className="shrink-0 font-mono text-[10px] text-white/30">{formatDate(repo.pushed_at)}</span>
+      </div>
 
-        <h2 className="text-xl font-semibold tracking-tight text-white">
-          <a
-            href={repo.html_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="transition-colors hover:text-[#4da3ff]"
-          >
+      <div className={`h-px ${style.border.replace('border-', 'bg-')}`} />
+
+      {/* Body */}
+      <div className="flex flex-col gap-3 p-4">
+        <h2 className={`text-sm font-semibold leading-snug tracking-tight ${style.link}`}>
+          <a href={repo.html_url} target="_blank" rel="noopener noreferrer">
             {repo.name}
           </a>
         </h2>
 
-        <p className="mt-3 flex-1 text-sm leading-relaxed text-white/65">
-          {repo.description || 'No description provided yet.'}
+        <p className="flex-1 text-xs leading-relaxed text-[#6b7280]">
+          {repo.description || 'No description provided.'}
         </p>
 
         {Array.isArray(repo.topics) && repo.topics.length > 0 && (
-          <div className="mt-4 flex flex-wrap gap-2">
-            {repo.topics.slice(0, 4).map((topic) => (
-              <span
-                key={topic}
-                className="rounded-full border border-blue-300/15 bg-blue-400/10 px-2.5 py-1 text-xs font-medium text-blue-100"
-              >
+          <div className="flex flex-wrap gap-1.5">
+            {repo.topics.slice(0, 5).map((topic) => (
+              <span key={topic} className={`rounded border px-2 py-0.5 font-mono text-[10px] ${style.tag}`}>
                 {topic}
               </span>
             ))}
           </div>
         )}
 
-        <div className="mt-6 flex flex-wrap gap-2.5">
+        {repo.archived && (
+          <span className="w-fit rounded border border-amber-300/20 bg-amber-500/10 px-2 py-0.5 font-mono text-[10px] text-amber-300">
+            archived
+          </span>
+        )}
+
+        <div className="mt-1 flex flex-wrap gap-2">
           <a
             href={repo.html_url}
             target="_blank"
             rel="noopener noreferrer"
-            className="rounded-full bg-[#0a84ff] px-4 py-2 text-sm font-semibold text-white shadow-[0_10px_20px_rgba(10,132,255,0.28)] transition-colors hover:bg-[#2997ff]"
+            className={`rounded border px-3 py-1.5 font-mono text-[10px] font-semibold transition-colors ${style.btn}`}
           >
-            View Repo
+            View Repo →
           </a>
           {demoUrl && (
             <a
               href={demoUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="rounded-full border border-white/12 bg-white/5 px-4 py-2 text-sm font-semibold text-white/90 transition-colors hover:bg-white/10"
+              className="rounded border border-[#3a3d45] bg-[#252830] px-3 py-1.5 font-mono text-[10px] text-[#9099a8] transition-colors hover:text-white"
             >
               Live Demo
             </a>
@@ -397,14 +443,14 @@ function MetricCard({ label, value }) {
 function StateCard({ children, tone = 'neutral' }) {
   const toneClasses =
     tone === 'error'
-      ? 'border-red-300/20 bg-red-500/10 text-red-200'
-      : 'border-white/10 bg-white/5 text-white/65';
+      ? 'border-red-800/40 bg-red-900/10 text-red-400'
+      : 'border-[#2e3240] bg-[#1e2128] text-[#5a6070]';
 
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className={`rounded-[1.5rem] border p-8 text-center shadow-[0_12px_35px_rgba(0,0,0,0.25)] ${toneClasses}`}
+      className={`rounded-lg border p-10 text-center font-mono text-xs ${toneClasses}`}
     >
       {children}
     </motion.div>
