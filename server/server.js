@@ -49,6 +49,10 @@ app.use(cors());
 app.use(express.json());
 app.use(useragent.express()); // Enable express-useragent
 
+// Persistent data directory — mounted as a Docker volume so it survives container rebuilds
+const DATA_DIR = path.join(process.cwd(), 'data');
+fs.mkdirSync(DATA_DIR, { recursive: true });
+
 // Helper to ensure a cache file exists (create it if it doesn't)
 function ensureCacheFileExists(filePath) {
   if (!fs.existsSync(filePath)) {
@@ -57,10 +61,10 @@ function ensureCacheFileExists(filePath) {
 }
 
 // Cache file paths
-const videoLinkCacheFile = path.join(process.cwd(), 'videoLinkCache.json');
-const userProjectsCacheFile = path.join(process.cwd(), 'userProjectsCache.json');
-const projectDetailsCacheFile = path.join(process.cwd(), 'projectDetailsCache.json');
-const githubRepoCacheFile = path.join(process.cwd(), 'githubRepoCache.json');
+const videoLinkCacheFile = path.join(DATA_DIR, 'videoLinkCache.json');
+const userProjectsCacheFile = path.join(DATA_DIR, 'userProjectsCache.json');
+const projectDetailsCacheFile = path.join(DATA_DIR, 'projectDetailsCache.json');
+const githubRepoCacheFile = path.join(DATA_DIR, 'githubRepoCache.json');
 
 // Ensure all cache files exist before loading
 ensureCacheFileExists(videoLinkCacheFile);
@@ -431,7 +435,7 @@ app.get('/api/load', async (req, res) => {
     console.log('Location Data:', locationData);
 
     // Log JSON
-    const logFilePath = path.join(process.cwd(), 'loadLogs.json');
+    const logFilePath = path.join(DATA_DIR, 'loadLogs.json');
     if (!fs.existsSync(logFilePath)) {
       fs.writeFileSync(logFilePath, JSON.stringify([], null, 2));
     }
@@ -471,7 +475,7 @@ app.get('/api/load', async (req, res) => {
 // -------------------------
 app.get('/api/logs', (req, res) => {
   try {
-    const logFilePath = path.join(process.cwd(), 'loadLogs.json');
+    const logFilePath = path.join(DATA_DIR, 'loadLogs.json');
     if (!fs.existsSync(logFilePath)) {
       return res.json([]);
     }
@@ -883,6 +887,16 @@ app.post('/api/admin/blog/images', requireAdmin, imageUpload.single('image'), (r
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   res.json({ filename: req.file.originalname });
 });
+
+// ── Serve React build + catch-all for BrowserRouter ──────────────────────────
+const CLIENT_BUILD = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'client', 'build');
+
+if (fs.existsSync(CLIENT_BUILD)) {
+  app.use(express.static(CLIENT_BUILD));
+  app.get(/^(?!\/api).*$/, (req, res) => {
+    res.sendFile(path.join(CLIENT_BUILD, 'index.html'));
+  });
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 
