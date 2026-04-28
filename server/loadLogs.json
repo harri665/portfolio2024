@@ -2546,5 +2546,33 @@
       "message": "reserved range",
       "query": "::1"
     }
+  },
+  {
+    "timestamp": "2026-04-28T01:30:34.198Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-04-28T01:30:34.278Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
   }
 ]
