@@ -13,6 +13,21 @@ import { SITE_MODES } from '../../utils/siteMode';
 import { remarkWikiLinks } from './plugins/remarkWikiLinks';
 import { rehypeCallouts } from './plugins/rehypeCallouts';
 
+function setMeta(name, content) {
+  const isOg = name.startsWith('og:');
+  const selector = isOg
+    ? `meta[property="${name}"]`
+    : `meta[name="${name}"]`;
+  let el = document.querySelector(selector);
+  if (!el) {
+    el = document.createElement('meta');
+    if (isOg) el.setAttribute('property', name);
+    else el.setAttribute('name', name);
+    document.head.appendChild(el);
+  }
+  el.setAttribute('content', content);
+}
+
 function formatDate(dateStr) {
   if (!dateStr) return '';
   return new Date(dateStr).toLocaleDateString(undefined, {
@@ -36,10 +51,22 @@ export default function BlogPost() {
         if (!r.ok) throw new Error(r.status === 404 ? 'Post not found.' : `Error ${r.status}`);
         return r.json();
       })
-      .then(setPost)
+      .then((data) => {
+        setPost(data);
+        const { title, description } = data.meta;
+        document.title = `${title} — Harrison Martin`;
+        setMeta('description', description || title);
+        setMeta('og:title', title);
+        setMeta('og:description', description || title);
+        setMeta('og:type', 'article');
+      })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, [slug]);
+
+  useEffect(() => {
+    return () => { document.title = 'Harrison Martin'; };
+  }, []);
 
   if (loading) {
     return (
