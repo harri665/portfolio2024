@@ -7,6 +7,8 @@ import ArtHomePage from './Components/Homepage/ArtHomePage';
 import RootHomePage from './Components/Homepage/RootHomePage';
 import CSHomePage from './Components/Homepage/CSHomePage';
 import ProjectDetails from './Components/ProjectDetails/ProjectDetails';
+import CSProjectDetails from './Components/ProjectDetails/CSProjectDetails';
+import CSAdmin from './Components/Admin/CSAdmin';
 import LogsViewer from './Components/Admin/Admin';
 import ContactPage from './Components/Contact/ContactPage';
 import BlogIndex from './Components/Blog/BlogIndex';
@@ -59,6 +61,8 @@ function MainRoutes({ siteMode }) {
         element={homePageByMode[siteMode] || <RootHomePage />}
       />
       <Route path="/projects/:hashId" element={<ProjectDetails />} />
+      <Route path="/github/:owner/:repo" element={<CSProjectDetails />} />
+      <Route path="/cs-admin" element={<CSAdmin />} />
       <Route path="/posts/:slug" element={<BlogPost />} />
       <Route path="/blog-admin" element={<BlogAdmin />} />
       <Route path="/blog-admin/new" element={<BlogPostEditor />} />

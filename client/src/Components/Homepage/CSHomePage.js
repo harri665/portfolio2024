@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 
 
@@ -9,22 +10,6 @@ import { SITE_MODES } from '../../utils/siteMode';
 import { apiUrl } from '../../utils/api';
 
 const GITHUB_USERNAME = 'harri665';
-
-// Toggle this on to only show the repositories listed below.
-// Entries can be either:
-// - 'repo-name' (matches repos owned by GITHUB_USERNAME)
-// - 'owner/repo-name' (supports repos not owned by GITHUB_USERNAME)
-const REPO_WHITELIST = {
-  enabled: true,
-  caseSensitive: false,
-  preserveListedOrder: true,
-  repoNames: [
-    'OpenGL-Star-Simulation',
-    'MadixOutdoors3DWebsite',
-    'MurderMysteryCH/MurderMysteryV2',
-    // 'someone-else/cool-repo',
-  ],
-};
 
 function formatDate(value) {
   if (!value) {
@@ -74,7 +59,7 @@ function getRepoMatchKeys(repo, caseSensitive) {
   ].filter(Boolean);
 }
 
-function getWhitelistEntries(whitelistConfig = REPO_WHITELIST) {
+function getWhitelistEntries(whitelistConfig = {}) {
   return Array.isArray(whitelistConfig?.repoNames)
     ? whitelistConfig.repoNames
         .map((entry) => String(entry || '').trim())
@@ -82,7 +67,7 @@ function getWhitelistEntries(whitelistConfig = REPO_WHITELIST) {
     : [];
 }
 
-function getExternalWhitelistEntries(whitelistConfig = REPO_WHITELIST) {
+function getExternalWhitelistEntries(whitelistConfig = {}) {
   return getWhitelistEntries(whitelistConfig).filter((entry) => entry.includes('/'));
 }
 
@@ -98,7 +83,7 @@ function getRepoOrderIndex(repo, lookup, whitelistConfig) {
   return Number.MAX_SAFE_INTEGER;
 }
 
-function applyRepoWhitelist(repos, whitelistConfig = REPO_WHITELIST) {
+function applyRepoWhitelist(repos, whitelistConfig = {}) {
   if (!whitelistConfig?.enabled) {
     return repos;
   }
@@ -184,6 +169,47 @@ async function fetchExternalWhitelistedRepos(whitelistConfig, signal) {
   return results.filter(Boolean);
 }
 
+function resolveGithubImageUrl(src, fullName, defaultBranch) {
+  if (!src) return null;
+  if (/^https?:\/\//i.test(src)) {
+    return src.replace(
+      /^https:\/\/github\.com\/([^/]+\/[^/]+)\/blob\//,
+      'https://raw.githubusercontent.com/$1/'
+    );
+  }
+  const branch = defaultBranch || 'main';
+  const clean = src.replace(/^\.\//, '');
+  return `https://raw.githubusercontent.com/${fullName}/${branch}/${clean}`;
+}
+
+function extractFirstMedia(markdown, fullName, defaultBranch) {
+  if (!markdown) return null;
+
+  // Markdown image/video syntax: ![alt](url)
+  const mdMatch = markdown.match(/!\[.*?\]\(([^)\s]+)/);
+  if (mdMatch) return resolveGithubImageUrl(mdMatch[1], fullName, defaultBranch);
+
+  // HTML <video src="..."> or <video ...><source src="...">
+  const videoSrcMatch = markdown.match(/<video[^>]+src=["']([^"']+)["']/i)
+    || markdown.match(/<source[^>]+src=["']([^"']+\.mp4[^"']*)["']/i);
+  if (videoSrcMatch) return resolveGithubImageUrl(videoSrcMatch[1], fullName, defaultBranch);
+
+  // HTML <img src="..."> — quoted then unquoted
+  const imgMatch = markdown.match(/<img[^>]+src=["']([^"']+)["']/i)
+    || markdown.match(/<img[^>]+src=([^\s>]+)/i);
+  if (imgMatch) return resolveGithubImageUrl(imgMatch[1], fullName, defaultBranch);
+
+  return null;
+}
+
+function getMediaType(url) {
+  if (!url) return 'image';
+  const path = (() => { try { return new URL(url).pathname; } catch { return url; } })().toLowerCase();
+  if (path.endsWith('.mp4') || path.endsWith('.webm') || path.endsWith('.mov')) return 'video';
+  if (path.endsWith('.gif')) return 'gif';
+  return 'image';
+}
+
 function mergeRepos(primaryRepos, additionalRepos) {
   const merged = new Map();
 
@@ -199,6 +225,7 @@ function mergeRepos(primaryRepos, additionalRepos) {
 
 export default function CSHomePage() {
   const [repos, setRepos] = useState([]);
+  const [repoImages, setRepoImages] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -207,45 +234,28 @@ export default function CSHomePage() {
 
     async function fetchRepositories() {
       try {
-        const params = new URLSearchParams({
-          owner: GITHUB_USERNAME,
-          per_page: '100',
-          type: 'owner',
-          sort: 'updated',
-        });
-        const response = await fetch(apiUrl(`/github/repos?${params.toString()}`), {
-          signal: controller.signal,
-        });
+        const [configRes, reposRes] = await Promise.all([
+          fetch(apiUrl('/cs-config'), { signal: controller.signal }),
+          fetch(apiUrl(`/github/repos?${new URLSearchParams({ owner: GITHUB_USERNAME, per_page: '100', type: 'owner', sort: 'updated' })}`), { signal: controller.signal }),
+        ]);
 
-        if (!response.ok) {
-          if (response.status === 403) {
-            throw new Error('GitHub API rate limit reached. Please try again in a bit.');
-          }
+        const whitelist = configRes.ok ? await configRes.json() : { enabled: false };
 
-          throw new Error(
-            await getResponseErrorMessage(
-              response,
-              `Failed to load GitHub projects (${response.status})`
-            )
-          );
+        if (!reposRes.ok) {
+          if (reposRes.status === 403) throw new Error('GitHub API rate limit reached. Please try again in a bit.');
+          throw new Error(await getResponseErrorMessage(reposRes, `Failed to load GitHub projects (${reposRes.status})`));
         }
 
-        const data = await response.json();
+        const data = await reposRes.json();
         const publicOwnedRepos = data.filter((repo) => !repo.fork);
-        const externalWhitelistedRepos = await fetchExternalWhitelistedRepos(
-          REPO_WHITELIST,
-          controller.signal
-        );
+        const externalWhitelistedRepos = await fetchExternalWhitelistedRepos(whitelist, controller.signal);
         const combinedRepos = mergeRepos(publicOwnedRepos, externalWhitelistedRepos);
         const sortedRepos = sortRepos(combinedRepos);
-        const visibleRepos = applyRepoWhitelist(sortedRepos);
+        const visibleRepos = applyRepoWhitelist(sortedRepos, whitelist);
 
         setRepos(visibleRepos);
       } catch (err) {
-        if (err.name === 'AbortError') {
-          return;
-        }
-
+        if (err.name === 'AbortError') return;
         setError(err.message || 'Failed to load projects');
       } finally {
         setLoading(false);
@@ -256,6 +266,39 @@ export default function CSHomePage() {
 
     return () => controller.abort();
   }, []);
+
+  useEffect(() => {
+    if (repos.length === 0) return;
+    const controller = new AbortController();
+    const ghHeaders = { Accept: 'application/vnd.github+json' };
+
+    async function fetchReadmeImages() {
+      const entries = await Promise.all(
+        repos.map(async (repo) => {
+          try {
+            const res = await fetch(
+              `https://api.github.com/repos/${repo.full_name}/readme`,
+              { signal: controller.signal, headers: ghHeaders }
+            );
+            if (!res.ok) return [repo.full_name, null];
+            const json = await res.json();
+            const bytes = Uint8Array.from(
+              atob(json.content.replace(/\n/g, '')),
+              (c) => c.charCodeAt(0)
+            );
+            const markdown = new TextDecoder('utf-8').decode(bytes);
+            return [repo.full_name, extractFirstMedia(markdown, repo.full_name, repo.default_branch)];
+          } catch {
+            return [repo.full_name, null];
+          }
+        })
+      );
+      setRepoImages(Object.fromEntries(entries));
+    }
+
+    fetchReadmeImages();
+    return () => controller.abort();
+  }, [repos]);
 
 
 
@@ -274,11 +317,7 @@ export default function CSHomePage() {
         {error && <StateCard tone="error">{error}</StateCard>}
 
         {!loading && !error && repos.length === 0 && (
-          <StateCard tone="neutral">
-            {REPO_WHITELIST.enabled
-              ? 'No repositories matched your whitelist. Use repo-name or owner/repo-name entries in REPO_WHITELIST.repoNames.'
-              : 'No repositories found.'}
-          </StateCard>
+          <StateCard tone="neutral">No repositories found.</StateCard>
         )}
 
         {!loading && !error && repos.length > 0 && (
@@ -289,7 +328,7 @@ export default function CSHomePage() {
             className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3"
           >
             {repos.map((repo, index) => (
-              <RepoCard key={repo.id} repo={repo} index={index} />
+              <RepoCard key={repo.id} repo={repo} index={index} imageUrl={repoImages[repo.full_name] ?? null} />
             ))}
           </motion.section>
         )}
@@ -298,20 +337,25 @@ export default function CSHomePage() {
   );
 }
 
-function RepoCard({ repo, index }) {
+function RepoCard({ repo, index, imageUrl }) {
   const demoUrl = normalizeHomepage(repo.homepage);
+  const navigate = useNavigate();
 
   return (
     <motion.article
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.02 * Math.min(index, 14), duration: 0.4 }}
-      whileHover={{ y: -3 }}
-      className="group relative overflow-hidden rounded-[1.5rem] border border-white/10 bg-white/5 p-5 shadow-[0_16px_45px_rgba(0,0,0,0.32)] backdrop-blur-xl"
+      whileHover={{ y: -4, boxShadow: '0 24px 60px rgba(0,0,0,0.45)' }}
+      onClick={() => navigate(`/github/${repo.full_name}`)}
+      className="group relative cursor-pointer overflow-hidden rounded-[1.5rem] border border-white/10 bg-white/5 shadow-[0_16px_45px_rgba(0,0,0,0.32)] backdrop-blur-xl"
     >
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-sky-400/12 via-white/5 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+      {/* Hover glow */}
+      <div className="pointer-events-none absolute inset-0 z-10 bg-gradient-to-br from-sky-400/10 via-white/4 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
 
-      <div className="relative z-10 flex h-full flex-col">
+      {imageUrl && <MediaPreview url={imageUrl} />}
+
+      <div className="relative z-20 flex flex-col p-5">
         <div className="mb-4 flex flex-wrap items-center gap-2">
           {repo.language && (
             <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs font-medium text-white/75">
@@ -328,16 +372,7 @@ function RepoCard({ repo, index }) {
           )}
         </div>
 
-        <h2 className="text-xl font-semibold tracking-tight text-white">
-          <a
-            href={repo.html_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="transition-colors hover:text-[#4da3ff]"
-          >
-            {repo.name}
-          </a>
-        </h2>
+        <h2 className="text-xl font-semibold tracking-tight text-white">{repo.name}</h2>
 
         <p className="mt-3 flex-1 text-sm leading-relaxed text-white/65">
           {repo.description || 'No description provided yet.'}
@@ -356,28 +391,55 @@ function RepoCard({ repo, index }) {
           </div>
         )}
 
-        <div className="mt-6 flex flex-wrap gap-2.5">
-          <a
-            href={repo.html_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="rounded-full bg-[#0a84ff] px-4 py-2 text-sm font-semibold text-white shadow-[0_10px_20px_rgba(10,132,255,0.28)] transition-colors hover:bg-[#2997ff]"
-          >
-            View Repo
-          </a>
-          {demoUrl && (
+        {(repo.html_url || demoUrl) && (
+          <div className="mt-6 flex flex-wrap gap-2.5">
             <a
-              href={demoUrl}
+              href={repo.html_url}
               target="_blank"
               rel="noopener noreferrer"
-              className="rounded-full border border-white/12 bg-white/5 px-4 py-2 text-sm font-semibold text-white/90 transition-colors hover:bg-white/10"
+              onClick={(e) => e.stopPropagation()}
+              className="rounded-full border border-white/12 bg-white/5 px-4 py-2 text-sm font-semibold text-white/80"
             >
-              Live Demo
+              GitHub
             </a>
-          )}
-        </div>
+            {demoUrl && (
+              <a
+                href={demoUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="rounded-full bg-[#0a84ff] px-4 py-2 text-sm font-semibold text-white shadow-[0_8px_18px_rgba(10,132,255,0.25)]"
+              >
+                Live Demo
+              </a>
+            )}
+          </div>
+        )}
       </div>
     </motion.article>
+  );
+}
+
+function MediaPreview({ url }) {
+  const type = getMediaType(url);
+  const fitClass = type === 'image' ? 'object-cover' : 'object-contain';
+
+  return (
+    <div className="relative w-full overflow-hidden bg-[#0d0f14]" style={{ height: '11rem' }}>
+      {type === 'video' ? (
+        <video
+          src={url}
+          autoPlay
+          loop
+          muted
+          playsInline
+          className={`h-full w-full ${fitClass}`}
+        />
+      ) : (
+        <img src={url} alt="" className={`h-full w-full ${fitClass}`} />
+      )}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[#08090c] to-transparent" />
+    </div>
   );
 }
 
