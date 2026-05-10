@@ -17,6 +17,9 @@ services:
     networks:
       - portfolio-network
     restart: unless-stopped
+    volumes:
+      - server_blog:/usr/src/app/blog
+      - server_data:/usr/src/app/data
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3005/api/health"]
       interval: 30s
@@ -40,3 +43,7 @@ services:
 networks:
   portfolio-network:
     driver: bridge
+
+volumes:
+  server_blog:
+  server_data:

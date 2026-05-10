@@ -223,6 +223,52 @@ function mergeRepos(primaryRepos, additionalRepos) {
   return Array.from(merged.values());
 }
 
+// ── Houdini node colour palette (mirrors BlogCard) ────────────────────────────
+const NODE_STYLES = [
+  {
+    header: 'bg-gradient-to-r from-[#0a4035] to-[#0d5045]',
+    border: 'border-[#1a6b5c]',
+    dot: 'bg-teal-400 shadow-[0_0_5px_rgba(45,212,191,0.7)]',
+    tag: 'border-teal-500/30 bg-teal-500/10 text-teal-300',
+    link: 'text-teal-400 hover:text-teal-300',
+    label: 'text-teal-300/70',
+    btn: 'border-teal-500/30 bg-teal-500/10 text-teal-300 hover:bg-teal-500/20',
+  },
+  {
+    header: 'bg-gradient-to-r from-[#4a2000] to-[#5c2a00]',
+    border: 'border-[#8b4500]',
+    dot: 'bg-orange-400 shadow-[0_0_5px_rgba(251,146,60,0.7)]',
+    tag: 'border-orange-500/30 bg-orange-500/10 text-orange-300',
+    link: 'text-orange-400 hover:text-orange-300',
+    label: 'text-orange-300/70',
+    btn: 'border-orange-500/30 bg-orange-500/10 text-orange-300 hover:bg-orange-500/20',
+  },
+  {
+    header: 'bg-gradient-to-r from-[#0a2a4a] to-[#0d3560]',
+    border: 'border-[#1a5090]',
+    dot: 'bg-blue-400 shadow-[0_0_5px_rgba(96,165,250,0.7)]',
+    tag: 'border-blue-500/30 bg-blue-500/10 text-blue-300',
+    link: 'text-blue-400 hover:text-blue-300',
+    label: 'text-blue-300/70',
+    btn: 'border-blue-500/30 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20',
+  },
+  {
+    header: 'bg-gradient-to-r from-[#2d0a4a] to-[#38105a]',
+    border: 'border-[#5a1a90]',
+    dot: 'bg-purple-400 shadow-[0_0_5px_rgba(192,132,252,0.7)]',
+    tag: 'border-purple-500/30 bg-purple-500/10 text-purple-300',
+    link: 'text-purple-400 hover:text-purple-300',
+    label: 'text-purple-300/70',
+    btn: 'border-purple-500/30 bg-purple-500/10 text-purple-300 hover:bg-purple-500/20',
+  },
+];
+
+function nodeStyle(name) {
+  let hash = 0;
+  for (const c of (name || '')) hash = (hash * 31 + c.charCodeAt(0)) & 0xffff;
+  return NODE_STYLES[hash % NODE_STYLES.length];
+}
+
 export default function CSHomePage() {
   const [repos, setRepos] = useState([]);
   const [repoImages, setRepoImages] = useState({});
@@ -305,7 +351,7 @@ export default function CSHomePage() {
 
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[#08090c] text-white">
+    <div className="houdini-canvas relative min-h-screen overflow-hidden text-white">
       {/* <TorusBackdrop /> */}
       <SubdomainNav currentMode={SITE_MODES.CS} />
       <HeroSection />
@@ -325,7 +371,7 @@ export default function CSHomePage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.1, duration: 0.45 }}
-            className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3"
+            className="grid grid-cols-1 gap-8 px-4 md:grid-cols-2 xl:grid-cols-3"
           >
             {repos.map((repo, index) => (
               <RepoCard key={repo.id} repo={repo} index={index} imageUrl={repoImages[repo.full_name] ?? null} />
@@ -365,26 +411,20 @@ function RepoCard({ repo, index, imageUrl }) {
           <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs font-medium text-white/55">
             Updated {formatDate(repo.pushed_at)}
           </span>
-          {repo.archived && (
-            <span className="rounded-full border border-amber-300/20 bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-200">
-              Archived
-            </span>
-          )}
         </div>
+        <span className="shrink-0 font-mono text-[10px] text-white/30">{formatDate(repo.pushed_at)}</span>
+      </div>
 
         <h2 className="text-xl font-semibold tracking-tight text-white">{repo.name}</h2>
 
-        <p className="mt-3 flex-1 text-sm leading-relaxed text-white/65">
-          {repo.description || 'No description provided yet.'}
+        <p className="flex-1 text-xs leading-relaxed text-[#6b7280]">
+          {repo.description || 'No description provided.'}
         </p>
 
         {Array.isArray(repo.topics) && repo.topics.length > 0 && (
-          <div className="mt-4 flex flex-wrap gap-2">
-            {repo.topics.slice(0, 4).map((topic) => (
-              <span
-                key={topic}
-                className="rounded-full border border-blue-300/15 bg-blue-400/10 px-2.5 py-1 text-xs font-medium text-blue-100"
-              >
+          <div className="flex flex-wrap gap-1.5">
+            {repo.topics.slice(0, 5).map((topic) => (
+              <span key={topic} className={`rounded border px-2 py-0.5 font-mono text-[10px] ${style.tag}`}>
                 {topic}
               </span>
             ))}
@@ -459,14 +499,14 @@ function MetricCard({ label, value }) {
 function StateCard({ children, tone = 'neutral' }) {
   const toneClasses =
     tone === 'error'
-      ? 'border-red-300/20 bg-red-500/10 text-red-200'
-      : 'border-white/10 bg-white/5 text-white/65';
+      ? 'border-red-800/40 bg-red-900/10 text-red-400'
+      : 'border-[#2e3240] bg-[#1e2128] text-[#5a6070]';
 
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className={`rounded-[1.5rem] border p-8 text-center shadow-[0_12px_35px_rgba(0,0,0,0.25)] ${toneClasses}`}
+      className={`rounded-lg border p-10 text-center font-mono text-xs ${toneClasses}`}
     >
       {children}
     </motion.div>
