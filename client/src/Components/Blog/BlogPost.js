@@ -3,9 +3,12 @@ import { useParams, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
 import rehypeHighlight from 'rehype-highlight';
+import rehypeKatex from 'rehype-katex';
 import rehypeSlug from 'rehype-slug';
 import rehypeRaw from 'rehype-raw';
+import 'katex/dist/katex.min.css';
 
 import { apiUrl, getApiBaseUrl } from '../../utils/api';
 import SubdomainNav from '../Homepage/SubdomainNav';
@@ -169,8 +172,8 @@ export default function BlogPost() {
 
           <div className="blog-prose px-5 py-6 sm:px-8">
             <ReactMarkdown
-              remarkPlugins={[remarkGfm, [remarkWikiLinks, { apiBase: getApiBaseUrl() }]]}
-              rehypePlugins={[rehypeCallouts, rehypeSlug, rehypeHighlight, rehypeRaw]}
+              remarkPlugins={[remarkGfm, remarkMath, [remarkWikiLinks, { apiBase: getApiBaseUrl() }]]}
+              rehypePlugins={[rehypeCallouts, rehypeSlug, rehypeKatex, rehypeHighlight, rehypeRaw]}
             >
               {content}
             </ReactMarkdown>
