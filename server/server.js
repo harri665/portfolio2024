@@ -107,6 +107,14 @@ function ensureGitHubRepoCacheShape() {
   if (!githubRepoCache.repos || typeof githubRepoCache.repos !== 'object') {
     githubRepoCache.repos = {};
   }
+
+  if (!githubRepoCache.readmes || typeof githubRepoCache.readmes !== 'object') {
+    githubRepoCache.readmes = {};
+  }
+
+  if (!githubRepoCache.languages || typeof githubRepoCache.languages !== 'object') {
+    githubRepoCache.languages = {};
+  }
 }
 
 ensureGitHubRepoCacheShape();
@@ -539,6 +547,128 @@ app.get('/api/github/repo', async (req, res) => {
 
     console.error('Error in GitHub repo API route:', error.message || error);
     res.status(status).json({ error: message });
+  }
+});
+
+app.get('/api/github/readme', async (req, res) => {
+  const fullName = String(req.query.full_name || '').trim();
+  const forceRefresh =
+    req.query.refresh === '1' || String(req.query.refresh || '').toLowerCase() === 'true';
+
+  if (!fullName) {
+    return res.status(400).json({ error: 'Missing required query param: full_name' });
+  }
+
+  if (!/^[^/\s]+\/[^/\s]+$/.test(fullName)) {
+    return res.status(400).json({ error: 'full_name must be in "owner/repo" format' });
+  }
+
+  const cachedEntry = getGitHubCacheEntry('readmes', fullName);
+  if (!forceRefresh && isGitHubCacheEntryFresh(cachedEntry)) {
+    return res.json(cachedEntry.data);
+  }
+
+  try {
+    const [owner, repo] = fullName.split('/');
+    const response = await axios.get(
+      `https://api.github.com/repos/${owner}/${repo}/readme`,
+      { headers: getGitHubHeaders() }
+    );
+    const content = Buffer.from(response.data.content, 'base64').toString('utf-8');
+    const data = { content, name: response.data.name };
+    setGitHubCacheEntry('readmes', fullName, data);
+    res.json(data);
+  } catch (error) {
+    if (error.response?.status === 404) {
+      return res.json({ content: null, name: null });
+    }
+    const status = error.response?.status || 500;
+    const message = error.response?.data?.message || `Failed to fetch README for ${fullName}`;
+    console.error('Error in GitHub readme API route:', error.message || error);
+    res.status(status).json({ error: message });
+  }
+});
+
+app.get('/api/github/languages', async (req, res) => {
+  const fullName = String(req.query.full_name || '').trim();
+  const forceRefresh =
+    req.query.refresh === '1' || String(req.query.refresh || '').toLowerCase() === 'true';
+
+  if (!fullName) {
+    return res.status(400).json({ error: 'Missing required query param: full_name' });
+  }
+
+  if (!/^[^/\s]+\/[^/\s]+$/.test(fullName)) {
+    return res.status(400).json({ error: 'full_name must be in "owner/repo" format' });
+  }
+
+  const cachedEntry = getGitHubCacheEntry('languages', fullName);
+  if (!forceRefresh && isGitHubCacheEntryFresh(cachedEntry)) {
+    return res.json(cachedEntry.data);
+  }
+
+  try {
+    const [owner, repo] = fullName.split('/');
+    const response = await axios.get(
+      `https://api.github.com/repos/${owner}/${repo}/languages`,
+      { headers: getGitHubHeaders() }
+    );
+    setGitHubCacheEntry('languages', fullName, response.data);
+    res.json(response.data);
+  } catch (error) {
+    const status = error.response?.status || 500;
+    const message = error.response?.data?.message || `Failed to fetch languages for ${fullName}`;
+    console.error('Error in GitHub languages API route:', error.message || error);
+    res.status(status).json({ error: message });
+  }
+});
+
+// -------------------------
+// CS Projects Config
+// -------------------------
+const CS_CONFIG_FILE = path.join(process.cwd(), 'csProjectsConfig.json');
+
+const DEFAULT_CS_CONFIG = {
+  enabled: true,
+  preserveListedOrder: true,
+  repoNames: [
+    'OpenGL-Star-Simulation',
+    'MadixOutdoors3DWebsite',
+    'MurderMysteryCH/MurderMysteryV2',
+  ],
+};
+
+function loadCsConfig() {
+  try {
+    if (fs.existsSync(CS_CONFIG_FILE)) {
+      return JSON.parse(fs.readFileSync(CS_CONFIG_FILE, 'utf-8'));
+    }
+  } catch (e) {
+    console.error('Failed to load CS config:', e);
+  }
+  return { ...DEFAULT_CS_CONFIG };
+}
+
+app.get('/api/cs-config', (req, res) => {
+  res.json(loadCsConfig());
+});
+
+app.post('/api/cs-config', (req, res) => {
+  try {
+    const { enabled, preserveListedOrder, repoNames } = req.body;
+    if (!Array.isArray(repoNames)) {
+      return res.status(400).json({ error: 'repoNames must be an array' });
+    }
+    const config = {
+      enabled: Boolean(enabled),
+      preserveListedOrder: Boolean(preserveListedOrder),
+      repoNames: repoNames.map(String).filter(Boolean),
+    };
+    fs.writeFileSync(CS_CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
+    res.json({ success: true });
+  } catch (e) {
+    console.error('Failed to save CS config:', e);
+    res.status(500).json({ error: 'Failed to save config' });
   }
 });
 
