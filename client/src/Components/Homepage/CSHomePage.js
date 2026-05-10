@@ -412,19 +412,20 @@ function RepoCard({ repo, index, imageUrl }) {
             Updated {formatDate(repo.pushed_at)}
           </span>
         </div>
-        <span className="shrink-0 font-mono text-[10px] text-white/30">{formatDate(repo.pushed_at)}</span>
-      </div>
 
         <h2 className="text-xl font-semibold tracking-tight text-white">{repo.name}</h2>
 
-        <p className="flex-1 text-xs leading-relaxed text-[#6b7280]">
-          {repo.description || 'No description provided.'}
+        <p className="mt-3 flex-1 text-sm leading-relaxed text-white/65">
+          {repo.description || 'No description provided yet.'}
         </p>
 
         {Array.isArray(repo.topics) && repo.topics.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {repo.topics.slice(0, 5).map((topic) => (
-              <span key={topic} className={`rounded border px-2 py-0.5 font-mono text-[10px] ${style.tag}`}>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {repo.topics.slice(0, 4).map((topic) => (
+              <span
+                key={topic}
+                className="rounded-full border border-blue-300/15 bg-blue-400/10 px-2.5 py-1 text-xs font-medium text-blue-100"
+              >
                 {topic}
               </span>
             ))}
