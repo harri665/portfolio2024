@@ -64,7 +64,7 @@ export default function BlogCard({ post, index = 0 }) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.04 * Math.min(index, 10), duration: 0.4 }}
       whileHover={{ y: -2, boxShadow: '0 20px 50px rgba(0,0,0,0.5)' }}
-      onClick={() => navigate(`/posts/${post.slug}`)}
+      onClick={() => navigate(`/${post.slug}`)}
       className={`group relative cursor-pointer overflow-visible rounded-lg border ${style.border} bg-[#1e2128] shadow-[0_8px_30px_rgba(0,0,0,0.4)]`}
     >
       {/* Input port — left edge */}

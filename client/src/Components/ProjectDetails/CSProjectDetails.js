@@ -106,8 +106,8 @@ function LanguageStrip({ languages }) {
 }
 
 export default function CSProjectDetails() {
-  const { owner, repo } = useParams();
-  const fullName = `${owner}/${repo}`;
+  const { repoName } = useParams();
+  const fullName = `harri665/${repoName}`;
 
   const [repoData, setRepoData] = useState(null);
   const [readme, setReadme] = useState(null);

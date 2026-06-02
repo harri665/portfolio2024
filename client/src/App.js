@@ -60,13 +60,13 @@ function MainRoutes({ siteMode }) {
         path="/"
         element={homePageByMode[siteMode] || <RootHomePage />}
       />
-      <Route path="/projects/:hashId" element={<ProjectDetails />} />
-      <Route path="/github/:owner/:repo" element={<CSProjectDetails />} />
       <Route path="/cs-admin" element={<CSAdmin />} />
-      <Route path="/posts/:slug" element={<BlogPost />} />
       <Route path="/blog-admin" element={<BlogAdmin />} />
       <Route path="/blog-admin/new" element={<BlogPostEditor />} />
       <Route path="/blog-admin/edit/:slug" element={<BlogPostEditor />} />
+      {siteMode === SITE_MODES.ART && <Route path="/:identifier" element={<ProjectDetails />} />}
+      {siteMode === SITE_MODES.CS && <Route path="/:repoName" element={<CSProjectDetails />} />}
+      {siteMode === SITE_MODES.BLOG && <Route path="/:slug" element={<BlogPost />} />}
       {/* The /admin route is just a placeholder; you can rename it as needed */}
       <Route path="/admin" element={<AdminLogs />} />
       <Route path="/contact" element={<ContactPage />} />
