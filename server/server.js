@@ -694,6 +694,35 @@ app.get('/api/artstation/:username', async (req, res) => {
   }
 });
 
+function titleToSlug(title) {
+  return (title || '').replace(/\s+/g, '-').replace(/[^A-Za-z0-9-]/g, '');
+}
+
+app.get('/api/project/by-identifier/:identifier', async (req, res) => {
+  const { identifier } = req.params;
+  try {
+    // Try by hash_id first
+    const byHashId = await getProjectDetailsWithPuppeteer(identifier);
+    if (byHashId) return res.json(byHashId);
+  } catch {}
+
+  // Try by title slug — scan cached projects lists
+  try {
+    for (const username in userProjectsCache) {
+      const projects = userProjectsCache[username]?.data || [];
+      const match = projects.find((p) => titleToSlug(p.title) === identifier);
+      if (match) {
+        const details = await getProjectDetailsWithPuppeteer(match.hash_id);
+        if (details) return res.json(details);
+      }
+    }
+  } catch (error) {
+    console.error('Error in by-identifier title-slug lookup:', error);
+  }
+
+  res.status(404).json({ error: 'Project not found' });
+});
+
 app.get('/api/project/:projectId', async (req, res) => {
   const { projectId } = req.params;
   try {

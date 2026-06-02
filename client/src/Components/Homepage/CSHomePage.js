@@ -393,7 +393,7 @@ function RepoCard({ repo, index, imageUrl }) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.02 * Math.min(index, 14), duration: 0.4 }}
       whileHover={{ y: -4, boxShadow: '0 24px 60px rgba(0,0,0,0.45)' }}
-      onClick={() => navigate(`/github/${repo.full_name}`)}
+      onClick={() => navigate(`/${repo.name}`)}
       className="group relative cursor-pointer overflow-hidden rounded-[1.5rem] border border-white/10 bg-white/5 shadow-[0_16px_45px_rgba(0,0,0,0.32)] backdrop-blur-xl"
     >
       {/* Hover glow */}

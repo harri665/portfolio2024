@@ -98,7 +98,7 @@ function getAssetFrameProps(asset) {
 }
 
 const ArtStationProject = () => {
-  const { hashId } = useParams();
+  const { identifier } = useParams();
   const [project, setProject] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -107,7 +107,7 @@ const ArtStationProject = () => {
   useEffect(() => {
     async function fetchProject() {
       try {
-        const response = await fetch(apiUrl(`/project/${hashId}`));
+        const response = await fetch(apiUrl(`/project/by-identifier/${encodeURIComponent(identifier)}`));
 
         if (!response.ok) {
           throw new Error('Network response was not ok');
@@ -123,7 +123,7 @@ const ArtStationProject = () => {
     }
 
     fetchProject();
-  }, [hashId]);
+  }, [identifier]);
 
   useEffect(() => {
     if (loading || !project) {

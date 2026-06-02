@@ -140,7 +140,7 @@ const ArtStationProjects = () => {
                     <img key={index} src={software.icon_url} alt={software.name} className="w-6 h-6" />
                   ))}
                 </div>
-                <Link to={`/projects/${project.hash_id}`} className="block w-full h-full">
+                <Link to={`/${project.hash_id}`} className="block w-full h-full">
                   <motion.img 
                     src={project.cover.thumb_url} 
                     alt={project.title || 'ArtStation Project Image'} 
@@ -188,7 +188,7 @@ const ArtStationProjects = () => {
                 {projects.slice(visibleProjectsCount, visibleProjectsCount + 4).map((project, index) => (
                   index < 4 && ( // Ensure only one row is displayed
                     <div key={project.id} className="relative rounded-lg border border-white/10 shadow-[0_18px_45px_rgba(0,0,0,0.28)] overflow-hidden">
-                      <Link to={`/projects/${project.hash_id}`} className="block w-full h-full">
+                      <Link to={`/${project.hash_id}`} className="block w-full h-full">
                         <img 
                           src={project.cover.thumb_url} 
                           alt={project.title || 'ArtStation Project Image'} 
