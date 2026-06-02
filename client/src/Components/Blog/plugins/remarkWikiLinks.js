@@ -1,9 +1,6 @@
 import { visit } from 'unist-util-visit';
 
-// Transforms Obsidian-style wiki links and image embeds:
-//   [[slug]]            → <a href="/#/posts/slug">slug</a>
-//   [[slug|label]]      → <a href="/#/posts/slug">label</a>
-//   ![[image.png]]      → <img src="{apiBase}/blog/images/image.png" alt="image.png" />
+// obsidian [[slug]], [[slug|label]] and ![[image.png]]
 export function remarkWikiLinks({ apiBase = '' } = {}) {
   return (tree) => {
     visit(tree, 'text', (node, index, parent) => {
@@ -33,7 +30,7 @@ export function remarkWikiLinks({ apiBase = '' } = {}) {
           const label = labelRaw ? labelRaw.trim() : slug;
           parts.push({
             type: 'html',
-            value: `<a href="/posts/${encodeURIComponent(slug)}" class="blog-wiki-link">${label}</a>`,
+            value: `<a href="/${encodeURIComponent(slug)}" class="blog-wiki-link">${label}</a>`,
           });
         }
 
