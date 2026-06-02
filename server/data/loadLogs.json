@@ -446,5 +446,61 @@
       "message": "reserved range",
       "query": "::1"
     }
+  },
+  {
+    "timestamp": "2026-06-02T00:46:08.243Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36 Edg/148.0.0.0",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-06-02T00:46:08.322Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36 Edg/148.0.0.0",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-06-02T00:46:14.698Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36 Edg/148.0.0.0",
+    "pageAccessed": "localhost/art-admin",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-06-02T00:46:14.752Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36 Edg/148.0.0.0",
+    "pageAccessed": "localhost/art-admin",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
   }
 ]
