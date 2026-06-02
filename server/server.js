@@ -677,6 +677,23 @@ app.post('/api/cs-config', (req, res) => {
 });
 
 // -------------------------
+// Art slug config
+// -------------------------
+const ART_SLUG_CONFIG_FILE = path.join(process.cwd(), 'artSlugConfig.json');
+
+function loadArtSlugConfig() {
+  try {
+    if (fs.existsSync(ART_SLUG_CONFIG_FILE)) {
+      return JSON.parse(fs.readFileSync(ART_SLUG_CONFIG_FILE, 'utf-8'));
+    }
+  } catch {}
+  return {};
+}
+
+function saveArtSlugConfig(config) {
+  fs.writeFileSync(ART_SLUG_CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
+}
+
 // Existing ArtStation endpoints
 // -------------------------
 app.get('/api/artstation/:username', async (req, res) => {
@@ -700,13 +717,24 @@ function titleToSlug(title) {
 
 app.get('/api/project/by-identifier/:identifier', async (req, res) => {
   const { identifier } = req.params;
+
+  // 1. Check custom slug config (reverse map: custom-slug → hash_id)
   try {
-    // Try by hash_id first
+    const slugConfig = loadArtSlugConfig();
+    const hashIdForSlug = Object.entries(slugConfig).find(([, slug]) => slug === identifier)?.[0];
+    if (hashIdForSlug) {
+      const details = await getProjectDetailsWithPuppeteer(hashIdForSlug);
+      if (details) return res.json(details);
+    }
+  } catch {}
+
+  // 2. Try by hash_id directly
+  try {
     const byHashId = await getProjectDetailsWithPuppeteer(identifier);
     if (byHashId) return res.json(byHashId);
   } catch {}
 
-  // Try by title slug — scan cached projects lists
+  // 3. Try by auto-generated title slug
   try {
     for (const username in userProjectsCache) {
       const projects = userProjectsCache[username]?.data || [];
@@ -1045,6 +1073,32 @@ const imageUpload = multer({
 app.post('/api/admin/blog/images', requireAdmin, imageUpload.single('image'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   res.json({ filename: req.file.originalname });
+});
+
+// ─── ART ADMIN ───────────────────────────────────────────────────────────────
+
+app.get('/api/admin/art/slugs', requireAdmin, (req, res) => {
+  res.json(loadArtSlugConfig());
+});
+
+app.post('/api/admin/art/slugs', requireAdmin, (req, res) => {
+  try {
+    const { slugs } = req.body;
+    if (typeof slugs !== 'object' || Array.isArray(slugs)) {
+      return res.status(400).json({ error: 'Invalid payload' });
+    }
+    const cleaned = {};
+    for (const [hashId, slug] of Object.entries(slugs)) {
+      const s = String(slug || '').trim();
+      if (s && /^[A-Za-z0-9-]+$/.test(s)) {
+        cleaned[hashId] = s;
+      }
+    }
+    saveArtSlugConfig(cleaned);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save config' });
+  }
 });
 
 // ── Serve React build + catch-all for BrowserRouter ──────────────────────────

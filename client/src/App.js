@@ -9,6 +9,7 @@ import CSHomePage from './Components/Homepage/CSHomePage';
 import ProjectDetails from './Components/ProjectDetails/ProjectDetails';
 import CSProjectDetails from './Components/ProjectDetails/CSProjectDetails';
 import CSAdmin from './Components/Admin/CSAdmin';
+import ArtAdmin from './Components/Admin/ArtAdmin';
 import LogsViewer from './Components/Admin/Admin';
 import ContactPage from './Components/Contact/ContactPage';
 import BlogIndex from './Components/Blog/BlogIndex';
@@ -61,6 +62,7 @@ function MainRoutes({ siteMode }) {
         element={homePageByMode[siteMode] || <RootHomePage />}
       />
       <Route path="/cs-admin" element={<CSAdmin />} />
+      <Route path="/art-admin" element={<ArtAdmin />} />
       <Route path="/blog-admin" element={<BlogAdmin />} />
       <Route path="/blog-admin/new" element={<BlogPostEditor />} />
       <Route path="/blog-admin/edit/:slug" element={<BlogPostEditor />} />
