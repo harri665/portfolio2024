@@ -112,7 +112,7 @@ export default function PagesAdmin() {
           <button onClick={() => setEditing(null)} style={styles.btnSmall}>← Back</button>
           {editing.isNew ? (
             <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span>/static/</span>
+              <span>/p/</span>
               <input
                 value={editing.slug}
                 onChange={e => setEditing(prev => ({ ...prev, slug: e.target.value }))}
@@ -122,8 +122,8 @@ export default function PagesAdmin() {
             </span>
           ) : (
             <span>
-              /static/<strong>{editing.slug}</strong>{' '}
-              <a href={`/static/${editing.slug}`} target="_blank" rel="noreferrer" style={styles.link}>[preview]</a>
+              /p/<strong>{editing.slug}</strong>{' '}
+              <a href={`/p/${editing.slug}`} target="_blank" rel="noreferrer" style={styles.link}>[preview]</a>
             </span>
           )}
           <button onClick={savePage} style={styles.btnPrimary}>Save</button>
@@ -141,7 +141,7 @@ export default function PagesAdmin() {
         {deleteConfirm && (
           <div style={styles.overlay}>
             <div style={styles.dialog}>
-              <p>Delete <strong>/static/{deleteConfirm}</strong>?</p>
+              <p>Delete <strong>/p/{deleteConfirm}</strong>?</p>
               <button onClick={() => deletePage(deleteConfirm)} style={styles.btnDanger}>Delete</button>
               <button onClick={() => setDeleteConfirm(null)} style={styles.btnSmall}>Cancel</button>
             </div>
@@ -163,9 +163,9 @@ export default function PagesAdmin() {
       <ul style={styles.list}>
         {pages.map(({ slug }) => (
           <li key={slug} style={styles.listItem}>
-            <button onClick={() => openPage(slug)} style={styles.pageBtn}>/static/{slug}</button>
+            <button onClick={() => openPage(slug)} style={styles.pageBtn}>/p/{slug}</button>
             <span style={{ display: 'flex', gap: 8 }}>
-              <a href={`/static/${slug}`} target="_blank" rel="noreferrer" style={styles.link}>Preview</a>
+              <a href={`/p/${slug}`} target="_blank" rel="noreferrer" style={styles.link}>Preview</a>
               <button onClick={() => setDeleteConfirm(slug)} style={styles.btnDanger}>Delete</button>
             </span>
             {deleteConfirm === slug && (

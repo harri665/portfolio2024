@@ -1116,7 +1116,7 @@ function safePagePath(slug) {
 }
 
 // Public: serve a custom static page
-app.get('/static/:slug', (req, res) => {
+app.get('/p/:slug', (req, res) => {
   const filePath = safePagePath(req.params.slug);
   if (!filePath) return res.status(400).send('Invalid page name');
   if (!fs.existsSync(filePath)) return res.status(404).send('Page not found');
