@@ -16,6 +16,7 @@ import BlogIndex from './Components/Blog/BlogIndex';
 import BlogPost from './Components/Blog/BlogPost';
 import BlogAdmin from './Components/Blog/Admin/BlogAdmin';
 import BlogPostEditor from './Components/Blog/Admin/BlogPostEditor';
+import PagesAdmin from './Components/Admin/PagesAdmin';
 import { apiUrl } from './utils/api';
 import { detectSiteMode, SITE_MODES } from './utils/siteMode';
 
@@ -66,6 +67,7 @@ function MainRoutes({ siteMode }) {
       <Route path="/blog-admin" element={<BlogAdmin />} />
       <Route path="/blog-admin/new" element={<BlogPostEditor />} />
       <Route path="/blog-admin/edit/:slug" element={<BlogPostEditor />} />
+      <Route path="/pages-admin" element={<PagesAdmin />} />
       {siteMode === SITE_MODES.ART && <Route path="/:identifier" element={<ProjectDetails />} />}
       {siteMode === SITE_MODES.CS && <Route path="/:repoName" element={<CSProjectDetails />} />}
       {siteMode === SITE_MODES.BLOG && <Route path="/:slug" element={<BlogPost />} />}

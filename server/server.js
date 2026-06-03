@@ -1101,6 +1101,80 @@ app.post('/api/admin/art/slugs', requireAdmin, (req, res) => {
   }
 });
 
+// ─── STATIC PAGES ────────────────────────────────────────────────────────────
+
+const PAGES_DIR = path.join(process.cwd(), 'pages');
+fs.mkdirSync(PAGES_DIR, { recursive: true });
+
+function safePagePath(slug) {
+  if (!/^[a-zA-Z0-9_-]+$/.test(slug)) return null;
+  const base = path.resolve(PAGES_DIR);
+  const resolved = path.resolve(base, `${slug}.html`);
+  // Prevent path traversal: resolved must start with base + separator
+  if (!resolved.startsWith(base + path.sep) && resolved !== base) return null;
+  return resolved;
+}
+
+// Public: serve a custom static page
+app.get('/static/:slug', (req, res) => {
+  const filePath = safePagePath(req.params.slug);
+  if (!filePath) return res.status(400).send('Invalid page name');
+  if (!fs.existsSync(filePath)) return res.status(404).send('Page not found');
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.sendFile(filePath);
+});
+
+// Admin: list all pages
+app.get('/api/admin/pages', requireAdmin, (req, res) => {
+  try {
+    const pages = fs.readdirSync(PAGES_DIR)
+      .filter(f => f.endsWith('.html'))
+      .map(f => ({ slug: f.replace(/\.html$/, '') }));
+    res.json(pages);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to list pages' });
+  }
+});
+
+// Admin: get single page
+app.get('/api/admin/pages/:slug', requireAdmin, (req, res) => {
+  const filePath = safePagePath(req.params.slug);
+  if (!filePath) return res.status(400).json({ error: 'Invalid slug' });
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Page not found' });
+  try {
+    res.json({ slug: req.params.slug, content: fs.readFileSync(filePath, 'utf-8') });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to read page' });
+  }
+});
+
+// Admin: create or update page
+app.put('/api/admin/pages/:slug', requireAdmin, (req, res) => {
+  const filePath = safePagePath(req.params.slug);
+  if (!filePath) return res.status(400).json({ error: 'Invalid slug' });
+  const { content } = req.body;
+  if (typeof content !== 'string') return res.status(400).json({ error: 'content must be a string' });
+  try {
+    fs.writeFileSync(filePath, content, 'utf-8');
+    res.json({ ok: true, slug: req.params.slug });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save page' });
+  }
+});
+
+// Admin: delete page
+app.delete('/api/admin/pages/:slug', requireAdmin, (req, res) => {
+  const filePath = safePagePath(req.params.slug);
+  if (!filePath) return res.status(400).json({ error: 'Invalid slug' });
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Page not found' });
+  try {
+    fs.unlinkSync(filePath);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete page' });
+  }
+});
+
 // ── Serve React build + catch-all for BrowserRouter ──────────────────────────
 const CLIENT_BUILD = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'client', 'build');
 
