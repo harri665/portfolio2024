@@ -20,6 +20,7 @@ services:
     volumes:
       - server_blog:/usr/src/app/blog
       - server_data:/usr/src/app/data
+      - server_pages:/usr/src/app/pages
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3005/api/health"]
       interval: 30s
@@ -47,3 +48,4 @@ networks:
 volumes:
   server_blog:
   server_data:
+  server_pages:
