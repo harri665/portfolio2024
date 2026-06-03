@@ -1040,6 +1040,41 @@ app.post('/api/admin/art/slugs', requireAdmin, (req, res) => {
   }
 });
 
+// nextcloud doesn't send CORS headers
+
+const PROXY_ALLOWED_HOST = 'cloud.harrison-martin.com';
+
+app.get('/api/proxy/video', async (req, res) => {
+  const { url } = req.query;
+  if (!url) return res.status(400).json({ error: 'Missing url' });
+
+  let parsed;
+  try { parsed = new URL(url); } catch { return res.status(400).json({ error: 'Invalid URL' }); }
+  if (parsed.hostname !== PROXY_ALLOWED_HOST) {
+    return res.status(403).json({ error: 'Domain not allowed' });
+  }
+
+  try {
+    const upstream = await axios.get(url, {
+      responseType: 'stream',
+      maxRedirects: 5,
+      headers: {
+        ...(req.headers.range ? { Range: req.headers.range } : {}),
+        'User-Agent': 'Mozilla/5.0',
+      },
+    });
+
+    res.status(upstream.status);
+    const forward = ['content-type', 'content-length', 'content-range', 'accept-ranges'];
+    for (const h of forward) {
+      if (upstream.headers[h]) res.setHeader(h, upstream.headers[h]);
+    }
+    upstream.data.pipe(res);
+  } catch (err) {
+    if (!res.headersSent) res.status(502).json({ error: 'Proxy failed' });
+  }
+});
+
 const PAGES_DIR = path.join(process.cwd(), 'pages');
 fs.mkdirSync(PAGES_DIR, { recursive: true });
 

@@ -57,8 +57,7 @@
         camera.position.set(0, 0, 0.1);
 
         const video = document.createElement('video');
-        video.src = 'https://cloud.harrison-martin.com/public.php/dav/files/Qri4LKZnDiscxkM';
-        video.crossOrigin = 'anonymous';
+        video.src = '/api/proxy/video?url=' + encodeURIComponent('https://cloud.harrison-martin.com/s/Qri4LKZnDiscxkM/download');
         video.loop = true;
         video.muted = true;
         video.playsInline = true;
