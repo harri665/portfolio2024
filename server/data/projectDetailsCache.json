@@ -1,1 +1,212 @@
-{}
+{
+  "YG6eN3": {
+    "liked": false,
+    "tags": [
+      "Heist",
+      "Horse",
+      "Cowboy",
+      "train",
+      "animation",
+      "short",
+      "NoAI"
+    ],
+    "hide_as_adult": false,
+    "visible_on_artstation": true,
+    "assets": [
+      {
+        "has_image": true,
+        "has_embedded_player": true,
+        "player_embedded": "https://cdn.artstation.com/p/video_sources/002/577/185/timeline-16.mp4",
+        "oembed": {
+          "width": 1920,
+          "height": 1080,
+          "provider_name": "ArtStation"
+        },
+        "id": 87345448,
+        "title": null,
+        "title_formatted": "",
+        "image_url": "https://cdna.artstation.com/p/assets/video_clips/images/087/345/448/large/harri-thumb.jpg?1745531223",
+        "width": 1920,
+        "height": 1080,
+        "position": 0,
+        "asset_type": "video_clip",
+        "viewport_constraint_type": "constrained"
+      },
+      {
+        "has_image": false,
+        "has_embedded_player": false,
+        "player_embedded": null,
+        "oembed": null,
+        "id": 87345632,
+        "title": null,
+        "title_formatted": "",
+        "image_url": "https://cdna.artstation.com/p/assets/covers/images/087/345/632/large/harri-harri-timeline-17-frame-at-0m5s.jpg?1745531768",
+        "width": 1920,
+        "height": 1080,
+        "position": 0,
+        "asset_type": "cover",
+        "viewport_constraint_type": "constrained"
+      },
+      {
+        "has_image": true,
+        "has_embedded_player": true,
+        "player_embedded": "https://cdn.artstation.com/p/video_sources/002/577/190/timeline-17.mp4",
+        "oembed": {
+          "width": 1920,
+          "height": 1080,
+          "provider_name": "ArtStation"
+        },
+        "id": 87345460,
+        "title": null,
+        "title_formatted": "",
+        "image_url": "https://cdna.artstation.com/p/assets/video_clips/images/087/345/460/large/harri-thumb.jpg?1745531277",
+        "width": 1920,
+        "height": 1080,
+        "position": 1,
+        "asset_type": "video_clip",
+        "viewport_constraint_type": "constrained"
+      },
+      {
+        "has_image": true,
+        "has_embedded_player": true,
+        "player_embedded": "https://cdn.artstation.com/p/video_sources/002/577/197/timeline-18.mp4",
+        "oembed": {
+          "width": 1920,
+          "height": 1080,
+          "provider_name": "ArtStation"
+        },
+        "id": 87345528,
+        "title": null,
+        "title_formatted": "",
+        "image_url": "https://cdna.artstation.com/p/assets/video_clips/images/087/345/528/large/harri-thumb.jpg?1745531532",
+        "width": 1920,
+        "height": 1080,
+        "position": 2,
+        "asset_type": "video_clip",
+        "viewport_constraint_type": "constrained"
+      },
+      {
+        "has_image": true,
+        "has_embedded_player": true,
+        "player_embedded": "https://cdn.artstation.com/p/video_sources/002/577/203/timeline-19.mp4",
+        "oembed": {
+          "width": 1920,
+          "height": 878,
+          "provider_name": "ArtStation"
+        },
+        "id": 87345541,
+        "title": null,
+        "title_formatted": "",
+        "image_url": "https://cdnb.artstation.com/p/assets/video_clips/images/087/345/541/large/harri-thumb.jpg?1745531567",
+        "width": 1920,
+        "height": 878,
+        "position": 3,
+        "asset_type": "video_clip",
+        "viewport_constraint_type": "constrained"
+      },
+      {
+        "has_image": true,
+        "has_embedded_player": true,
+        "player_embedded": "https://cdn.artstation.com/p/video_sources/002/577/207/timeline-20.mp4",
+        "oembed": {
+          "width": 1920,
+          "height": 1244,
+          "provider_name": "ArtStation"
+        },
+        "id": 87345590,
+        "title": null,
+        "title_formatted": "",
+        "image_url": "https://cdna.artstation.com/p/assets/video_clips/images/087/345/590/large/harri-thumb.jpg?1745531652",
+        "width": 1920,
+        "height": 1244,
+        "position": 4,
+        "asset_type": "video_clip",
+        "viewport_constraint_type": "constrained"
+      },
+      {
+        "has_image": true,
+        "has_embedded_player": true,
+        "player_embedded": "https://cdn.artstation.com/p/video_sources/002/577/215/timeline-21.mp4",
+        "oembed": {
+          "width": 1920,
+          "height": 1012,
+          "provider_name": "ArtStation"
+        },
+        "id": 87345603,
+        "title": null,
+        "title_formatted": "",
+        "image_url": "https://cdnb.artstation.com/p/assets/video_clips/images/087/345/603/large/harri-thumb.jpg?1745531692",
+        "width": 1920,
+        "height": 1012,
+        "position": 5,
+        "asset_type": "video_clip",
+        "viewport_constraint_type": "constrained"
+      }
+    ],
+    "collections": [],
+    "user": {
+      "followed": false,
+      "following_back": false,
+      "blocked": false,
+      "is_staff": false,
+      "is_plus_member": false,
+      "is_studio_account": false,
+      "is_school_account": false,
+      "id": 1472254,
+      "username": "harr1",
+      "headline": "I just enjoy 3D art ",
+      "full_name": "Harri",
+      "permalink": "https://www.artstation.com/harr1",
+      "medium_avatar_url": "https://cdna.artstation.com/p/users/avatars/001/472/254/medium/712569197465d666574c1e6088e8d5e0.jpg?1685992015",
+      "large_avatar_url": "https://cdna.artstation.com/p/users/avatars/001/472/254/large/712569197465d666574c1e6088e8d5e0.jpg?1685992015",
+      "small_cover_url": "https://cdna.artstation.com/p/users/covers/001/472/254/small/11f2795c90f5ecb15465b0ee08802d60.jpg?1686034559",
+      "pro_member": false
+    },
+    "medium": null,
+    "mediums": [],
+    "categories": [],
+    "software_items": [
+      {
+        "icon_url": "https://cdna.artstation.com/p/softwares/icons/000/000/008/default/blender_icon_1024x1024.png?1570478232",
+        "name": "Blender"
+      },
+      {
+        "icon_url": "https://cdna.artstation.com/p/softwares/icons/000/000/018/default/Houdini.png?1424684347",
+        "name": "Houdini"
+      },
+      {
+        "icon_url": "https://cdnb.artstation.com/p/softwares/icons/000/000/041/default/pt_appicon_noshadow_512.png?1627397594",
+        "name": "Substance 3D Painter"
+      },
+      {
+        "icon_url": "https://cdnb.artstation.com/p/softwares/icons/000/000/125/default/premiere-pro.png?1608144421",
+        "name": "Premiere"
+      },
+      {
+        "icon_url": "https://cdnb.artstation.com/p/softwares/icons/000/000/003/default/aftereffects.png?1608144443",
+        "name": "After Effects"
+      }
+    ],
+    "id": 20364687,
+    "user_id": 1472254,
+    "title": "Train Heist Short Animation",
+    "description": "<p></p>",
+    "description_html": "<p></p>",
+    "created_at": "2025-04-24T16:56:12.687-05:00",
+    "updated_at": "2025-10-11T14:27:06.815-05:00",
+    "views_count": 20,
+    "likes_count": 2,
+    "comments_count": 2,
+    "permalink": "https://www.artstation.com/artwork/YG6eN3",
+    "cover_url": "https://cdna.artstation.com/p/assets/covers/images/087/345/632/medium/harri-harri-timeline-17-frame-at-0m5s.jpg?1745531768",
+    "published_at": "2025-04-24T16:56:12.680-05:00",
+    "editor_pick": false,
+    "adult_content": false,
+    "admin_adult_content": false,
+    "slug": "train-heist-short-animation-d4f495fa-2f1d-4dbc-845a-80c9baada33f",
+    "suppressed": false,
+    "hash_id": "YG6eN3",
+    "visible": true,
+    "is_promotional": false
+  }
+}
