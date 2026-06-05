@@ -1,0 +1,260 @@
+/* ============================================================
+   Harrison Martin — Project Gallery
+   Ported from design handoff. Scoped under .gx.
+   ============================================================ */
+
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap");
+
+.gx {
+  --bg: #09090b;
+  --panel: rgba(255, 255, 255, 0.022);
+  --panel-2: rgba(255, 255, 255, 0.04);
+  --line: rgba(255, 255, 255, 0.09);
+  --line-strong: rgba(255, 255, 255, 0.18);
+  --text: #f4f4f5;
+  --muted: #a1a1aa;
+  --dim: #6b6b73;
+  --faint: #46464d;
+  --blue: #2b80ff;
+  --blue-bright: #2f8bff;
+
+  position: relative;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.gx *,
+.gx *::before,
+.gx *::after {
+  box-sizing: border-box;
+}
+
+/* ============================================================
+   NF DIRECTION (flat, 3D art)
+   ============================================================ */
+.gx.nf { --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace; }
+
+.nf .nf-dots {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1.4px);
+  background-size: 26px 26px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.nf .gx-shell { position: relative; z-index: 1; }
+
+.gx-shell {
+  position: relative;
+  padding: 0 40px 60px;
+}
+
+/* ---- header ---- */
+.nf-head { margin: 34px 0 30px; }
+.nf-eyebrow {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  color: var(--dim);
+  margin-bottom: 16px;
+  text-transform: uppercase;
+}
+.nf-title {
+  font-size: 54px;
+  line-height: 0.98;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  margin: 0;
+}
+.nf-meta {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--faint);
+  margin: 16px 0 0;
+}
+
+/* ============================================================
+   REAL GALLERY (GR) — bordered cards with real ArtStation data
+   ============================================================ */
+.gr-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 22px;
+}
+
+@media (max-width: 1023px) {
+  .gr-grid { grid-template-columns: repeat(2, 1fr); }
+  .gx-shell { padding: 0 24px 60px; }
+}
+
+@media (max-width: 639px) {
+  .gr-grid { grid-template-columns: 1fr; }
+  .gx-shell { padding: 0 16px 60px; }
+  .nf-title { font-size: 38px; }
+}
+
+.gr-card {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #0c0c0f;
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.22s, transform 0.22s, box-shadow 0.22s;
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+.gr-card:hover {
+  border-color: var(--line-strong);
+  transform: translateY(-4px);
+  box-shadow: 0 22px 52px -26px rgba(0, 0, 0, 0.92);
+}
+
+/* thumbnail */
+.gr-thumb {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  background: var(--tint, #141417);
+  border-bottom: 1px solid var(--line);
+  overflow: hidden;
+}
+.gr-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.5s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.gr-card:hover .gr-img { transform: scale(1.04); }
+
+/* software icons cluster — reuses .nf-tools */
+.nf-tools {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  gap: 5px;
+  padding: 6px;
+  border-radius: 11px;
+  background: rgba(14, 14, 16, 0.66);
+  backdrop-filter: blur(12px);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+  z-index: 3;
+}
+.gr-toolpos { top: 10px; right: 10px; padding: 5px; gap: 4px; }
+
+.nf-tool {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: #16161a;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.gr-toolpos .nf-tool { width: 25px; height: 25px; font-size: 10px; }
+
+.nf-tool-img {
+  width: 16px;
+  height: 16px;
+  display: block;
+  object-fit: contain;
+}
+.gr-toolpos .nf-tool-img { width: 15px; height: 15px; }
+
+/* video badge */
+.gr-vid {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 3;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: #e7e7ea;
+  padding: 4px 9px;
+  border-radius: 7px;
+  background: rgba(12, 12, 14, 0.7);
+  backdrop-filter: blur(8px);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+/* hover reveal — solid panel */
+.gr-reveal {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 10px;
+  background: rgba(9, 9, 11, 0.9);
+  backdrop-filter: blur(3px);
+  opacity: 0;
+  transition: opacity 0.24s;
+  pointer-events: none;
+}
+.gr-card:hover .gr-reveal { opacity: 1; }
+.gr-reveal p {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: #e4e4e7;
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.gr-link {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--blue-bright);
+}
+.gr-rev-title { display: none; }
+
+/* meta row */
+.gr-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 15px 17px;
+}
+.gr-name {
+  font-size: 15.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  line-height: 1.25;
+}
+.gr-arrow {
+  flex: 0 0 auto;
+  color: var(--faint);
+  font-size: 15px;
+  transition: color 0.2s, transform 0.2s;
+}
+.gr-card:hover .gr-arrow { color: var(--blue-bright); transform: translateX(3px); }
+
+/* prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  .gr-card,
+  .gr-img,
+  .gr-arrow { transition: none; }
+  .gr-card:hover { transform: none; }
+  .gr-card:hover .gr-img { transform: none; }
+}
