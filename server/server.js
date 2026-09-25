@@ -482,7 +482,8 @@ app.get('/api/load', async (req, res) => {
 // -------------------------
 // /api/logs Endpoint
 // -------------------------
-app.get('/api/logs', (req, res) => {
+// Visitor logs carry IPs and geolocation, so they sit behind the admin key.
+app.get('/api/logs', requireAdmin, (req, res) => {
   try {
     const logFilePath = path.join(DATA_DIR, 'loadLogs.json');
     if (!fs.existsSync(logFilePath)) {
@@ -658,7 +659,8 @@ app.get('/api/cs-config', (req, res) => {
   res.json(loadCsConfig());
 });
 
-app.post('/api/cs-config', (req, res) => {
+// requireAdmin is a hoisted function declaration defined with the admin routes below.
+app.post('/api/cs-config', requireAdmin, (req, res) => {
   try {
     const { enabled, preserveListedOrder, repoNames } = req.body;
     if (!Array.isArray(repoNames)) {
@@ -1087,6 +1089,199 @@ app.post('/api/admin/art/slugs', requireAdmin, (req, res) => {
   } catch (err) {
     res.status(500).json({ error: 'Failed to save config' });
   }
+});
+
+// ─── COMMENTS ────────────────────────────────────────────────────────────────
+// One thread per post, keyed as "<type>:<id>" where type is blog | cs | art.
+// Bodies are stored as plain text and rendered as text by the client, so no
+// markup ever round-trips back out.
+
+const commentsFile = path.join(DATA_DIR, 'comments.json');
+ensureCacheFileExists(commentsFile);
+let commentsStore = loadCacheFromFile(commentsFile);
+
+const COMMENT_TYPES = new Set(['blog', 'cs', 'art']);
+const MAX_COMMENT_NAME = 60;
+const MAX_COMMENT_BODY = 2000;
+const COMMENT_RATE_WINDOW_MS = 60 * 1000;
+const COMMENT_RATE_LIMIT = 3;
+
+// ip -> timestamps of recent posts, pruned on each attempt
+const commentRateBuckets = new Map();
+
+function threadKey(type, id) {
+  if (!COMMENT_TYPES.has(type)) return null;
+  // Art identifiers can be hash_ids or title slugs, so allow the same
+  // character set the art/blog/cs routes already accept.
+  if (!/^[A-Za-z0-9_-]{1,120}$/.test(id)) return null;
+  return `${type}:${id}`;
+}
+
+function saveComments() {
+  saveCacheToFile(commentsFile, commentsStore);
+}
+
+function publicComment(comment) {
+  return {
+    id: comment.id,
+    name: comment.name,
+    body: comment.body,
+    createdAt: comment.createdAt,
+    parentId: comment.parentId || null,
+    editedAt: comment.editedAt || null,
+  };
+}
+
+function isCommentRateLimited(ip) {
+  const now = Date.now();
+  const recent = (commentRateBuckets.get(ip) || []).filter(
+    (t) => now - t < COMMENT_RATE_WINDOW_MS
+  );
+  if (recent.length >= COMMENT_RATE_LIMIT) {
+    commentRateBuckets.set(ip, recent);
+    return true;
+  }
+  recent.push(now);
+  commentRateBuckets.set(ip, recent);
+  return false;
+}
+
+app.get('/api/comments/:type/:id', (req, res) => {
+  const key = threadKey(req.params.type, req.params.id);
+  if (!key) return res.status(400).json({ error: 'Invalid thread' });
+
+  const thread = commentsStore[key] || [];
+  res.json(thread.filter((c) => !c.hidden).map(publicComment));
+});
+
+app.post('/api/comments/:type/:id', (req, res) => {
+  const key = threadKey(req.params.type, req.params.id);
+  if (!key) return res.status(400).json({ error: 'Invalid thread' });
+
+  // Hidden field real people never fill in.
+  if (req.body?.website) return res.status(400).json({ error: 'Rejected' });
+
+  const name = String(req.body?.name || '').trim();
+  const body = String(req.body?.body || '').trim();
+
+  if (!name) return res.status(400).json({ error: 'Name is required' });
+  if (!body) return res.status(400).json({ error: 'Comment is required' });
+  if (name.length > MAX_COMMENT_NAME) {
+    return res.status(400).json({ error: `Name must be ${MAX_COMMENT_NAME} characters or fewer` });
+  }
+  if (body.length > MAX_COMMENT_BODY) {
+    return res.status(400).json({ error: `Comment must be ${MAX_COMMENT_BODY} characters or fewer` });
+  }
+
+  // Replies are capped at one level: a reply to a reply attaches to the same
+  // top-level comment, so threads stay readable and can't nest without bound.
+  let parentId = null;
+  if (req.body?.parentId) {
+    const thread = commentsStore[key] || [];
+    const parent = thread.find((c) => c.id === req.body.parentId && !c.hidden);
+    if (!parent) return res.status(400).json({ error: 'That comment no longer exists' });
+    parentId = parent.parentId || parent.id;
+  }
+
+  const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.ip || 'unknown';
+  if (isCommentRateLimited(ip)) {
+    return res.status(429).json({ error: 'Slow down — try again in a minute.' });
+  }
+
+  const comment = {
+    id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+    name,
+    body,
+    parentId,
+    createdAt: new Date().toISOString(),
+    ip,
+  };
+
+  if (!Array.isArray(commentsStore[key])) commentsStore[key] = [];
+  commentsStore[key].push(comment);
+  saveComments();
+
+  res.status(201).json(publicComment(comment));
+});
+
+// Admin: every thread, including hidden comments
+app.get('/api/admin/comments', requireAdmin, (req, res) => {
+  const threads = Object.entries(commentsStore)
+    .map(([key, comments]) => {
+      const [type, ...rest] = key.split(':');
+      return { key, type, id: rest.join(':'), comments };
+    })
+    .filter((t) => t.comments.length > 0);
+  res.json(threads);
+});
+
+// Admin: edit a comment's author, body, or timestamp
+app.patch('/api/admin/comments/:type/:id/:commentId', requireAdmin, (req, res) => {
+  const key = threadKey(req.params.type, req.params.id);
+  if (!key) return res.status(400).json({ error: 'Invalid thread' });
+
+  const thread = commentsStore[key];
+  const comment = thread?.find((c) => c.id === req.params.commentId);
+  if (!comment) return res.status(404).json({ error: 'Comment not found' });
+
+  const updates = {};
+
+  if (req.body?.name !== undefined) {
+    const name = String(req.body.name).trim();
+    if (!name) return res.status(400).json({ error: 'Name is required' });
+    if (name.length > MAX_COMMENT_NAME) {
+      return res.status(400).json({ error: `Name must be ${MAX_COMMENT_NAME} characters or fewer` });
+    }
+    updates.name = name;
+  }
+
+  if (req.body?.body !== undefined) {
+    const body = String(req.body.body).trim();
+    if (!body) return res.status(400).json({ error: 'Comment is required' });
+    if (body.length > MAX_COMMENT_BODY) {
+      return res.status(400).json({ error: `Comment must be ${MAX_COMMENT_BODY} characters or fewer` });
+    }
+    updates.body = body;
+  }
+
+  if (req.body?.createdAt !== undefined) {
+    const parsed = new Date(req.body.createdAt);
+    if (Number.isNaN(parsed.getTime())) {
+      return res.status(400).json({ error: 'Invalid date' });
+    }
+    updates.createdAt = parsed.toISOString();
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return res.status(400).json({ error: 'Nothing to update' });
+  }
+
+  Object.assign(comment, updates, { editedAt: new Date().toISOString() });
+  saveComments();
+
+  res.json(publicComment(comment));
+});
+
+app.delete('/api/admin/comments/:type/:id/:commentId', requireAdmin, (req, res) => {
+  const key = threadKey(req.params.type, req.params.id);
+  if (!key) return res.status(400).json({ error: 'Invalid thread' });
+
+  const thread = commentsStore[key];
+  if (!thread) return res.status(404).json({ error: 'Thread not found' });
+
+  const target = thread.find((c) => c.id === req.params.commentId);
+  if (!target) return res.status(404).json({ error: 'Comment not found' });
+
+  // Deleting a top-level comment takes its replies with it, so none are orphaned.
+  const next = thread.filter(
+    (c) => c.id !== target.id && c.parentId !== target.id
+  );
+
+  if (next.length === 0) delete commentsStore[key];
+  else commentsStore[key] = next;
+  saveComments();
+
+  res.json({ ok: true, removed: thread.length - next.length });
 });
 
 // ─── VIDEO PROXY ─────────────────────────────────────────────────────────────

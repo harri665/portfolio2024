@@ -5,6 +5,7 @@ import { motion } from 'framer-motion';
 import { FaArrowLeft } from 'react-icons/fa';
 
 import { apiUrl } from '../../utils/api';
+import CommentSection from '../Comments/CommentSection';
 import { getSiteHref, SITE_MODES } from '../../utils/siteMode';
 
 function formatDate(value) {
@@ -393,6 +394,15 @@ const ArtStationProject = () => {
             </div>
           </motion.section>
         )}
+
+        {/* Comments read better at text width than across the full gallery grid */}
+        <div className="mt-6 max-w-3xl">
+          <CommentSection
+            type="art"
+            id={project.hash_id || identifier}
+            variant="glass"
+          />
+        </div>
       </div>
     </div>
   );

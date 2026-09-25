@@ -13,6 +13,7 @@ import { FaArrowLeft, FaGithub, FaExternalLinkAlt } from 'react-icons/fa';
 
 import { SITE_MODES } from '../../utils/siteMode';
 import SubdomainNav from '../Homepage/SubdomainNav';
+import CommentSection from '../Comments/CommentSection';
 
 const LANGUAGE_COLORS = {
   JavaScript: '#f1e05a',
@@ -296,7 +297,7 @@ export default function CSProjectDetails() {
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, delay: 0.15 }}
-        className="relative z-10 mx-auto max-w-3xl px-4 pb-32 pt-12 sm:px-8"
+        className="relative z-10 mx-auto max-w-3xl px-4 pb-12 pt-12 sm:px-8"
       >
         {readme ? (
           <div className="cs-readme-prose">
@@ -324,6 +325,11 @@ export default function CSProjectDetails() {
           <p className="text-center text-sm text-white/30">No README found for this repository.</p>
         )}
       </motion.div>
+
+      {/* ── Comments ─────────────────────────────────────────────────────── */}
+      <div className="relative z-10 mx-auto max-w-3xl px-4 pb-32 sm:px-8">
+        <CommentSection type="cs" id={repoName} variant="glass" />
+      </div>
     </div>
   );
 }
