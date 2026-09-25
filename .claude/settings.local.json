@@ -6,7 +6,8 @@
       "Bash(Expand-Archive -Path \"C:\\\\Users\\\\harri\\\\Downloads\\\\Portfolio.zip\" -DestinationPath \"C:\\\\Users\\\\harri\\\\Downloads\\\\Portfolio_extracted\" -Force)",
       "Read(//c/Users/harri/Downloads/**)",
       "PowerShell(Get-ChildItem \"C:\\\\Users\\\\harri\\\\Downloads\\\\Portfolio_extracted\\\\design_handoff_project_gallery\" -Recurse | ForEach-Object { $_.FullName })",
-      "Bash(node *)"
+      "Bash(node *)",
+      "Bash(node -e ' *)"
     ]
   }
 }

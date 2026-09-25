@@ -474,6 +474,12 @@ function MediaPreview({ url }) {
           loop
           muted
           playsInline
+          webkit-playsinline="true"
+          ref={(el) => {
+            // React only sets `muted` as a property; iOS needs the attribute too
+            // or it refuses inline playback and kicks the video fullscreen.
+            if (el) el.setAttribute('muted', '');
+          }}
           className={`h-full w-full ${fitClass}`}
         />
       ) : (
