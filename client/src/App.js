@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom';
 import './App.css';
 import 'highlight.js/styles/atom-one-dark.css';
 
@@ -8,17 +8,27 @@ import RootHomePage from './Components/Homepage/RootHomePage';
 import CSHomePage from './Components/Homepage/CSHomePage';
 import ProjectDetails from './Components/ProjectDetails/ProjectDetails';
 import CSProjectDetails from './Components/ProjectDetails/CSProjectDetails';
-import CSAdmin from './Components/Admin/CSAdmin';
-import ArtAdmin from './Components/Admin/ArtAdmin';
-import LogsViewer from './Components/Admin/Admin';
+import AdminApp from './Components/Admin/AdminApp';
 import ContactPage from './Components/Contact/ContactPage';
 import BlogIndex from './Components/Blog/BlogIndex';
 import BlogPost from './Components/Blog/BlogPost';
-import BlogAdmin from './Components/Blog/Admin/BlogAdmin';
-import BlogPostEditor from './Components/Blog/Admin/BlogPostEditor';
-import PagesAdmin from './Components/Admin/PagesAdmin';
 import { apiUrl } from './utils/api';
 import { detectSiteMode, SITE_MODES } from './utils/siteMode';
+
+// old admin urls
+const LEGACY_ADMIN_REDIRECTS = [
+  ['/cs-admin', '/admin/cs'],
+  ['/art-admin', '/admin/art'],
+  ['/blog-admin', '/admin/blog'],
+  ['/blog-admin/new', '/admin/blog/new'],
+  ['/pages-admin', '/admin/pages'],
+  ['/comments-admin', '/admin/comments'],
+];
+
+function LegacyBlogEditRedirect() {
+  const { slug } = useParams();
+  return <Navigate to={`/admin/blog/edit/${slug}`} replace />;
+}
 
 function MainRoutes({ siteMode }) {
   const location = useLocation();
@@ -60,39 +70,19 @@ function MainRoutes({ siteMode }) {
         path="/"
         element={homePageByMode[siteMode] || <RootHomePage />}
       />
-      <Route path="/cs-admin" element={<CSAdmin />} />
-      <Route path="/art-admin" element={<ArtAdmin />} />
-      <Route path="/blog-admin" element={<BlogAdmin />} />
-      <Route path="/blog-admin/new" element={<BlogPostEditor />} />
-      <Route path="/blog-admin/edit/:slug" element={<BlogPostEditor />} />
-      <Route path="/pages-admin" element={<PagesAdmin />} />
+
+      <Route path="/admin/*" element={<AdminApp />} />
+      {LEGACY_ADMIN_REDIRECTS.map(([from, to]) => (
+        <Route key={from} path={from} element={<Navigate to={to} replace />} />
+      ))}
+      <Route path="/blog-admin/edit/:slug" element={<LegacyBlogEditRedirect />} />
+
       {siteMode === SITE_MODES.ART && <Route path="/:identifier" element={<ProjectDetails />} />}
       {siteMode === SITE_MODES.CS && <Route path="/:repoName" element={<CSProjectDetails />} />}
       {siteMode === SITE_MODES.BLOG && <Route path="/:slug" element={<BlogPost />} />}
-      {/* The /admin route is just a placeholder; you can rename it as needed */}
-      <Route path="/admin" element={<AdminLogs />} />
       <Route path="/contact" element={<ContactPage />} />
     </Routes>
   );
-}
-
-// This component fetches logs from the server and passes them to LogsViewer
-function AdminLogs() {
-  const [logs, setLogs] = useState([]);
-
-  useEffect(() => {
-    // Fetch logs from your server's /api/logs
-    fetch(apiUrl('/logs'))
-      .then((response) => response.json())
-      .then((data) => {
-        console.log('Fetched logs:', data);
-        setLogs(data);
-      })
-      .catch((error) => console.error('Error fetching logs:', error));
-  }, []);
-
-  // Pass the logs array into LogsViewer
-  return <LogsViewer initialLogs={logs} />;
 }
 
 export default function App() {

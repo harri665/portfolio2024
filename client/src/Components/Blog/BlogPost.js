@@ -12,6 +12,7 @@ import 'katex/dist/katex.min.css';
 
 import { apiUrl, getApiBaseUrl } from '../../utils/api';
 import SubdomainNav from '../Homepage/SubdomainNav';
+import CommentSection from '../Comments/CommentSection';
 import { SITE_MODES } from '../../utils/siteMode';
 import { remarkWikiLinks } from './plugins/remarkWikiLinks';
 import { rehypeCallouts } from './plugins/rehypeCallouts';
@@ -179,6 +180,10 @@ export default function BlogPost() {
             </ReactMarkdown>
           </div>
         </motion.div>
+
+        <div className="mt-6">
+          <CommentSection type="blog" id={meta.slug} variant="houdini" />
+        </div>
 
         <motion.div
           initial={{ opacity: 0 }}
