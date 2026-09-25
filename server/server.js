@@ -10,7 +10,7 @@ import useragent from 'express-useragent';
 import matter from 'gray-matter';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
-import { createOgHandler, isCrawler } from './og.js';
+import { createOgHandler, isCrawler, detectSiteMode } from './og.js';
 // --- NEW IMPORTS ---
 import { Client, GatewayIntentBits } from 'discord.js';
 import 'dotenv/config'; // Loads .env file contents into process.env
@@ -896,24 +896,6 @@ app.get('/api/blog/posts/:slug', (req, res) => {
   }
 });
 
-// Sitemap — helps Google discover blog posts
-app.get('/sitemap.xml', (req, res) => {
-  try {
-    const posts = loadBlogPosts();
-    const base = 'https://blog.harrison-martin.com';
-    const urls = [
-      `<url><loc>${base}/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>`,
-      ...posts.map((p) =>
-        `<url><loc>${base}/${encodeURIComponent(p.slug)}</loc>${p.date ? `<lastmod>${p.date}</lastmod>` : ''}<changefreq>monthly</changefreq><priority>0.8</priority></url>`
-      ),
-    ].join('\n  ');
-    res.setHeader('Content-Type', 'application/xml');
-    res.send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  ${urls}\n</urlset>`);
-  } catch (err) {
-    res.status(500).send('Failed to generate sitemap');
-  }
-});
-
 // ─── BLOG ADMIN ──────────────────────────────────────────────────────────────
 
 const ADMIN_KEY = process.env.ADMIN_KEY || 'test';
@@ -1238,15 +1220,159 @@ function resolveCsRepoFullName(repoName) {
   return `${GITHUB_DEFAULT_OWNER}/${repoName}`;
 }
 
+const ARTSTATION_USERNAME = 'harr1';
+
+// The gallery links projects by hash_id, so that's the canonical URL.
+function listArtProjects() {
+  const projects =
+    userProjectsCache[ARTSTATION_USERNAME]?.data ||
+    Object.values(userProjectsCache)[0]?.data ||
+    [];
+
+  return projects
+    .filter((project) => project?.hash_id)
+    .map((project) => ({
+      identifier: project.hash_id,
+      title: project.title || project.hash_id,
+      description: project.description || '',
+      image: project.cover?.thumb_url || project.cover?.small_square_url || null,
+      date: project.published_at || project.created_at || null,
+    }));
+}
+
+// Mirrors what CSHomePage shows: owned non-forks, plus whitelisted external
+// repos, filtered by the whitelist when it's enabled.
+async function listCsRepos() {
+  const config = loadCsConfig();
+  const listed = (config.repoNames || []).map((name) => String(name).trim()).filter(Boolean);
+
+  if (config.enabled) {
+    const repos = await Promise.all(
+      listed.map(async (entry) => {
+        const fullName = entry.includes('/') ? entry : `${GITHUB_DEFAULT_OWNER}/${entry}`;
+        try {
+          const repo = await getGitHubRepoByFullName(fullName);
+          return repo?.name ? { name: repo.name, description: repo.description || '' } : null;
+        } catch {
+          return null;
+        }
+      })
+    );
+    return repos.filter(Boolean);
+  }
+
+  const owned = await getGitHubRepoList({ owner: GITHUB_DEFAULT_OWNER, perPage: 100 });
+  return (owned || [])
+    .filter((repo) => !repo.fork)
+    .map((repo) => ({ name: repo.name, description: repo.description || '' }));
+}
+
 const ogHandler = createOgHandler({
   blogPostsDir: BLOG_POSTS_DIR,
   blogImagesDir: BLOG_IMAGES_DIR,
   getArtProject: getArtProjectByIdentifier,
   getCsRepo: (fullName) => getGitHubRepoByFullName(fullName),
   getCsRepoFullName: resolveCsRepoFullName,
+  listBlogPosts: () => loadBlogPosts(),
+  listArtProjects,
+  listCsRepos,
 });
 
 app.get('/__og', (req, res) => ogHandler(req, res, req.headers['x-original-uri'] || req.query.path || '/'));
+
+// ─── SEARCH ENGINES ──────────────────────────────────────────────────────────
+// robots.txt and sitemap.xml are per-host: each subdomain is its own site to
+// Google, so each one advertises only its own pages.
+
+function siteOriginFor(req) {
+  const host = req.headers['x-forwarded-host'] || req.headers.host || 'harrison-martin.com';
+  const isLocal = /^(localhost|127\.0\.0\.1|\[::1\])(:|$)|\.localhost(:|$)/i.test(host);
+  const proto =
+    (req.headers['x-forwarded-proto'] || '').split(',')[0].trim() || (isLocal ? 'http' : 'https');
+
+  return `${proto}://${host}`;
+}
+
+app.get('/robots.txt', (req, res) => {
+  const origin = siteOriginFor(req);
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.send(
+    [
+      'User-agent: *',
+      'Allow: /',
+      'Disallow: /admin',
+      'Disallow: /cs-admin',
+      'Disallow: /art-admin',
+      'Disallow: /blog-admin',
+      'Disallow: /pages-admin',
+      'Disallow: /api/',
+      '',
+      `Sitemap: ${origin}/sitemap.xml`,
+      '',
+    ].join('\n')
+  );
+});
+
+app.get('/sitemap.xml', async (req, res) => {
+  const origin = siteOriginFor(req);
+  const mode = detectSiteMode(req.headers['x-forwarded-host'] || req.headers.host);
+
+  function urlEntry({ loc, lastmod, changefreq = 'monthly', priority = '0.8' }) {
+    return `<url><loc>${loc}</loc>${
+      lastmod ? `<lastmod>${lastmod}</lastmod>` : ''
+    }<changefreq>${changefreq}</changefreq><priority>${priority}</priority></url>`;
+  }
+
+  try {
+    const entries = [
+      urlEntry({ loc: `${origin}/`, changefreq: 'weekly', priority: '1.0' }),
+    ];
+
+    if (mode === 'blog') {
+      for (const post of loadBlogPosts()) {
+        entries.push(
+          urlEntry({ loc: `${origin}/${encodeURIComponent(post.slug)}`, lastmod: post.date })
+        );
+      }
+    } else if (mode === 'art') {
+      for (const project of listArtProjects()) {
+        entries.push(
+          urlEntry({
+            loc: `${origin}/${encodeURIComponent(project.identifier)}`,
+            lastmod: project.date ? String(project.date).slice(0, 10) : null,
+          })
+        );
+      }
+    } else if (mode === 'cs') {
+      for (const repo of await listCsRepos()) {
+        entries.push(urlEntry({ loc: `${origin}/${encodeURIComponent(repo.name)}` }));
+      }
+    } else {
+      // The root site's content lives on the subdomains.
+      for (const host of ['cs', 'art', 'blog']) {
+        entries.push(
+          urlEntry({
+            loc: `https://${host}.harrison-martin.com/`,
+            changefreq: 'weekly',
+            priority: '0.9',
+          })
+        );
+      }
+      entries.push(urlEntry({ loc: `${origin}/contact`, priority: '0.5' }));
+    }
+
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(
+      `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  ${entries.join(
+        '\n  '
+      )}\n</urlset>`
+    );
+  } catch (err) {
+    console.error('Failed to generate sitemap:', err);
+    res.status(500).send('Failed to generate sitemap');
+  }
+});
 
 // Fallback for deployments where Express serves the React build itself.
 app.use((req, res, next) => {

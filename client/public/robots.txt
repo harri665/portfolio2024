@@ -1,3 +1,11 @@
 # https://www.robotstxt.org/robotstxt.html
+# Fallback only — nginx serves the generated per-host robots.txt from the
+# backend, which also advertises that host's sitemap.
 User-agent: *
-Disallow:
+Allow: /
+Disallow: /admin
+Disallow: /cs-admin
+Disallow: /art-admin
+Disallow: /blog-admin
+Disallow: /pages-admin
+Disallow: /api/
