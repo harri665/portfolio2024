@@ -1,15 +1,41 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 
 
 import Buttons from "./Buttons";
 import SubdomainNav from './SubdomainNav';
-import DistortedTorusScene from './DistortedTorusScene';
+import ContinuousScene, { ScrollCue } from './ContinuousScene';
 import { SITE_MODES } from '../../utils/siteMode';
 import { apiUrl } from '../../utils/api';
 
 const GITHUB_USERNAME = 'harri665';
+
+// Scroll-driven keyframes for the continuous background object (`at` is
+// scroll depth in viewport heights). Centered and vivid in the hero, then it
+// glides to the screen edge and dims way down behind the project grid so the
+// cards stay fully readable.
+// Accent pairs the object adopts when a project card is hovered — hashed by
+// repo name so each project keeps a stable color identity.
+const ACCENT_PAIRS = [
+  ['#2dd4bf', '#5eead4'],
+  ['#fb923c', '#fbbf24'],
+  ['#60a5fa', '#38bdf8'],
+  ['#c084fc', '#a78bfa'],
+];
+
+function repoAccentPair(name) {
+  let hash = 0;
+  for (const c of name || '') hash = (hash * 31 + c.charCodeAt(0)) & 0xffff;
+  return ACCENT_PAIRS[hash % ACCENT_PAIRS.length];
+}
+
+const CS_KEYFRAMES = [
+  { at: 0, position: [0, 0, 0], scale: 1.15, rotation: [0.2, 0, 0], distortion: 0.2, spinSpeed: 0.3, opacity: 1, colorA: '#00e5ff', colorB: '#ff00e5' },
+  { at: 0.9, position: [2.2, 0.5, -0.8], scale: 0.7, rotation: [0.8, 1.6, 0.4], distortion: 0.32, spinSpeed: 0.5, opacity: 0.3, colorA: '#38bdf8', colorB: '#8b5cf6' },
+  { at: 2.6, position: [-2.4, 0.2, -1.2], scale: 0.85, rotation: [-0.3, 3.0, 0.6], distortion: 0.12, spinSpeed: 0.35, opacity: 0.22, colorA: '#2dd4bf', colorB: '#2b80ff' },
+  { at: 4.6, position: [2.4, -0.2, -1.4], scale: 0.75, rotation: [0.4, 4.6, 0.2], distortion: 0.4, spinSpeed: 0.45, opacity: 0.18, colorA: '#8b5cf6', colorB: '#00e5ff' },
+];
 
 function formatDate(value) {
   if (!value) {
@@ -274,6 +300,32 @@ export default function CSHomePage() {
   const [repoImages, setRepoImages] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [spotlight, setSpotlight] = useState(null);
+  // Mutable handles into the 3D scene: the rail slot the object docks into,
+  // and hover controls (tint + excitement) set by the project cards.
+  const railSlotRef = useRef(null);
+  const sceneControlsRef = useRef({ tintA: null, tintB: null, excite: 0, textureUrl: null });
+
+  const handleSpotlight = (repo) => {
+    setSpotlight(repo);
+    const controls = sceneControlsRef.current;
+    if (repo) {
+      const [a, b] = repoAccentPair(repo.name);
+      controls.tintA = a;
+      controls.tintB = b;
+      controls.excite = 1;
+      // Flow the repo's README image over the object (videos can't be
+      // sampled as textures — those stay tint-only).
+      const mediaUrl = repoImages[repo.full_name];
+      controls.textureUrl =
+        mediaUrl && getMediaType(mediaUrl) !== 'video' ? mediaUrl : null;
+    } else {
+      controls.tintA = null;
+      controls.tintB = null;
+      controls.excite = 0;
+      controls.textureUrl = null;
+    }
+  };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -351,39 +403,86 @@ export default function CSHomePage() {
 
 
   return (
-    <div className="houdini-canvas relative min-h-screen overflow-hidden text-white">
-      {/* <TorusBackdrop /> */}
+    <div className="houdini-canvas relative min-h-screen text-white">
+      <ContinuousScene
+        keyframes={CS_KEYFRAMES}
+        shapeArgs={[1, 0.3, 220, 36, 2, 3]}
+        anchorRef={railSlotRef}
+        controlsRef={sceneControlsRef}
+      />
       <SubdomainNav currentMode={SITE_MODES.CS} />
       <HeroSection />
 
-      <main className="relative z-10 mx-auto max-w-7xl px-4 pb-20 sm:px-8">
+      <main id="projects" className="relative z-10 mx-auto max-w-7xl px-4 pb-20 sm:px-8">
+        <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_270px] lg:items-start lg:gap-10">
+          <div>
+            {loading && <StateCard tone="neutral">Loading GitHub projects...</StateCard>}
+            {error && <StateCard tone="error">{error}</StateCard>}
 
+            {!loading && !error && repos.length === 0 && (
+              <StateCard tone="neutral">No repositories found.</StateCard>
+            )}
 
-        {loading && <StateCard tone="neutral">Loading GitHub projects...</StateCard>}
-        {error && <StateCard tone="error">{error}</StateCard>}
+            {!loading && !error && repos.length > 0 && (
+              <motion.section
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.1, duration: 0.45 }}
+                className="grid grid-cols-1 gap-8 md:grid-cols-2"
+              >
+                {repos.map((repo, index) => (
+                  <RepoCard
+                    key={repo.id}
+                    repo={repo}
+                    index={index}
+                    imageUrl={repoImages[repo.full_name] ?? null}
+                    onSpotlight={handleSpotlight}
+                  />
+                ))}
+              </motion.section>
+            )}
+          </div>
 
-        {!loading && !error && repos.length === 0 && (
-          <StateCard tone="neutral">No repositories found.</StateCard>
-        )}
-
-        {!loading && !error && repos.length > 0 && (
-          <motion.section
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.1, duration: 0.45 }}
-            className="grid grid-cols-1 gap-8 px-4 md:grid-cols-2 xl:grid-cols-3"
-          >
-            {repos.map((repo, index) => (
-              <RepoCard key={repo.id} repo={repo} index={index} imageUrl={repoImages[repo.full_name] ?? null} />
-            ))}
-          </motion.section>
-        )}
+          <SceneRail slotRef={railSlotRef} spotlight={spotlight} />
+        </div>
       </main>
     </div>
   );
 }
 
-function RepoCard({ repo, index, imageUrl }) {
+// Sticky rail beside the grid. The empty slot is where the 3D object docks —
+// it reserves real layout space so the object is part of the page, never
+// behind the cards. The caption mirrors whichever project is hovered.
+function SceneRail({ slotRef, spotlight }) {
+  return (
+    <aside aria-hidden="true" className="hidden lg:block">
+      <div className="sticky top-24">
+        <div ref={slotRef} className="aspect-square w-full" />
+        <div className="mt-2 rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-xl">
+          <p className="mb-2 font-mono text-[10px] tracking-[0.25em] text-white/35">
+            {spotlight ? 'NOW INSPECTING' : 'LIVE OBJECT'}
+          </p>
+          {spotlight ? (
+            <>
+              <p className="truncate text-sm font-semibold text-white/90">{spotlight.name}</p>
+              <p className="mt-1 text-xs text-white/50">
+                {[spotlight.language, `updated ${formatDate(spotlight.pushed_at)}`]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </p>
+            </>
+          ) : (
+            <p className="text-xs leading-relaxed text-white/50">
+              Hover a project — the object picks up its colors.
+            </p>
+          )}
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function RepoCard({ repo, index, imageUrl, onSpotlight }) {
   const demoUrl = normalizeHomepage(repo.homepage);
   const navigate = useNavigate();
 
@@ -393,6 +492,8 @@ function RepoCard({ repo, index, imageUrl }) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.02 * Math.min(index, 14), duration: 0.4 }}
       whileHover={{ y: -4, boxShadow: '0 24px 60px rgba(0,0,0,0.45)' }}
+      onMouseEnter={() => onSpotlight && onSpotlight(repo)}
+      onMouseLeave={() => onSpotlight && onSpotlight(null)}
       onClick={() => navigate(`/${repo.name}`)}
       className="group relative cursor-pointer overflow-hidden rounded-[1.5rem] border border-white/10 bg-white/5 shadow-[0_16px_45px_rgba(0,0,0,0.32)] backdrop-blur-xl"
     >
@@ -514,35 +615,23 @@ function StateCard({ children, tone = 'neutral' }) {
   );
 }
 
-function TorusBackdrop() {
-  return (
-    <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-[34rem]">
-      <div className="absolute inset-0 opacity-22">
-        <DistortedTorusScene variant="cs" className="h-full w-full" />
-      </div>
-      <div className="absolute inset-0 bg-gradient-to-b from-[#08090c]/5 via-[#08090c]/55 to-[#08090c]" />
-    </div>
-  );
-}
-
 function HeroSection() {
   return (
-    <div className="relative h-[90vh] flex items-center justify-center overflow-hidden">
-      {/* Background Torus Scene */}
-        <DistortedTorusScene variant="cs" className="h-full w-full" />
-
-      {/* Hero Text Content with animations */}
+    // Short of full-screen on purpose: the top of the project grid peeks
+    // above the fold so visitors immediately see there is work below.
+    <div className="relative z-10 flex h-[68vh] min-h-[420px] items-center justify-center">
       <motion.div
-        className="absolute text-center z-10"
+        className="text-center"
         initial={{ opacity: 0, y: 50 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 1 }}
       >
-        <h1 className="text-7xl font-extrabold tracking-tight text-white">
+        <h1 className="text-5xl font-extrabold tracking-tight text-white sm:text-7xl">
           Harrison Martin
         </h1>
         <Buttons />
       </motion.div>
+      <ScrollCue className="absolute bottom-4 left-1/2 -translate-x-1/2" />
     </div>
   );
 }
