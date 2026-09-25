@@ -1,8 +1,20 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import SubdomainNav from './SubdomainNav';
+import ContinuousScene, { ScrollCue } from './ContinuousScene';
 import { SITE_MODES } from '../../utils/siteMode';
 import './gallery.css';
+
+// Scroll-driven keyframes for the continuous background object (`at` is
+// scroll depth in viewport heights). Warm Blender-orange/blue to match the
+// gallery palette; it dims to the screen edge once the grid is in view so
+// the artwork thumbnails always win.
+const ART_KEYFRAMES = [
+  { at: 0, position: [0, 0.15, 0], scale: 1.0, rotation: [0.2, 0, 0], distortion: 0.16, spinSpeed: 0.28, opacity: 0.95, colorA: '#ec7a1c', colorB: '#2b80ff' },
+  { at: 0.8, position: [2.3, 0.5, -0.9], scale: 0.6, rotation: [0.9, 1.8, 0.3], distortion: 0.3, spinSpeed: 0.5, opacity: 0.24, colorA: '#ff9a4d', colorB: '#8b5cf6' },
+  { at: 2.4, position: [-2.4, 0.3, -1.1], scale: 0.75, rotation: [-0.4, 3.2, 0.7], distortion: 0.1, spinSpeed: 0.35, opacity: 0.18, colorA: '#2b80ff', colorB: '#ec7a1c' },
+  { at: 4.6, position: [2.4, -0.1, -1.3], scale: 0.7, rotation: [0.3, 4.8, 0.2], distortion: 0.35, spinSpeed: 0.45, opacity: 0.15, colorA: '#f5c84b', colorB: '#2b80ff' },
+];
 
 const TINTS = [
   '#171419', '#13161c', '#181414', '#131a18',
@@ -122,12 +134,17 @@ function ToolBadge({ k }) {
   );
 }
 
-function GRCard({ p, i }) {
+function GRCard({ p, i, onSpotlight }) {
   const hashId = p.url.split('/').pop();
   const desc = p.d || `${p.assets} ${p.assets === 1 ? 'asset' : 'assets'} · ${p.likes} ${p.likes === 1 ? 'like' : 'likes'} · view the full project on ArtStation.`;
 
   return (
-    <Link to={`/${hashId}`} className="gr-card">
+    <Link
+      to={`/${hashId}`}
+      className="gr-card"
+      onMouseEnter={() => onSpotlight && onSpotlight(p)}
+      onMouseLeave={() => onSpotlight && onSpotlight(null)}
+    >
       <div className="gr-thumb" style={{ '--tint': TINTS[i % TINTS.length] }}>
         <img
           className="gr-img"
@@ -155,18 +172,80 @@ function GRCard({ p, i }) {
 }
 
 export default function ArtGallery() {
+  const [spotlight, setSpotlight] = useState(null);
+  // Mutable handles into the 3D scene: the rail slot the object docks into,
+  // and hover controls (tint + excitement) set by the artwork cards.
+  const railSlotRef = useRef(null);
+  const sceneControlsRef = useRef({ tintA: null, tintB: null, excite: 0, textureUrl: null });
+
+  const handleSpotlight = (piece) => {
+    setSpotlight(piece);
+    const controls = sceneControlsRef.current;
+    if (piece) {
+      // Tint the object with the piece's software brand colors (e.g. Blender
+      // orange, Houdini orange, Unreal silver-blue) while the artwork's
+      // thumbnail loads and flows over its surface.
+      const tints = (piece.sw || [])
+        .map((k) => SOFTWARE[k] && SOFTWARE[k].fg)
+        .filter(Boolean);
+      controls.tintA = tints[0] || '#ec7a1c';
+      controls.tintB = tints[1] || tints[0] || '#2b80ff';
+      controls.excite = 1;
+      controls.textureUrl = piece.img || null;
+    } else {
+      controls.tintA = null;
+      controls.tintB = null;
+      controls.excite = 0;
+      controls.textureUrl = null;
+    }
+  };
+
   return (
     <div className="gx nf gr">
       <div className="nf-dots" aria-hidden="true" />
+      <ContinuousScene
+        keyframes={ART_KEYFRAMES}
+        shapeArgs={[1, 0.35, 220, 36, 3, 4]}
+        anchorRef={railSlotRef}
+        controlsRef={sceneControlsRef}
+      />
       <SubdomainNav currentMode={SITE_MODES.ART} />
       <div className="gx-shell" style={{ paddingTop: '108px' }}>
-        <header className="nf-head">
-          <div className="nf-eyebrow">3D Art</div>
+        {/* Hero stops short of full-screen so the first row of the grid is
+            visible on load and invites scrolling. */}
+        <header className="relative flex h-[52vh] min-h-[340px] flex-col items-center justify-center text-center">
+          <div className="nf-eyebrow" style={{ marginBottom: 12 }}>3D Art</div>
           <h1 className="nf-title">Selected work.</h1>
           <p className="nf-meta">{WORKS.length} projects · pulled from ArtStation</p>
+          <ScrollCue className="absolute bottom-2 left-1/2 -translate-x-1/2" />
         </header>
-        <div className="gr-grid">
-          {WORKS.map((p, i) => <GRCard key={p.url} p={p} i={i} />)}
+        <div className="gr-layout">
+          <div className="gr-grid">
+            {WORKS.map((p, i) => (
+              <GRCard key={p.url} p={p} i={i} onSpotlight={handleSpotlight} />
+            ))}
+          </div>
+          <aside className="gr-rail" aria-hidden="true">
+            <div className="gr-rail-sticky">
+              {/* Empty slot the continuous 3D object docks into on scroll */}
+              <div ref={railSlotRef} className="gr-rail-slot" />
+              <div className="gr-rail-caption">
+                <p className="gr-rail-label">{spotlight ? 'Now viewing' : 'Live object'}</p>
+                {spotlight ? (
+                  <>
+                    <p className="gr-rail-title">{spotlight.t}</p>
+                    <p className="gr-rail-meta">
+                      {(spotlight.sw || []).join(' · ')}
+                    </p>
+                  </>
+                ) : (
+                  <p className="gr-rail-hint">
+                    Hover a piece — the object borrows its software's colors.
+                  </p>
+                )}
+              </div>
+            </div>
+          </aside>
         </div>
       </div>
     </div>
