@@ -440,6 +440,7 @@ const RESERVED_PATHS = new Set([
   'art-admin',
   'blog-admin',
   'pages-admin',
+  'comments-admin',
   '3d-mockup',
 ]);
 
