@@ -10,7 +10,7 @@ import useragent from 'express-useragent';
 import matter from 'gray-matter';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
-import { createOgHandler, isCrawler, detectSiteMode } from './og.js';
+import { createOgHandler, isCrawler, detectSiteMode, siteOrigin } from './og.js';
 import { Client, GatewayIntentBits } from 'discord.js';
 import 'dotenv/config';
 
@@ -1208,12 +1208,7 @@ app.get('/__og', (req, res) => ogHandler(req, res, req.headers['x-original-uri']
 // robots + sitemap per subdomain, google treats each one as its own site
 
 function siteOriginFor(req) {
-  const host = req.headers['x-forwarded-host'] || req.headers.host || 'harrison-martin.com';
-  const isLocal = /^(localhost|127\.0\.0\.1|\[::1\])(:|$)|\.localhost(:|$)/i.test(host);
-  const proto =
-    (req.headers['x-forwarded-proto'] || '').split(',')[0].trim() || (isLocal ? 'http' : 'https');
-
-  return `${proto}://${host}`;
+  return siteOrigin(req.headers['x-forwarded-host'] || req.headers.host);
 }
 
 app.get('/robots.txt', (req, res) => {

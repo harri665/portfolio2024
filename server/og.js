@@ -97,14 +97,16 @@ function stripMarkdown(markdown) {
 }
 
 function originFor(req) {
-  const host = req.headers['x-forwarded-host'] || req.headers.host || 'harrison-martin.com';
-  const isLocal = /^(localhost|127\.0\.0\.1|\[::1\])(:|$)|\.localhost(:|$)/i.test(host);
-  // TLS may be terminated upstream, so trust the forwarded scheme and otherwise
-  // assume https for anything that isn't a local dev host.
-  const proto =
-    (req.headers['x-forwarded-proto'] || '').split(',')[0].trim() || (isLocal ? 'http' : 'https');
+  return siteOrigin(req.headers['x-forwarded-host'] || req.headers.host);
+}
 
-  return `${proto}://${host}`;
+// TLS ends upstream so nginx forwards X-Forwarded-Proto: http. trusting it gave http:// canonicals
+// and sitemap urls, which google counts as different pages. site is https only anyway
+export function siteOrigin(hostHeader) {
+  const host = hostHeader || 'harrison-martin.com';
+  const isLocal = /^(localhost|127\.0\.0\.1|\[::1\])(:|$)|\.localhost(:|$)/i.test(host);
+
+  return `${isLocal ? 'http' : 'https'}://${host}`;
 }
 
 function upgradeArtStationImage(url) {
