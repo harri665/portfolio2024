@@ -109,7 +109,10 @@ function originFor(req) {
 
 function upgradeArtStationImage(url) {
   if (!/^https?:\/\/cdn[a-z]?\.artstation\.com\//i.test(url || '')) return url;
-  return url.replace(/\/(?:small|medium)\//, '/large/');
+  return url.replace(
+    /\/(?:small|medium|thumb|micro_square|smaller_square|small_square)\//,
+    '/large/'
+  );
 }
 
 function absoluteUrl(origin, url) {
@@ -142,9 +145,25 @@ function renderOgHtml(meta) {
     publishedTime,
     tags = [],
     bodyText = '',
+    links = [],
+    jsonLd = null,
   } = meta;
 
   const tagLine = tags.length ? `<p class="tags">${escapeHtml(tags.join(' · '))}</p>` : '';
+
+  // every page has to be reachable by links from the bare domain or google can't find the posts
+  const linkList = links.length
+    ? `<nav><ul>
+${links
+  .map(
+    (l) =>
+      `<li><a href="${escapeHtml(l.url)}">${escapeHtml(l.title)}</a>${
+        l.description ? ` — ${escapeHtml(truncate(l.description, 160))}` : ''
+      }</li>`
+  )
+  .join('\n')}
+</ul></nav>`
+    : '';
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -156,6 +175,7 @@ function renderOgHtml(meta) {
 <meta name="description" content="${escapeHtml(description)}" />
 <meta name="theme-color" content="${ACCENT}" />
 <meta name="author" content="Harrison Martin" />
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
 
 <meta property="og:type" content="${escapeHtml(type)}" />
 <meta property="og:site_name" content="${escapeHtml(siteName)}" />
@@ -173,6 +193,7 @@ ${tags.map((t) => `<meta property="article:tag" content="${escapeHtml(t)}" />`).
 <meta name="twitter:title" content="${escapeHtml(title)}" />
 <meta name="twitter:description" content="${escapeHtml(description)}" />
 ${image ? `<meta name="twitter:image" content="${escapeHtml(image)}" />` : ''}
+${jsonLd ? `<script type="application/ld+json">${JSON.stringify(jsonLd).replace(/</g, '\\u003c')}</script>` : ''}
 </head>
 <body>
 <article>
@@ -181,6 +202,7 @@ ${tagLine}
 <p>${escapeHtml(description)}</p>
 ${image ? `<img src="${escapeHtml(image)}" alt="${escapeHtml(imageAlt || title)}" />` : ''}
 ${bodyText ? `<p>${escapeHtml(bodyText)}</p>` : ''}
+${linkList}
 <p><a href="${escapeHtml(url)}">${escapeHtml(url)}</a></p>
 </article>
 </body>
@@ -281,6 +303,104 @@ async function resolveCsProject({ repoName, getCsRepoFullName, getCsRepo }) {
   };
 }
 
+async function resolveHome({ mode, origin, deps }) {
+  if (mode === 'blog') {
+    const posts = (await deps.listBlogPosts?.()) || [];
+    const cover = posts.find((p) => p.cover)?.cover;
+
+    return {
+      image: cover ? blogImageUrl({ file: cover, origin, blogImagesDir: deps.blogImagesDir }) : null,
+      links: posts.map((post) => ({
+        url: `${origin}/${encodeURIComponent(post.slug)}`,
+        title: post.title,
+        description: post.description,
+        date: post.date,
+      })),
+    };
+  }
+
+  if (mode === 'art') {
+    const projects = (await deps.listArtProjects?.()) || [];
+
+    return {
+      image: upgradeArtStationImage(projects[0]?.image) || null,
+      links: projects.map((project) => ({
+        url: `${origin}/${encodeURIComponent(project.identifier)}`,
+        title: project.title,
+        description: project.description,
+      })),
+    };
+  }
+
+  if (mode === 'cs') {
+    const repos = (await deps.listCsRepos?.()) || [];
+
+    return {
+      image: null,
+      links: repos.map((repo) => ({
+        url: `${origin}/${encodeURIComponent(repo.name)}`,
+        title: repo.name,
+        description: repo.description,
+      })),
+    };
+  }
+
+  return {
+    image: null,
+    links: ['cs', 'art', 'blog'].map((sub) => ({
+      url: `https://${sub}.harrison-martin.com/`,
+      title: SITES[sub].title,
+      description: SITES[sub].description,
+    })),
+  };
+}
+
+const AUTHOR = { '@type': 'Person', name: 'Harrison Martin', url: 'https://harrison-martin.com' };
+
+function buildJsonLd({ mode, url, title, description, image, resolved, isHome, links }) {
+  if (isHome) {
+    const collection = {
+      '@context': 'https://schema.org',
+      '@type': mode === 'blog' ? 'Blog' : 'CollectionPage',
+      name: title,
+      description,
+      url,
+      author: AUTHOR,
+      ...(image ? { image } : {}),
+    };
+
+    if (links.length) {
+      collection.hasPart = links.slice(0, 50).map((link) => ({
+        '@type': mode === 'blog' ? 'BlogPosting' : 'CreativeWork',
+        headline: link.title,
+        url: link.url,
+        ...(link.description ? { description: truncate(link.description, 160) } : {}),
+        ...(link.date ? { datePublished: link.date } : {}),
+      }));
+    }
+
+    return collection;
+  }
+
+  if (!resolved) return null;
+
+  const TYPES = { blog: 'BlogPosting', art: 'VisualArtwork', cs: 'SoftwareSourceCode' };
+
+  return {
+    '@context': 'https://schema.org',
+    '@type': TYPES[mode] || 'CreativeWork',
+    headline: title,
+    name: title,
+    description,
+    url,
+    mainEntityOfPage: { '@type': 'WebPage', '@id': url },
+    author: AUTHOR,
+    ...(image ? { image } : {}),
+    ...(resolved.publishedTime ? { datePublished: resolved.publishedTime } : {}),
+    ...(resolved.tags?.length ? { keywords: resolved.tags.join(', ') } : {}),
+  };
+}
+
 const RESERVED_PATHS = new Set([
   'contact',
   'admin',
@@ -309,6 +429,9 @@ function withTimeout(promise, ms) {
  *   getArtProject    — async (identifier) => ArtStation project JSON | null
  *   getCsRepo        — async ("owner/repo") => GitHub repo JSON | null
  *   getCsRepoFullName— (repoName) => "owner/repo"
+ *   listBlogPosts    — async () => [{ slug, title, description, cover, date }]
+ *   listArtProjects  — async () => [{ identifier, title, description, image }]
+ *   listCsRepos      — async () => [{ name, description }]
  */
 export function createOgHandler(deps) {
   return async function ogHandler(req, res, requestedPath) {
@@ -320,6 +443,16 @@ export function createOgHandler(deps) {
 
     const segments = pathname.split('/').filter(Boolean);
     const slug = segments.length === 1 ? segments[0] : null;
+    const isHome = segments.length === 0;
+
+    let home = { image: null, links: [] };
+    if (isHome) {
+      try {
+        home = (await withTimeout(resolveHome({ mode, origin, deps }), RESOLVE_TIMEOUT_MS)) || home;
+      } catch (err) {
+        console.error('[og] Failed to build index for', mode, err?.message || err);
+      }
+    }
 
     let resolved = null;
     if (slug && !RESERVED_PATHS.has(slug)) {
@@ -351,26 +484,48 @@ export function createOgHandler(deps) {
       }
     }
 
-    const fallbackImage = `${origin}/logo.png`;
-    const image = resolved?.image || fallbackImage;
+    const realImage = resolved?.image || home.image || null;
+    const image = realImage || `${origin}/logo.png`;
+    const url = `${origin}${pathname}`;
+    const title = resolved?.title || site.title;
+    const description = resolved?.description || site.description;
 
     const html = renderOgHtml({
-      title: resolved?.title || site.title,
-      description: resolved?.description || site.description,
+      title,
+      description,
       image,
       imageAlt: resolved?.title || site.name,
-      url: `${origin}${pathname}`,
+      url,
       siteName: site.name,
       type: resolved?.type || 'website',
       // square logo looks better in the small card
-      card: resolved?.image ? 'summary_large_image' : 'summary',
+      card: realImage ? 'summary_large_image' : 'summary',
       publishedTime: resolved?.publishedTime,
       tags: resolved?.tags || [],
       bodyText: resolved?.bodyText || '',
+      links: home.links,
+      jsonLd: buildJsonLd({
+        mode,
+        url,
+        title,
+        description,
+        image,
+        resolved,
+        isHome,
+        links: home.links,
+      }),
     });
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'public, max-age=300');
+
+    // unknown blog slug is a real 404. art/cs lookups can fail on rate limits or scrape
+    // timeouts though, so those stay 200 instead of risking deindexing a real page
+    if (mode === 'blog' && slug && !RESERVED_PATHS.has(slug) && !resolved) {
+      res.setHeader('X-Robots-Tag', 'noindex');
+      return res.status(404).send(html);
+    }
+
     res.setHeader('X-Robots-Tag', 'all');
     res.send(html);
   };
