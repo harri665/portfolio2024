@@ -293,7 +293,6 @@ export default function CommentSection({ type, id, variant = 'glass' }) {
           <span className={s.author}>{comment.name}</span>
           <span className={s.timestamp}>
             {formatTimestamp(comment.createdAt)}
-            {comment.editedAt ? ' · edited' : ''}
           </span>
         </div>
         <p className={s.text}>{comment.body}</p>
@@ -348,24 +347,6 @@ export default function CommentSection({ type, id, variant = 'glass' }) {
       </div>
 
       <div className={s.body}>
-        <div className="mb-8">
-          <CommentForm
-            s={s}
-            idPrefix="comment"
-            name={name}
-            onNameChange={setName}
-            body={body}
-            onBodyChange={setBody}
-            website={website}
-            onWebsiteChange={setWebsite}
-            onSubmit={handleSubmit}
-            submitting={submitting}
-            error={submitError}
-            submitLabel="Post comment"
-            placeholder="Say something…"
-          />
-        </div>
-
         {loading ? (
           <p className={s.empty}>loading comments…</p>
         ) : loadError ? (
@@ -387,6 +368,24 @@ export default function CommentSection({ type, id, variant = 'glass' }) {
             ))}
           </div>
         )}
+
+        <div className="mt-8">
+          <CommentForm
+            s={s}
+            idPrefix="comment"
+            name={name}
+            onNameChange={setName}
+            body={body}
+            onBodyChange={setBody}
+            website={website}
+            onWebsiteChange={setWebsite}
+            onSubmit={handleSubmit}
+            submitting={submitting}
+            error={submitError}
+            submitLabel="Post comment"
+            placeholder="Say something…"
+          />
+        </div>
       </div>
     </motion.section>
   );
