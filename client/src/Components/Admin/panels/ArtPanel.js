@@ -106,7 +106,7 @@ export default function ArtPanel({ adminFetch }) {
     <div>
       <PanelHeader
         title="Art Project Slugs"
-        description="Set a custom URL slug for each ArtStation project. Leave blank to use the auto-generated title slug."
+        description="Set a custom URL slug for each art project. Leave blank to use the auto-generated title slug."
         actions={
           <button onClick={handleSave} disabled={saving} className={BTN_PRIMARY}>
             <FaSave className="text-xs" />

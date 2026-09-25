@@ -7,8 +7,8 @@ import { getCommenterName, setCommenterName } from '../../utils/commenterIdentit
 const MAX_NAME = 60;
 const MAX_BODY = 2000;
 
-// Two looks: the Houdini node panels on the blog, and the glass cards used by
-// the art and cs project pages.
+// Three looks: the Houdini node panels on the blog, the glass cards on the cs
+// project pages, and the flat bordered panels of the art gallery.
 const VARIANTS = {
   houdini: {
     section: 'rounded-lg border border-[#2e3240] bg-[#1e2128] overflow-hidden',
@@ -59,6 +59,30 @@ const VARIANTS = {
     author: 'text-sm font-semibold text-white',
     timestamp: 'text-xs text-white/35',
     text: 'mt-1.5 whitespace-pre-wrap break-words text-sm leading-relaxed text-white/70',
+  },
+  gallery: {
+    section: 'rounded-2xl border border-white/[0.09] bg-[#0c0c0f] overflow-hidden',
+    header: 'flex items-center gap-2 border-b border-white/[0.09] px-[17px] py-3',
+    headerDot: 'h-1.5 w-1.5 rounded-full bg-[#2f8bff]',
+    headerText:
+      'font-mono text-[10.5px] font-semibold uppercase tracking-[0.2em] text-[#6b6b73]',
+    body: 'px-[17px] py-6 sm:px-6',
+    label:
+      'mb-1 block font-mono text-[10.5px] font-semibold uppercase tracking-[0.2em] text-[#6b6b73]',
+    input:
+      'w-full rounded-lg border border-white/[0.09] bg-[#121215] px-3 py-2 text-sm text-[#f4f4f5] outline-none transition-colors placeholder:text-[#46464d] focus:border-[#2f8bff]/60',
+    button:
+      'rounded-lg bg-[#2b80ff] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#2f8bff] disabled:cursor-not-allowed disabled:opacity-50',
+    subtleButton:
+      'font-mono text-[10.5px] font-semibold uppercase tracking-[0.15em] text-[#6b6b73] transition-colors hover:text-[#2f8bff]',
+    counter: 'font-mono text-[11px] text-[#46464d]',
+    error: 'text-xs text-red-300',
+    empty: 'font-mono text-xs text-[#6b6b73]',
+    divider: 'border-t border-white/[0.09] pt-4',
+    replyRail: 'border-l border-white/[0.09] pl-4',
+    author: 'text-sm font-semibold text-[#f4f4f5]',
+    timestamp: 'font-mono text-[11px] text-[#46464d]',
+    text: 'mt-1.5 whitespace-pre-wrap break-words text-sm leading-relaxed text-[#a1a1aa]',
   },
 };
 
