@@ -10,6 +10,7 @@ import useragent from 'express-useragent';
 import matter from 'gray-matter';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
+import { createOgHandler, isCrawler } from './og.js';
 // --- NEW IMPORTS ---
 import { Client, GatewayIntentBits } from 'discord.js';
 import 'dotenv/config'; // Loads .env file contents into process.env
@@ -715,23 +716,22 @@ function titleToSlug(title) {
   return (title || '').replace(/\s+/g, '-').replace(/[^A-Za-z0-9-]/g, '');
 }
 
-app.get('/api/project/by-identifier/:identifier', async (req, res) => {
-  const { identifier } = req.params;
-
+// Resolves an art URL identifier (custom slug, hash_id, or title slug) to project details.
+async function getArtProjectByIdentifier(identifier) {
   // 1. Check custom slug config (reverse map: custom-slug → hash_id)
   try {
     const slugConfig = loadArtSlugConfig();
     const hashIdForSlug = Object.entries(slugConfig).find(([, slug]) => slug === identifier)?.[0];
     if (hashIdForSlug) {
       const details = await getProjectDetailsWithPuppeteer(hashIdForSlug);
-      if (details) return res.json(details);
+      if (details) return details;
     }
   } catch {}
 
   // 2. Try by hash_id directly
   try {
     const byHashId = await getProjectDetailsWithPuppeteer(identifier);
-    if (byHashId) return res.json(byHashId);
+    if (byHashId) return byHashId;
   } catch {}
 
   // 3. Try by auto-generated title slug
@@ -741,13 +741,19 @@ app.get('/api/project/by-identifier/:identifier', async (req, res) => {
       const match = projects.find((p) => titleToSlug(p.title) === identifier);
       if (match) {
         const details = await getProjectDetailsWithPuppeteer(match.hash_id);
-        if (details) return res.json(details);
+        if (details) return details;
       }
     }
   } catch (error) {
     console.error('Error in by-identifier title-slug lookup:', error);
   }
 
+  return null;
+}
+
+app.get('/api/project/by-identifier/:identifier', async (req, res) => {
+  const details = await getArtProjectByIdentifier(req.params.identifier);
+  if (details) return res.json(details);
   res.status(404).json({ error: 'Project not found' });
 });
 
@@ -898,7 +904,7 @@ app.get('/sitemap.xml', (req, res) => {
     const urls = [
       `<url><loc>${base}/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>`,
       ...posts.map((p) =>
-        `<url><loc>${base}/posts/${encodeURIComponent(p.slug)}</loc>${p.date ? `<lastmod>${p.date}</lastmod>` : ''}<changefreq>monthly</changefreq><priority>0.8</priority></url>`
+        `<url><loc>${base}/${encodeURIComponent(p.slug)}</loc>${p.date ? `<lastmod>${p.date}</lastmod>` : ''}<changefreq>monthly</changefreq><priority>0.8</priority></url>`
       ),
     ].join('\n  ');
     res.setHeader('Content-Type', 'application/xml');
@@ -1209,6 +1215,45 @@ app.delete('/api/admin/pages/:slug', requireAdmin, (req, res) => {
   } catch (err) {
     res.status(500).json({ error: 'Failed to delete page' });
   }
+});
+
+// ─── LINK PREVIEWS ───────────────────────────────────────────────────────────
+// Crawlers that don't run JS get server-rendered Open Graph tags instead of the
+// static index.html shell. nginx rewrites crawler requests to /__og and passes
+// the original path in X-Original-URI; when Express serves the build directly
+// the middleware below catches them instead.
+
+const GITHUB_DEFAULT_OWNER = 'harri665';
+
+// `/:repoName` carries only the repo name, so look up the owner from the
+// configured list before falling back to the default account.
+function resolveCsRepoFullName(repoName) {
+  if (!/^[\w.-]+$/.test(repoName)) return null;
+
+  const listed = (loadCsConfig().repoNames || []).find(
+    (name) => name.split('/').pop().toLowerCase() === repoName.toLowerCase()
+  );
+
+  if (listed) return listed.includes('/') ? listed : `${GITHUB_DEFAULT_OWNER}/${listed}`;
+  return `${GITHUB_DEFAULT_OWNER}/${repoName}`;
+}
+
+const ogHandler = createOgHandler({
+  blogPostsDir: BLOG_POSTS_DIR,
+  blogImagesDir: BLOG_IMAGES_DIR,
+  getArtProject: getArtProjectByIdentifier,
+  getCsRepo: (fullName) => getGitHubRepoByFullName(fullName),
+  getCsRepoFullName: resolveCsRepoFullName,
+});
+
+app.get('/__og', (req, res) => ogHandler(req, res, req.headers['x-original-uri'] || req.query.path || '/'));
+
+// Fallback for deployments where Express serves the React build itself.
+app.use((req, res, next) => {
+  if (req.method !== 'GET' || req.path.startsWith('/api') || req.path.startsWith('/p/')) return next();
+  if (path.extname(req.path)) return next(); // static assets
+  if (!isCrawler(req.headers['user-agent'])) return next();
+  return ogHandler(req, res, req.originalUrl);
 });
 
 // ── Serve React build + catch-all for BrowserRouter ──────────────────────────
