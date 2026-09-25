@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import SubdomainNav from './SubdomainNav';
-import DistortedTorusScene from './DistortedTorusScene';
+import { PrismBackdrop, PrismHero, trackPointer } from './Prism';
 import { SITE_MODES } from '../../utils/siteMode';
 import './gallery.css';
 
@@ -127,7 +127,7 @@ function GRCard({ p, i }) {
   const desc = p.d || `${p.assets} ${p.assets === 1 ? 'asset' : 'assets'} · open the project to see the full breakdown.`;
 
   return (
-    <Link to={`/${p.id}`} className="gr-card">
+    <Link to={`/${p.id}`} className="gr-card prism-glow lens-art" onPointerMove={trackPointer}>
       <div className="gr-thumb" style={{ '--tint': TINTS[i % TINTS.length] }}>
         <img
           className="gr-img"
@@ -143,7 +143,7 @@ function GRCard({ p, i }) {
         <div className="gr-reveal">
           <span className="gr-rev-title">{p.t}</span>
           <p>{desc}</p>
-          <span className="gr-link">View Details →</span>
+          <span className="gr-link">View project</span>
         </div>
       </div>
       <div className="gr-meta">
@@ -157,24 +157,17 @@ function GRCard({ p, i }) {
 export default function ArtGallery() {
   return (
     <div className="gx nf gr">
-      <div className="nf-dots" aria-hidden="true" />
+      <PrismBackdrop lens="art" tone="page" />
       <SubdomainNav currentMode={SITE_MODES.ART} />
 
-      <section className="nf-hero">
-        <div className="nf-hero-scene" aria-hidden="true">
-          <DistortedTorusScene variant="art" className="h-full w-full" />
-        </div>
-        <div className="nf-hero-fade" aria-hidden="true" />
-        <div className="nf-hero-name">Harrison Martin</div>
-        <header className="nf-hero-head">
-          <div className="nf-eyebrow">3D Art</div>
-          <h1 className="nf-title">Selected work.</h1>
-          <p className="nf-meta">{WORKS.length} projects · 3D, animation, and simulation</p>
-        </header>
-      </section>
+      <PrismHero
+        fullHeight
+        title="3D art."
+        subtitle={`${WORKS.length} projects in modeling, animation, and simulation.`}
+      />
 
       <div className="gx-shell">
-        <div className="gr-grid">
+        <div className="gr-grid" data-prism-panel>
           {WORKS.map((p, i) => <GRCard key={p.id} p={p} i={i} />)}
         </div>
       </div>

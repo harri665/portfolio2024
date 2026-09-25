@@ -5,6 +5,7 @@ import ReactPlayer from 'react-player';
 import { apiUrl } from '../../utils/api';
 import CommentSection from '../Comments/CommentSection';
 import SubdomainNav from '../Homepage/SubdomainNav';
+import { PrismBackdrop } from '../Homepage/Prism';
 import { getSiteHref, SITE_MODES } from '../../utils/siteMode';
 import '../Homepage/gallery.css';
 
@@ -299,7 +300,7 @@ const ArtProject = () => {
 function PageShell({ children }) {
   return (
     <div className="gx nf gd">
-      <div className="nf-dots" aria-hidden="true" />
+      <PrismBackdrop lens="art" tone="quiet" />
       <SubdomainNav currentMode={SITE_MODES.ART} />
       <div className="gx-shell" style={{ paddingTop: '108px' }}>
         {children}

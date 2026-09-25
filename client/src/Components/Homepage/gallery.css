@@ -3,8 +3,6 @@
    Ported from design handoff. Scoped under .gx.
    ============================================================ */
 
-@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap");
-
 .gx {
   --bg: #09090b;
   --panel: rgba(255, 255, 255, 0.022);
@@ -17,12 +15,15 @@
   --faint: #46464d;
   --blue: #2b80ff;
   --blue-bright: #2f8bff;
+  /* the Art lens accent, shared with the prism backdrop */
+  --accent: #ff9a7a;
+  --glass: rgba(15, 17, 23, 0.52);
+  --glass-line: rgba(255, 255, 255, 0.12);
 
   position: relative;
   min-height: 100vh;
   background: var(--bg);
   color: var(--text);
-  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -36,15 +37,9 @@
 /* ============================================================
    NF DIRECTION (flat, 3D art)
    ============================================================ */
-.gx.nf { --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace; }
-
-.nf .nf-dots {
-  position: absolute;
-  inset: 0;
-  background-image: radial-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1.4px);
-  background-size: 26px 26px;
-  pointer-events: none;
-  z-index: 0;
+/* labels use the same sans as the rest of the site */
+.gx.nf {
+  --mono: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
 }
 
 .nf .gx-shell { position: relative; z-index: 1; }
@@ -54,69 +49,7 @@
   padding: 0 40px 60px;
 }
 
-.nf-hero + .gx-shell { padding-top: 14px; }
-
-/* ---- hero: the distorted torus behind the page title ---- */
-.nf-hero {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  align-items: flex-end;
-  height: min(76vh, 660px);
-  min-height: 440px;
-  overflow: hidden;
-}
-.nf-hero-scene { position: absolute; inset: 0; }
-.nf-hero-scene canvas { display: block; }
-
-/* fades the scene into the page so the grid below reads as one surface */
-.nf-hero-fade {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: linear-gradient(
-    to bottom,
-    rgba(9, 9, 11, 0) 38%,
-    rgba(9, 9, 11, 0.6) 76%,
-    var(--bg) 100%
-  );
-}
-/* the wordmark sits centred in the scene, above the section header */
-.nf-hero-name {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 24px 9rem;
-  font-size: clamp(2.4rem, 7.2vw, 5.25rem);
-  font-weight: 800;
-  line-height: 1;
-  letter-spacing: -0.035em;
-  text-align: center;
-  color: var(--text);
-  text-shadow: 0 6px 40px rgba(9, 9, 11, 0.55);
-  pointer-events: none;
-}
-
-.nf-hero-head {
-  position: relative;
-  z-index: 2;
-  width: 100%;
-  padding: 0 40px 34px;
-}
-
-@media (max-width: 1023px) {
-  .nf-hero { height: min(66vh, 540px); min-height: 380px; }
-  .nf-hero-head { padding: 0 24px 28px; }
-  .nf-hero-name { padding-bottom: 8rem; }
-}
-@media (max-width: 639px) {
-  .nf-hero { height: 58vh; min-height: 340px; }
-  .nf-hero-head { padding: 0 16px 24px; }
-  .nf-hero-name { padding-bottom: 7rem; }
-}
+.gx.gr .gx-shell { max-width: 1280px; margin: 0 auto; }
 
 /* ---- header ---- */
 .nf-head { margin: 34px 0 30px; }
@@ -165,9 +98,12 @@
 
 .gr-card {
   position: relative;
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: #0c0c0f;
+  border: 1px solid var(--glass-line);
+  border-radius: 1.5rem;
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.35);
   overflow: hidden;
   cursor: pointer;
   transition: border-color 0.22s, transform 0.22s, box-shadow 0.22s;
@@ -175,11 +111,7 @@
   color: inherit;
   display: block;
 }
-.gr-card:hover {
-  border-color: var(--line-strong);
-  transform: translateY(-4px);
-  box-shadow: 0 22px 52px -26px rgba(0, 0, 0, 0.92);
-}
+.gr-card:hover { transform: translateY(-4px); }
 
 /* thumbnail */
 .gr-thumb {
@@ -267,7 +199,7 @@
   flex-direction: column;
   justify-content: flex-end;
   gap: 10px;
-  background: rgba(9, 9, 11, 0.9);
+  background: rgba(10, 11, 15, 0.84);
   backdrop-filter: blur(3px);
   opacity: 0;
   transition: opacity 0.24s;
@@ -287,12 +219,14 @@
 .gr-link {
   font-size: 13px;
   font-weight: 600;
-  color: var(--blue-bright);
+  color: var(--accent);
 }
 .gr-rev-title { display: none; }
 
 /* meta row */
 .gr-meta {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -312,12 +246,12 @@
   font-size: 15px;
   transition: color 0.2s, transform 0.2s;
 }
-.gr-card:hover .gr-arrow { color: var(--blue-bright); transform: translateX(3px); }
+.gr-card:hover .gr-arrow { color: var(--accent); transform: translateX(3px); }
 
 /* ============================================================
    PROJECT DETAIL (GD) — single art project, same flat language
    ============================================================ */
-.gd .gx-shell { max-width: 1440px; margin: 0 auto; }
+.gd .gx-shell { position: relative; z-index: 1; max-width: 1440px; margin: 0 auto; }
 
 /* back link */
 .gd-back {
@@ -356,9 +290,11 @@
 
 /* generic flat panel + section label */
 .gd-panel {
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: #0c0c0f;
+  border: 1px solid var(--glass-line);
+  border-radius: 1.5rem;
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
   overflow: hidden;
 }
 .gd-label {
@@ -390,9 +326,11 @@
   width: fit-content;
   max-width: 100%;
   margin: 0 auto 22px;
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: #0c0c0f;
+  border: 1px solid var(--glass-line);
+  border-radius: 1.5rem;
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
   overflow: hidden;
   line-height: 0;
 }
@@ -428,7 +366,7 @@
 .gd-prose > *:first-child { margin-top: 0; }
 .gd-prose > *:last-child { margin-bottom: 0; }
 .gd-prose p { margin: 0 0 1.1em; }
-.gd-prose a { color: var(--blue-bright); text-decoration: none; }
+.gd-prose a { color: var(--accent); text-decoration: none; }
 .gd-prose a:hover { text-decoration: underline; }
 .gd-prose strong { color: var(--text); font-weight: 600; }
 .gd-prose h1,
@@ -492,9 +430,11 @@
   .gd-span-6 { grid-column: span 1; }
 }
 .gd-asset {
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: #0c0c0f;
+  border: 1px solid var(--glass-line);
+  border-radius: 1.25rem;
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
   overflow: hidden;
   transition: border-color 0.22s, transform 0.22s, box-shadow 0.22s;
 }
@@ -503,7 +443,7 @@
   transform: translateY(-3px);
   box-shadow: 0 22px 52px -26px rgba(0, 0, 0, 0.92);
 }
-.gd-asset-frame { position: relative; width: 100%; background: #0c0c0f; line-height: 0; }
+.gd-asset-frame { position: relative; width: 100%; background: rgba(8, 9, 12, 0.6); line-height: 0; }
 .gd-asset-frame video,
 .gd-asset-frame iframe { display: block; width: 100%; height: 100%; }
 .gd-asset-frame > img {
@@ -536,6 +476,17 @@
 
 /* comments read better at text width than across the full asset grid */
 .gd-comments { max-width: 760px; margin-top: 22px; }
+
+@media (max-width: 639px) {
+  .gr-card,
+  .gd-panel,
+  .gd-cover,
+  .gd-asset {
+    background: rgba(15, 17, 23, 0.82);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
 
 /* prefers-reduced-motion */
 @media (prefers-reduced-motion: reduce) {

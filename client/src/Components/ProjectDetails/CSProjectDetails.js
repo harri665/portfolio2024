@@ -13,6 +13,7 @@ import { FaArrowLeft, FaGithub, FaExternalLinkAlt } from 'react-icons/fa';
 
 import { SITE_MODES } from '../../utils/siteMode';
 import SubdomainNav from '../Homepage/SubdomainNav';
+import { PrismBackdrop } from '../Homepage/Prism';
 import CommentSection from '../Comments/CommentSection';
 
 const LANGUAGE_COLORS = {
@@ -161,9 +162,10 @@ export default function CSProjectDetails() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#08090c] text-white">
+      <div className="min-h-screen text-white">
+        <PrismBackdrop lens="cs" tone="quiet" />
         <SubdomainNav currentMode={SITE_MODES.CS} />
-        <div className="flex min-h-screen items-center justify-center">
+        <div className="relative z-10 flex min-h-screen items-center justify-center">
           <p className="text-sm text-white/40">Loading…</p>
         </div>
       </div>
@@ -172,9 +174,10 @@ export default function CSProjectDetails() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-[#08090c] text-white">
+      <div className="min-h-screen text-white">
+        <PrismBackdrop lens="cs" tone="quiet" />
         <SubdomainNav currentMode={SITE_MODES.CS} />
-        <div className="flex min-h-screen items-center justify-center px-4">
+        <div className="relative z-10 flex min-h-screen items-center justify-center px-4">
           <div className="rounded-2xl border border-red-300/20 bg-red-500/10 px-8 py-10 text-center text-red-300">
             {error}
           </div>
@@ -190,8 +193,8 @@ export default function CSProjectDetails() {
   const updatedDate = formatDate(repoData.pushed_at);
 
   return (
-    <div className="relative min-h-screen bg-[#08090c] text-white">
-      <PageGlow />
+    <div className="relative min-h-screen text-white">
+      <PrismBackdrop lens="cs" tone="quiet" />
       <SubdomainNav currentMode={SITE_MODES.CS} />
 
       {/* ── Hero ─────────────────────────────────────────────────────────── */}
@@ -330,17 +333,6 @@ export default function CSProjectDetails() {
       <div className="relative z-10 mx-auto max-w-3xl px-4 pb-32 sm:px-8">
         <CommentSection type="cs" id={repoName} variant="glass" />
       </div>
-    </div>
-  );
-}
-
-function PageGlow() {
-  return (
-    <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
-      <div className="absolute left-[-8rem] top-[6rem] h-80 w-80 rounded-full bg-sky-500/10 blur-3xl" />
-      <div className="absolute right-[4%] top-[14rem] h-96 w-96 rounded-full bg-indigo-500/8 blur-3xl" />
-      <div className="absolute bottom-[20%] left-[30%] h-96 w-96 rounded-full bg-cyan-400/6 blur-3xl" />
-      <div className="absolute inset-0 opacity-[0.055] [background-image:radial-gradient(circle_at_1px_1px,rgba(255,255,255,0.8)_1px,transparent_0)] [background-size:22px_22px]" />
     </div>
   );
 }
