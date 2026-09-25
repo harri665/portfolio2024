@@ -337,6 +337,16 @@ const ArtStationProject = () => {
                           muted
                           loop
                           playing
+                          playsinline
+                          config={{
+                            file: {
+                              attributes: {
+                                playsInline: true,
+                                'webkit-playsinline': 'true',
+                                'x5-playsinline': 'true',
+                              },
+                            },
+                          }}
                         />
                       )}
                     </div>
