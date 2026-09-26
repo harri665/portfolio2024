@@ -1,7 +1,14 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import SubdomainNav from './SubdomainNav';
-import DistortedTorusScene from './DistortedTorusScene';
+import {
+  HOVER_LIFT,
+  PrismBackdrop,
+  PrismHero,
+  trackPointer,
+  useScrollReveal,
+} from './Prism';
 import { SITE_MODES } from '../../utils/siteMode';
 import './gallery.css';
 
@@ -123,11 +130,23 @@ function ToolBadge({ k }) {
   );
 }
 
+const MotionLink = motion(Link);
+
 function GRCard({ p, i }) {
   const desc = p.d || `${p.assets} ${p.assets === 1 ? 'asset' : 'assets'} · open the project to see the full breakdown.`;
+  const reveal = useScrollReveal(i);
 
   return (
-    <Link to={`/${p.id}`} className="gr-card">
+    <MotionLink
+      to={`/${p.id}`}
+      {...reveal}
+      whileHover={HOVER_LIFT}
+      className="gr-card liquid-glass prism-glow lens-art"
+      onPointerMove={trackPointer}
+      data-liquid-glass
+    >
+      <span aria-hidden="true" className="liquid-glass-sheen liquid-glass-over" />
+      <span aria-hidden="true" className="liquid-glass-rim liquid-glass-over" />
       <div className="gr-thumb" style={{ '--tint': TINTS[i % TINTS.length] }}>
         <img
           className="gr-img"
@@ -143,38 +162,31 @@ function GRCard({ p, i }) {
         <div className="gr-reveal">
           <span className="gr-rev-title">{p.t}</span>
           <p>{desc}</p>
-          <span className="gr-link">View Details →</span>
+          <span className="gr-link">View project</span>
         </div>
       </div>
       <div className="gr-meta">
         <span className="gr-name">{p.t}</span>
         <span className="gr-arrow">→</span>
       </div>
-    </Link>
+    </MotionLink>
   );
 }
 
 export default function ArtGallery() {
   return (
     <div className="gx nf gr">
-      <div className="nf-dots" aria-hidden="true" />
+      <PrismBackdrop lens="art" tone="page" />
       <SubdomainNav currentMode={SITE_MODES.ART} />
 
-      <section className="nf-hero">
-        <div className="nf-hero-scene" aria-hidden="true">
-          <DistortedTorusScene variant="art" className="h-full w-full" />
-        </div>
-        <div className="nf-hero-fade" aria-hidden="true" />
-        <div className="nf-hero-name">Harrison Martin</div>
-        <header className="nf-hero-head">
-          <div className="nf-eyebrow">3D Art</div>
-          <h1 className="nf-title">Selected work.</h1>
-          <p className="nf-meta">{WORKS.length} projects · 3D, animation, and simulation</p>
-        </header>
-      </section>
+      <PrismHero
+        fullHeight
+        title="3D art."
+        subtitle={`${WORKS.length} projects in modeling, animation, and simulation.`}
+      />
 
       <div className="gx-shell">
-        <div className="gr-grid">
+        <div className="gr-grid" data-prism-panel>
           {WORKS.map((p, i) => <GRCard key={p.id} p={p} i={i} />)}
         </div>
       </div>

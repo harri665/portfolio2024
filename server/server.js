@@ -1320,6 +1320,47 @@ app.get('/api/proxy/video', async (req, res) => {
   }
 });
 
+// ─── IMAGE PROXY ─────────────────────────────────────────────────────────────
+// Serves ArtStation images with CORS headers (from the cors() middleware), so
+// the art project pages can load a cover into WebGL as their backdrop.
+
+const IMAGE_PROXY_HOST = /^cdn[a-z]?\.artstation\.com$/;
+
+app.get('/api/proxy/image', async (req, res) => {
+  const { url } = req.query;
+  if (!url) return res.status(400).json({ error: 'Missing url' });
+
+  let parsed;
+  try { parsed = new URL(url); } catch { return res.status(400).json({ error: 'Invalid URL' }); }
+  if (parsed.protocol !== 'https:' || !IMAGE_PROXY_HOST.test(parsed.hostname)) {
+    return res.status(403).json({ error: 'Domain not allowed' });
+  }
+
+  try {
+    const upstream = await axios.get(url, {
+      responseType: 'stream',
+      maxRedirects: 3,
+      timeout: 15000,
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+    });
+
+    const type = upstream.headers['content-type'] || '';
+    if (!type.startsWith('image/')) {
+      upstream.data.destroy();
+      return res.status(415).json({ error: 'Not an image' });
+    }
+
+    res.setHeader('Content-Type', type);
+    if (upstream.headers['content-length']) {
+      res.setHeader('Content-Length', upstream.headers['content-length']);
+    }
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    upstream.data.pipe(res);
+  } catch (err) {
+    if (!res.headersSent) res.status(502).json({ error: 'Proxy failed' });
+  }
+});
+
 // ─── STATIC PAGES ────────────────────────────────────────────────────────────
 
 const PAGES_DIR = path.join(process.cwd(), 'pages');

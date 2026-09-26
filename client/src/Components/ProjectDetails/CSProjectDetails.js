@@ -13,6 +13,7 @@ import { FaArrowLeft, FaGithub, FaExternalLinkAlt } from 'react-icons/fa';
 
 import { SITE_MODES } from '../../utils/siteMode';
 import SubdomainNav from '../Homepage/SubdomainNav';
+import { PrismBackdrop, Reveal } from '../Homepage/Prism';
 import CommentSection from '../Comments/CommentSection';
 
 const LANGUAGE_COLORS = {
@@ -161,9 +162,10 @@ export default function CSProjectDetails() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#08090c] text-white">
+      <div className="min-h-screen text-white">
+        <PrismBackdrop lens="cs" tone="detail" />
         <SubdomainNav currentMode={SITE_MODES.CS} />
-        <div className="flex min-h-screen items-center justify-center">
+        <div className="relative z-10 flex min-h-screen items-center justify-center">
           <p className="text-sm text-white/40">Loading…</p>
         </div>
       </div>
@@ -172,9 +174,10 @@ export default function CSProjectDetails() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-[#08090c] text-white">
+      <div className="min-h-screen text-white">
+        <PrismBackdrop lens="cs" tone="detail" />
         <SubdomainNav currentMode={SITE_MODES.CS} />
-        <div className="flex min-h-screen items-center justify-center px-4">
+        <div className="relative z-10 flex min-h-screen items-center justify-center px-4">
           <div className="rounded-2xl border border-red-300/20 bg-red-500/10 px-8 py-10 text-center text-red-300">
             {error}
           </div>
@@ -190,12 +193,17 @@ export default function CSProjectDetails() {
   const updatedDate = formatDate(repoData.pushed_at);
 
   return (
-    <div className="relative min-h-screen bg-[#08090c] text-white">
-      <PageGlow />
+    <div className="relative min-h-screen text-white">
+      <PrismBackdrop
+        lens="cs"
+        tone="detail"
+        accent={LANGUAGE_COLORS[repoData.language]}
+      />
       <SubdomainNav currentMode={SITE_MODES.CS} />
 
+      <main className="relative z-10 mx-auto max-w-4xl px-4 pb-32 pt-28 sm:px-8">
       {/* ── Hero ─────────────────────────────────────────────────────────── */}
-      <div className="relative z-10 mx-auto max-w-3xl px-4 pb-4 pt-28 sm:px-8">
+      <div>
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -204,14 +212,14 @@ export default function CSProjectDetails() {
           {/* Back link */}
           <Link
             to="/"
-            className="mb-10 inline-flex items-center gap-2 text-sm text-white/40 transition-colors hover:text-white/70"
+            className="mb-10 inline-flex items-center gap-2 text-sm text-white/60 transition-colors hover:text-white"
           >
             <FaArrowLeft className="text-xs" />
             All projects
           </Link>
 
           {/* Language + date meta */}
-          <div className="mt-2 flex items-center gap-3 text-xs text-white/35">
+          <div className="mt-2 flex items-center gap-3 text-xs text-white/60">
             {repoData.language && (
               <span
                 className="font-medium"
@@ -231,7 +239,7 @@ export default function CSProjectDetails() {
 
           {/* Description */}
           {repoData.description && (
-            <p className="mt-5 text-lg leading-relaxed text-white/55">
+            <p className="mt-5 text-lg leading-relaxed text-white/70">
               {repoData.description}
             </p>
           )}
@@ -250,7 +258,7 @@ export default function CSProjectDetails() {
               {topics.map((t) => (
                 <span
                   key={t}
-                  className="rounded-full border border-blue-300/15 bg-blue-400/10 px-2.5 py-1 text-xs font-medium text-blue-200/70"
+                  className="rounded-full border border-white/12 bg-white/5 px-2.5 py-1 text-xs font-medium text-white/70"
                 >
                   {t}
                 </span>
@@ -287,20 +295,16 @@ export default function CSProjectDetails() {
         </motion.div>
       </div>
 
-      {/* ── Divider ──────────────────────────────────────────────────────── */}
-      <div className="relative z-10 mx-auto mt-12 max-w-3xl px-4 sm:px-8">
-        <div className="h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
-      </div>
-
       {/* ── README ───────────────────────────────────────────────────────── */}
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.15 }}
-        className="relative z-10 mx-auto max-w-3xl px-4 pb-12 pt-12 sm:px-8"
+      <Reveal
+        as="section"
+        data-liquid-glass="1.8"
+        className="liquid-glass solid-glow lens-cs relative mt-12 overflow-hidden rounded-[1.5rem] px-5 py-8 sm:px-10 sm:py-10"
       >
+        {/* No sheen here: stretched over a pane this tall it becomes one big glare */}
+        <span aria-hidden="true" className="liquid-glass-rim" />
         {readme ? (
-          <div className="cs-readme-prose">
+          <div className="cs-readme-prose relative z-10">
             <ReactMarkdown
               remarkPlugins={[remarkGfm, remarkMath]}
               rehypePlugins={[rehypeSlug, rehypeKatex, rehypeHighlight, rehypeRaw]}
@@ -322,25 +326,17 @@ export default function CSProjectDetails() {
             </ReactMarkdown>
           </div>
         ) : (
-          <p className="text-center text-sm text-white/30">No README found for this repository.</p>
+          <p className="relative z-10 text-center text-sm text-white/40">
+            This repository has no README yet.
+          </p>
         )}
-      </motion.div>
+      </Reveal>
 
       {/* ── Comments ─────────────────────────────────────────────────────── */}
-      <div className="relative z-10 mx-auto max-w-3xl px-4 pb-32 sm:px-8">
+      <Reveal className="mt-12 pb-6">
         <CommentSection type="cs" id={repoName} variant="glass" />
-      </div>
-    </div>
-  );
-}
-
-function PageGlow() {
-  return (
-    <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
-      <div className="absolute left-[-8rem] top-[6rem] h-80 w-80 rounded-full bg-sky-500/10 blur-3xl" />
-      <div className="absolute right-[4%] top-[14rem] h-96 w-96 rounded-full bg-indigo-500/8 blur-3xl" />
-      <div className="absolute bottom-[20%] left-[30%] h-96 w-96 rounded-full bg-cyan-400/6 blur-3xl" />
-      <div className="absolute inset-0 opacity-[0.055] [background-image:radial-gradient(circle_at_1px_1px,rgba(255,255,255,0.8)_1px,transparent_0)] [background-size:22px_22px]" />
+      </Reveal>
+      </main>
     </div>
   );
 }
