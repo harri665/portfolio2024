@@ -111,7 +111,9 @@ export default function DistortedTorusScene({
   accent,
   image,
   glass,
+  followScroll = false,
 }) {
+  const layer = useRef(null);
   const preset = SCENE_PRESETS[variant] || SCENE_PRESETS.art;
   // hub keeps full res since its headline is drawn as glass in this canvas
   const compact = useMemo(
@@ -125,14 +127,17 @@ export default function DistortedTorusScene({
   }
 
   return (
-    <div className={className}>
+    <div ref={layer} className={className}>
       <ErrorBoundary name="webgl">
         <Canvas
           camera={{ position: cameraPosition, fov: 60 }}
           dpr={[1, maxDpr]}
           gl={{ antialias: !glass }}
+          resize={{ scroll: false }}
           style={{ width: '100%', height: '100%' }}
         >
+          // has to be first so every frame callback sees the canvas over the viewport
+          {followScroll && <ScrollFollow layer={layer} />}
           <ambientLight intensity={preset.ambientLightIntensity} color="#ffffff" />
           <spotLight
             position={preset.spotLight.position}
@@ -172,6 +177,27 @@ export default function DistortedTorusScene({
       </ErrorBoundary>
     </div>
   );
+}
+
+// a fixed canvas lags the page on phones (iOS especially) because the browser scrolls
+// on its own thread. so the canvas scrolls with the page and gets moved back each frame
+function ScrollFollow({ layer }) {
+  const offset = useRef(0);
+
+  useFrame(() => {
+    const el = layer.current;
+    if (!el) {
+      return;
+    }
+    // clamp at 0 for iOS overscroll bounce
+    const next = Math.max(0, offset.current - el.getBoundingClientRect().top);
+    if (next !== offset.current) {
+      offset.current = next;
+      el.style.transform = `translate3d(0, ${next}px, 0)`;
+    }
+  }, -1);
+
+  return null;
 }
 
 // ─── The drip ──────────────────────────────────────────────────────────────
