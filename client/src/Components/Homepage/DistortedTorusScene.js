@@ -107,6 +107,13 @@ export default function DistortedTorusScene({
   glass,
 }) {
   const preset = SCENE_PRESETS[variant] || SCENE_PRESETS.art;
+  // Phones and tablets draw fewer pixels and a cheaper frost. The hub keeps
+  // its resolution because its headline is drawn as glass in this canvas.
+  const compact = useMemo(
+    () => window.matchMedia?.('(max-width: 768px), (pointer: coarse)').matches ?? false,
+    []
+  );
+  const maxDpr = compact && !glass?.textSelector ? 1 : 1.5;
   // Shared between the drip driver, the knot, and the liquid each frame
   const dripState = useRef(null);
   if (!dripState.current) {
@@ -119,7 +126,10 @@ export default function DistortedTorusScene({
       <ErrorBoundary name="webgl">
         <Canvas
           camera={{ position: cameraPosition, fov: 60 }}
-          dpr={[1, 1.5]}
+          dpr={[1, maxDpr]}
+          // With glass on, the scene renders to a texture first, so
+          // multisampling the screen would only cost fill rate
+          gl={{ antialias: !glass }}
           style={{ width: '100%', height: '100%' }}
         >
           <ambientLight intensity={preset.ambientLightIntensity} color="#ffffff" />
@@ -157,7 +167,7 @@ export default function DistortedTorusScene({
           )}
           {drip && <LiquidDrip lens={LENSES[lens]} state={dripState.current} />}
 
-          {glass && <LiquidGlassPass {...glass} />}
+          {glass && <LiquidGlassPass {...glass} blurTaps={compact ? 6 : 12} />}
         </Canvas>
       </ErrorBoundary>
     </div>
