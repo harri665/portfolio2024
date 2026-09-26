@@ -63,9 +63,9 @@ export function PrismBackdrop({ lens = 'hub', tone = 'page', accent, image }) {
             glass
               ? { selector: '[data-liquid-glass]', textSelector: '[data-liquid-glass-text]' }
               : tone === 'detail'
-                ? { selector: '[data-liquid-glass]', shade: false, frost: 2.5 }
+                ? { selector: '[data-liquid-glass]', imageSelector: '[data-glass-image]', shade: false, frost: 2.5 }
                 : drip
-                  ? { selector: '[data-liquid-glass]', shade: false }
+                  ? { selector: '[data-liquid-glass]', imageSelector: '[data-glass-image]', shade: false }
                   : undefined
           }
           className="h-full w-full"

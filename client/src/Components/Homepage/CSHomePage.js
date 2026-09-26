@@ -477,26 +477,30 @@ function MediaPreview({ url }) {
   const fitClass = type === 'image' ? 'object-cover' : 'object-contain';
 
   return (
-    <div className="relative z-10 w-full overflow-hidden bg-[#0d0f14]/80" style={{ height: '11rem' }}>
-      {type === 'video' ? (
-        <video
-          src={url}
-          autoPlay
-          loop
-          muted
-          playsInline
-          webkit-playsinline="true"
-          ref={(el) => {
-            // React only sets `muted` as a property; iOS needs the attribute too
-            // or it refuses inline playback and kicks the video fullscreen.
-            if (el) el.setAttribute('muted', '');
-          }}
-          className={`h-full w-full ${fitClass}`}
-        />
-      ) : (
-        <img src={url} alt="" className={`h-full w-full ${fitClass}`} />
-      )}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[#0f1117]/90 to-transparent" />
+    <div className="relative z-10 px-3 pt-3">
+      <div
+        className="relative w-full overflow-hidden rounded-xl border border-white/10 bg-[#0d0f14]/80"
+        style={{ height: '11rem' }}
+      >
+        {type === 'video' ? (
+          <video
+            src={url}
+            autoPlay
+            loop
+            muted
+            playsInline
+            webkit-playsinline="true"
+            ref={(el) => {
+              // React only sets `muted` as a property; iOS needs the attribute too
+              // or it refuses inline playback and kicks the video fullscreen.
+              if (el) el.setAttribute('muted', '');
+            }}
+            className={`h-full w-full ${fitClass}`}
+          />
+        ) : (
+          <img src={url} alt="" className={`h-full w-full ${fitClass}`} />
+        )}
+      </div>
     </div>
   );
 }
