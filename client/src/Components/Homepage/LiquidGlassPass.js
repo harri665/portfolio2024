@@ -23,6 +23,7 @@ import * as THREE from 'three';
 //
 // `frost` is the blur radius (px) through the glass. The project pages turn it
 // down so their backdrop's lines stay sharp enough to see bend at the rim.
+// `blurTaps` is how many samples spread across that blur; phones use fewer.
 // Enough for every gallery card on screen at once; off-screen ones are skipped
 const MAX_PANES = 16;
 
@@ -32,6 +33,7 @@ export default function LiquidGlassPass({
   sceneDim = [0.6, 0.7],
   shade = true,
   frost = 5,
+  blurTaps = 12,
 }) {
   const gl = useThree((state) => state.gl);
   const size = useThree((state) => state.size);
@@ -66,7 +68,7 @@ export default function LiquidGlassPass({
         textOpacity: { value: 0 },
       },
       vertexShader: passVertexShader,
-      fragmentShader: passFragmentShader,
+      fragmentShader: passFragmentShader(blurTaps),
       blending: THREE.NoBlending,
       depthTest: false,
       depthWrite: false,
@@ -75,7 +77,7 @@ export default function LiquidGlassPass({
     scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
     const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     return { material, scene, camera, emptyText };
-  }, [target]);
+  }, [target, blurTaps]);
 
   useEffect(() => {
     target.setSize(Math.round(size.width * dpr), Math.round(size.height * dpr));
@@ -343,12 +345,12 @@ const passVertexShader = `
 `;
 
 // all in css px, y down like the DOM
-const passFragmentShader = `
+const passFragmentShader = (blurTaps) => `
   #define MAX_PANES ${MAX_PANES}
   // prism split (px)
   #define SPLIT 5.5
   #define EDGE_DISPERSION 0.6
-  #define BLUR_TAPS 12
+  #define BLUR_TAPS ${blurTaps}
   #define TEXT_FROST 0.18
   #define TEXT_SPECULAR 0.9
 

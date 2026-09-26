@@ -140,7 +140,8 @@ export function PrismHero({ title, subtitle, children, fullHeight = false, glass
 
 // Gallery cards fade in and rise as they scroll into view, each row staggered
 // left to right. Spread onto a motion component; it animates once per card.
-export function useScrollReveal(index = 0) {
+// `amount` is the share of the element that has to be on screen first.
+export function useScrollReveal(index = 0, amount = 0.15) {
   const reduceMotion = useReducedMotion();
   return {
     initial: { opacity: 0, y: reduceMotion ? 0 : 40 },
@@ -149,13 +150,13 @@ export function useScrollReveal(index = 0) {
       y: 0,
       transition: { duration: 0.7, ease: [0.22, 1, 0.36, 1], delay: (index % 3) * 0.08 },
     },
-    viewport: { once: true, amount: 0.15 },
+    viewport: { once: true, amount },
   };
 }
 
-// A motion element (`as`, default div) that plays the scroll-in reveal
+// tall panels (long readme on a phone) never get 15% on screen so reveal on appear
 export function Reveal({ as = 'div', index = 0, ...props }) {
-  const reveal = useScrollReveal(index);
+  const reveal = useScrollReveal(index, 'some');
   const Component = motion[as];
   return <Component {...reveal} {...props} />;
 }

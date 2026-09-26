@@ -105,6 +105,12 @@ export default function DistortedTorusScene({
   glass,
 }) {
   const preset = SCENE_PRESETS[variant] || SCENE_PRESETS.art;
+  // hub keeps full res since its headline is drawn as glass in this canvas
+  const compact = useMemo(
+    () => window.matchMedia?.('(max-width: 768px), (pointer: coarse)').matches ?? false,
+    []
+  );
+  const maxDpr = compact && !glass?.textSelector ? 1 : 1.5;
   const dripState = useRef(null);
   if (!dripState.current) {
     dripState.current = { progress: 0, rect: null };
@@ -115,7 +121,8 @@ export default function DistortedTorusScene({
       <ErrorBoundary name="webgl">
         <Canvas
           camera={{ position: cameraPosition, fov: 60 }}
-          dpr={[1, 1.5]}
+          dpr={[1, maxDpr]}
+          gl={{ antialias: !glass }}
           style={{ width: '100%', height: '100%' }}
         >
           <ambientLight intensity={preset.ambientLightIntensity} color="#ffffff" />
@@ -152,7 +159,7 @@ export default function DistortedTorusScene({
           )}
           {drip && <LiquidDrip lens={LENSES[lens]} state={dripState.current} />}
 
-          {glass && <LiquidGlassPass {...glass} />}
+          {glass && <LiquidGlassPass {...glass} blurTaps={compact ? 6 : 12} />}
         </Canvas>
       </ErrorBoundary>
     </div>
