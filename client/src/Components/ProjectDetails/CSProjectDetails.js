@@ -162,7 +162,7 @@ export default function CSProjectDetails() {
 
   if (loading) {
     return (
-      <div className="min-h-screen text-white">
+      <div className="relative min-h-screen text-white">
         <PrismBackdrop lens="cs" tone="detail" />
         <SubdomainNav currentMode={SITE_MODES.CS} />
         <div className="relative z-10 flex min-h-screen items-center justify-center">
@@ -174,7 +174,7 @@ export default function CSProjectDetails() {
 
   if (error) {
     return (
-      <div className="min-h-screen text-white">
+      <div className="relative min-h-screen text-white">
         <PrismBackdrop lens="cs" tone="detail" />
         <SubdomainNav currentMode={SITE_MODES.CS} />
         <div className="relative z-10 flex min-h-screen items-center justify-center px-4">

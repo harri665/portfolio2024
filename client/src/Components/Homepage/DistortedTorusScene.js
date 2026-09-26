@@ -115,7 +115,11 @@ export default function DistortedTorusScene({
   accent,
   image,
   glass,
+  // Scroll with the page and move back over the viewport each frame (see
+  // ScrollFollow); the container must sit at the top of a scrolling box
+  followScroll = false,
 }) {
+  const layer = useRef(null);
   const preset = SCENE_PRESETS[variant] || SCENE_PRESETS.art;
   // Phones and tablets draw fewer pixels and a cheaper frost. The hub keeps
   // its resolution because its headline is drawn as glass in this canvas.
@@ -131,7 +135,7 @@ export default function DistortedTorusScene({
   }
 
   return (
-    <div className={className}>
+    <div ref={layer} className={className}>
       {/* No WebGL (or a lost context) should cost the backdrop, not the page */}
       <ErrorBoundary name="webgl">
         <Canvas
@@ -140,8 +144,13 @@ export default function DistortedTorusScene({
           // With glass on, the scene renders to a texture first, so
           // multisampling the screen would only cost fill rate
           gl={{ antialias: !glass }}
+          // The canvas takes no pointer events, so it needn't re-measure its
+          // offset on every scroll
+          resize={{ scroll: false }}
           style={{ width: '100%', height: '100%' }}
         >
+          {/* First, so every frame callback sees the canvas over the viewport */}
+          {followScroll && <ScrollFollow layer={layer} />}
           <ambientLight intensity={preset.ambientLightIntensity} color="#ffffff" />
           <spotLight
             position={preset.spotLight.position}
@@ -182,6 +191,34 @@ export default function DistortedTorusScene({
       </ErrorBoundary>
     </div>
   );
+}
+
+// A fixed canvas lags the page on phones (iOS most of all): the browser
+// scrolls the page on its own thread, ahead of the frame that draws the glass
+// over the cards, so the glass trails behind them. Instead the canvas scrolls
+// with the page, and each frame moves it back over the viewport. Between
+// frames the drawn glass then travels with its cards; only the backdrop behind
+// them trails the scroll, by as much as the glass used to.
+// Priority -1 runs it before the other frame callbacks without taking over
+// rendering.
+function ScrollFollow({ layer }) {
+  const offset = useRef(0);
+
+  useFrame(() => {
+    const el = layer.current;
+    if (!el) {
+      return;
+    }
+    // Where the layer would sit untransformed, less the scroll; never above
+    // its box (the top of iOS's overscroll bounce)
+    const next = Math.max(0, offset.current - el.getBoundingClientRect().top);
+    if (next !== offset.current) {
+      offset.current = next;
+      el.style.transform = `translate3d(0, ${next}px, 0)`;
+    }
+  }, -1);
+
+  return null;
 }
 
 // ─── The drip ──────────────────────────────────────────────────────────────
