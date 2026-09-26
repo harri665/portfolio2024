@@ -2,6 +2,8 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 
+import { apiUrl } from '../../utils/api';
+
 // Refracts the scene through DOM elements, like Apple's clear glass. The
 // scene renders to a texture, then a full-screen pass copies it back, bending
 // it inward along each glass edge as a thick pane would. Red, green and blue
@@ -21,6 +23,12 @@ import * as THREE from 'three';
 // With `shade` off (the gallery pages, which fade their own CSS vignette as
 // the liquid fills in) it only frosts and bends the scene.
 //
+// - `imageSelector` matches <img>s inside panes (the art gallery thumbnails).
+//   Each is drawn into the scene where the DOM laid it out, clipped to its
+//   parent and its pane, so the glass bends, frosts and splits it like the
+//   backdrop. Once drawn, the <img> gets `data-glass-ready` so CSS can fade
+//   its edges and let the glass version show through along the rim.
+//
 // `frost` is the blur radius (px) through the glass. The project pages turn it
 // down so their backdrop's lines stay sharp enough to see bend at the rim.
 // `blurTaps` is how many samples spread across that blur; phones use fewer.
@@ -30,6 +38,7 @@ const MAX_PANES = 16;
 export default function LiquidGlassPass({
   selector,
   textSelector,
+  imageSelector,
   sceneDim = [0.6, 0.7],
   shade = true,
   frost = 5,
@@ -43,6 +52,8 @@ export default function LiquidGlassPass({
   const radii = useRef(new WeakMap());
   const strengths = useRef(new WeakMap());
   const text = useRef({ el: null, observer: null, texture: null, pad: 0, ready: false });
+  const images = useRef(new Map());
+  const fits = useRef(new WeakMap());
 
   const pass = useMemo(() => {
     const emptyText = new THREE.DataTexture(new Uint8Array(4), 1, 1);
@@ -59,6 +70,7 @@ export default function LiquidGlassPass({
         paneRadii: { value: new Array(MAX_PANES).fill(0) },
         paneOpacity: { value: new Array(MAX_PANES).fill(1) },
         paneStrength: { value: new Array(MAX_PANES).fill(1) },
+        paneGlass: { value: Array.from({ length: MAX_PANES }, () => new THREE.Vector2(1, 1)) },
         paneCount: { value: 0 },
         tText: { value: emptyText },
         textRect: { value: new THREE.Vector4() },
@@ -76,7 +88,28 @@ export default function LiquidGlassPass({
     const scene = new THREE.Scene();
     scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
     const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-    return { material, scene, camera, emptyText };
+    const imageMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        tImage: { value: null },
+        viewport: { value: new THREE.Vector2(1, 1) },
+        imageRect: { value: new THREE.Vector4() },
+        imageSize: { value: new THREE.Vector2(1, 1) },
+        contain: { value: 0 },
+        clipRect: { value: new THREE.Vector4() },
+        pane: { value: new THREE.Vector4() },
+        paneRadius: { value: 0 },
+        opacity: { value: 1 },
+      },
+      vertexShader: passVertexShader,
+      fragmentShader: imageFragmentShader,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+    });
+    const imageScene = new THREE.Scene();
+    imageScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), imageMaterial));
+
+    return { material, scene, camera, emptyText, imageMaterial, imageScene };
   }, [target, blurTaps]);
 
   useEffect(() => {
@@ -99,6 +132,16 @@ export default function LiquidGlassPass({
       pass.material.dispose();
       pass.emptyText.dispose();
       pass.scene.children[0].geometry.dispose();
+      pass.imageMaterial.dispose();
+      pass.imageScene.children[0].geometry.dispose();
+    };
+  }, [target, pass]);
+
+  useEffect(() => {
+    const cache = images.current;
+    return () => {
+      cache.forEach((texture) => texture?.dispose());
+      cache.clear();
     };
   }, [target, pass]);
 
@@ -142,6 +185,7 @@ export default function LiquidGlassPass({
     uniforms.frost.value = frost;
 
     let count = 0;
+    const placed = new Map();
     if (selector) {
       document.querySelectorAll(selector).forEach((el) => {
         if (count >= MAX_PANES) {
@@ -165,6 +209,7 @@ export default function LiquidGlassPass({
         uniforms.paneRadii.value[count] = Math.min(radius, rect.width / 2, rect.height / 2);
         const opacity = parseFloat(el.style.opacity);
         uniforms.paneOpacity.value[count] = Number.isNaN(opacity) ? 1 : opacity;
+        placed.set(el, count);
         // data-liquid-glass="1.8" thickens a pane's glass; a bare attribute is 1
         // A thick pane only thickens while it's hovered (or, on touch
         // screens, in focus), easing in and out; otherwise it's standard glass
@@ -175,6 +220,12 @@ export default function LiquidGlassPass({
         const strength = current + (target - current) * (1 - Math.exp(-delta * 10));
         strengths.current.set(el, strength);
         uniforms.paneStrength.value[count] = strength;
+        const split = parseFloat(el.dataset.glassSplit);
+        const bezel = parseFloat(el.dataset.glassBezel);
+        uniforms.paneGlass.value[count].set(
+          Number.isNaN(split) ? 1 : split,
+          Number.isNaN(bezel) ? 1 : bezel
+        );
         count += 1;
       });
     }
@@ -204,6 +255,9 @@ export default function LiquidGlassPass({
 
     gl.setRenderTarget(target);
     gl.render(scene, camera);
+    if (imageSelector && selector) {
+      drawImages(canvasRect, placed);
+    }
     gl.setRenderTarget(null);
     gl.render(pass.scene, pass.camera);
 
@@ -211,6 +265,78 @@ export default function LiquidGlassPass({
       textState.el.dataset.glassReady = '';
     }
   }, 1);
+
+  function drawImages(canvasRect, placed) {
+    const { uniforms } = pass.imageMaterial;
+    const paneUniforms = pass.material.uniforms;
+    uniforms.viewport.value.set(canvasRect.width, canvasRect.height);
+    const autoClear = gl.autoClear;
+    gl.autoClear = false;
+
+    document.querySelectorAll(imageSelector).forEach((img) => {
+      const index = placed.get(img.closest(selector));
+      if (index === undefined || !img.src || img.style.display === 'none') {
+        return;
+      }
+      const texture = imageTexture(img.src);
+      if (!texture) {
+        return;
+      }
+      let contain = fits.current.get(img);
+      if (contain === undefined) {
+        contain = getComputedStyle(img).objectFit === 'contain';
+        fits.current.set(img, contain);
+      }
+      const rect = img.getBoundingClientRect();
+      const clip = img.parentElement.getBoundingClientRect();
+      const { left, top } = canvasRect;
+      uniforms.tImage.value = texture;
+      uniforms.imageSize.value.set(texture.image.width || 1, texture.image.height || 1);
+      uniforms.contain.value = contain ? 1 : 0;
+      uniforms.imageRect.value.set(rect.left - left, rect.top - top, rect.width, rect.height);
+      uniforms.clipRect.value.set(
+        clip.left - left,
+        clip.top - top,
+        clip.right - left,
+        clip.bottom - top
+      );
+      uniforms.pane.value.copy(paneUniforms.panes.value[index]);
+      uniforms.paneRadius.value = paneUniforms.paneRadii.value[index];
+      uniforms.opacity.value = paneUniforms.paneOpacity.value[index];
+      gl.render(pass.imageScene, pass.camera);
+      if (!('glassReady' in img.dataset)) {
+        img.dataset.glassReady = '';
+      }
+    });
+
+    gl.autoClear = autoClear;
+  }
+
+  // artstation's cdn has no CORS headers so these go through our proxy
+  function imageTexture(src) {
+    const cache = images.current;
+    if (cache.has(src)) {
+      return cache.get(src);
+    }
+    cache.set(src, null);
+    const loader = new THREE.TextureLoader();
+    loader.setCrossOrigin('anonymous');
+    loader.load(
+      apiUrl(`/proxy/image?url=${encodeURIComponent(src)}`),
+      (loaded) => {
+        if (!cache.has(src)) {
+          loaded.dispose();
+          return;
+        }
+        loaded.generateMipmaps = true;
+        loaded.minFilter = THREE.LinearMipmapLinearFilter;
+        cache.set(src, loaded);
+      },
+      undefined,
+      () => {}
+    );
+    return null;
+  }
 
   return null;
 }
@@ -344,6 +470,39 @@ const passVertexShader = `
   }
 `;
 
+const imageFragmentShader = `
+  uniform sampler2D tImage;
+  uniform vec2 viewport;
+  uniform vec4 imageRect;
+  uniform vec2 imageSize;
+  uniform float contain;
+  uniform vec4 clipRect;
+  uniform vec4 pane;
+  uniform float paneRadius;
+  uniform float opacity;
+
+  varying vec2 vUv;
+
+  float sdRoundRect(vec2 p, vec2 halfSize, float r) {
+    vec2 q = abs(p) - halfSize + r;
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+  }
+
+  void main() {
+    vec2 px = vec2(vUv.x, 1.0 - vUv.y) * viewport;
+    if (any(lessThan(px, clipRect.xy)) || any(greaterThan(px, clipRect.zw))) discard;
+    float d = sdRoundRect(px - pane.xy, pane.zw, paneRadius);
+    if (d > 1.0) discard;
+
+    vec2 fit = imageRect.zw / imageSize;
+    vec2 shown = imageSize * (contain > 0.5 ? min(fit.x, fit.y) : max(fit.x, fit.y));
+    vec2 uv = (px - imageRect.xy - imageRect.zw * 0.5) / shown + 0.5;
+    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) discard;
+    uv.y = 1.0 - uv.y;
+    gl_FragColor = vec4(texture2D(tImage, uv).rgb, opacity * (1.0 - smoothstep(-1.0, 1.0, d)));
+  }
+`;
+
 // all in css px, y down like the DOM
 const passFragmentShader = (blurTaps) => `
   #define MAX_PANES ${MAX_PANES}
@@ -363,6 +522,7 @@ const passFragmentShader = (blurTaps) => `
   uniform float paneRadii[MAX_PANES];
   uniform float paneOpacity[MAX_PANES];
   uniform float paneStrength[MAX_PANES];
+  uniform vec2 paneGlass[MAX_PANES];
   uniform int paneCount;
 
   uniform sampler2D tText;
@@ -404,11 +564,9 @@ const passFragmentShader = (blurTaps) => `
     return clamp((strength - 1.0) / 0.4, 0.0, 1.0);
   }
 
-  // As a pane turns into a lens it drops the fixed diagonal split, so its
-  // colour comes only from the bend and fans out evenly around every edge
-  vec4 throughGlass(vec2 px, vec2 offset, float strength) {
-    vec2 split = normalize(vec2(1.0, -0.4)) * SPLIT * (1.0 - lensAmount(strength));
-    float dispersion = EDGE_DISPERSION;
+  vec4 throughGlass(vec2 px, vec2 offset, float strength, float splitScale) {
+    vec2 split = normalize(vec2(1.0, -0.4)) * SPLIT * splitScale * (1.0 - lensAmount(strength));
+    float dispersion = min(EDGE_DISPERSION * splitScale, 0.95);
     vec4 red = blurredAt(px + offset * (1.0 + dispersion) + split);
     vec4 green = blurredAt(px + offset);
     vec4 blue = blurredAt(px + offset * (1.0 - dispersion) - split);
@@ -455,14 +613,14 @@ const passFragmentShader = (blurTaps) => `
       // flat middle, steep rim. thick panes act like a lens and pull in from past the edge instead
       float strength = paneStrength[i];
       float lens = lensAmount(strength);
-      float bezel = clamp(r * 1.15, 14.0, 34.0) * strength;
+      float bezel = clamp(r * 1.15, 14.0, 34.0) * strength * paneGlass[i].y;
       float t = clamp(-d / bezel, 0.0, 1.0);
       float bend = pow(1.0 - t, 2.4);
       float reach = mix(-0.7, 0.24, lens);
       vec2 offset = normal * reach * bend * bezel;
 
       float coverage = (1.0 - smoothstep(-1.0, 1.0, d)) * paneOpacity[i];
-      color = mix(color, throughGlass(px, offset, strength), coverage);
+      color = mix(color, throughGlass(px, offset, strength, paneGlass[i].x), coverage);
     }
 
     color = shade(color, px);
@@ -482,7 +640,7 @@ const passFragmentShader = (blurTaps) => `
           float slope = clamp(length(grad) * textSigma / 0.8, 0.0, 1.0);
           vec2 inward = grad / (length(grad) + 1e-5);
 
-          vec4 glyph = shade(throughGlass(px, inward * slope * textDepth, 1.0), px);
+          vec4 glyph = shade(throughGlass(px, inward * slope * textDepth, 1.0, 1.0), px);
           glyph = over(vec4(TEXT_FROST), glyph);
 
           // lit from the top left
