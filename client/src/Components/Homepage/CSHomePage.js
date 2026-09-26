@@ -361,6 +361,7 @@ export default function CSHomePage() {
       <SubdomainNav currentMode={SITE_MODES.CS} />
       <PrismHero
         fullHeight
+        peek
         title="Computer science."
         subtitle="Software, tools, and research code, pulled live from GitHub."
       >

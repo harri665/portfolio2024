@@ -86,13 +86,28 @@ export function PrismBackdrop({ lens = 'hub', tone = 'page', accent, image }) {
 }
 
 // The centred name / headline / subline block from the hub, shared so every
-// site opens the same way.
-export function PrismHero({ title, subtitle, children, fullHeight = false, glassTitle = false }) {
+// site opens the same way. `peek` stops a full-height hero short of the fold
+// so the top of the gallery below shows on load. It must leave enough of the
+// first cards on screen for their scroll reveal (15%, less the 40px they
+// start lowered by) to fire, or they peek in as empty space.
+export function PrismHero({
+  title,
+  subtitle,
+  children,
+  fullHeight = false,
+  peek = false,
+  glassTitle = false,
+}) {
   return (
     <header
       className={[
         'relative z-10 mx-auto flex w-full max-w-6xl flex-col items-center justify-center px-4 text-center sm:px-8',
-        fullHeight ? 'min-h-svh pb-10 pt-24 sm:pb-16 sm:pt-28' : 'min-h-[64vh] pb-12 pt-32',
+        fullHeight
+          ? [
+              'pb-10 pt-24 sm:pb-16 sm:pt-28',
+              peek ? 'min-h-[calc(100svh-6.5rem)] sm:min-h-[calc(100svh-7.5rem)]' : 'min-h-svh',
+            ].join(' ')
+          : 'min-h-[64vh] pb-12 pt-32',
       ].join(' ')}
     >
       <motion.p
