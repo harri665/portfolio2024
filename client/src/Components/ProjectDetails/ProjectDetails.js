@@ -186,14 +186,14 @@ const ArtProject = () => {
       </header>
 
       {project.cover_url && (
-        <Reveal className="gd-cover liquid-glass" data-liquid-glass>
+        <Reveal className="gd-cover liquid-glass" data-liquid-glass {...GALLERY_GLASS}>
           <GlassHighlights over />
-          <img src={project.cover_url} alt={project.title} />
+          <img src={project.cover_url} alt={project.title} data-glass-image />
         </Reveal>
       )}
 
       <div className="gd-cols">
-        <Reveal as="section" className="gd-panel liquid-glass" data-liquid-glass>
+        <Reveal as="section" className="gd-panel liquid-glass" data-liquid-glass {...GALLERY_GLASS}>
           <GlassHighlights />
           <div className="gd-panel-head">
             <span className="gd-label">Overview</span>
@@ -209,7 +209,7 @@ const ArtProject = () => {
         </Reveal>
 
         <aside className="gd-rail">
-          <Reveal as="section" index={1} className="gd-panel liquid-glass" data-liquid-glass>
+          <Reveal as="section" index={1} className="gd-panel liquid-glass" data-liquid-glass {...GALLERY_GLASS}>
             <GlassHighlights />
             <div className="gd-panel-head">
               <span className="gd-label">Software</span>
@@ -260,6 +260,7 @@ const ArtProject = () => {
                       src={asset.image_url}
                       alt={`Asset ${index + 1}`}
                       loading="lazy"
+                      data-glass-image
                     />
                   ) : (
                     <ReactPlayer
@@ -300,6 +301,11 @@ const ArtProject = () => {
   );
 };
 
+// The art gallery cards' glass (ArtGallery): a lighter prism split and the
+// standard rim. Images marked data-glass-image are drawn into the glass too,
+// so it bends and splits them along the rim like the gallery thumbnails.
+const GALLERY_GLASS = { 'data-glass-split': '0.5', 'data-glass-bezel': '1.0' };
+
 // Glass rim and sheen; `over` lifts them above media inside the pane
 function GlassHighlights({ over = false }) {
   const layer = over ? ' liquid-glass-over' : '';
@@ -322,6 +328,7 @@ function AssetTile({ index, tileRef, className, children, ...props }) {
       whileHover={HOVER_LIFT}
       className={`${className} liquid-glass`}
       data-liquid-glass
+      {...GALLERY_GLASS}
       {...props}
     >
       <GlassHighlights over />

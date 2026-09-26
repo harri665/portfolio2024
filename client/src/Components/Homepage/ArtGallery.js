@@ -144,12 +144,17 @@ function GRCard({ p, i }) {
       className="gr-card liquid-glass prism-glow lens-art"
       onPointerMove={trackPointer}
       data-liquid-glass
+      data-glass-split="0.5"
+      data-glass-bezel="1.0"
     >
       <span aria-hidden="true" className="liquid-glass-sheen liquid-glass-over" />
       <span aria-hidden="true" className="liquid-glass-rim liquid-glass-over" />
       <div className="gr-thumb" style={{ '--tint': TINTS[i % TINTS.length] }}>
+        {/* data-glass-image: the glass pass draws this too, so the card's
+            glass bends and splits it along the rim (LiquidGlassPass) */}
         <img
           className="gr-img"
+          data-glass-image
           src={p.img}
           alt={p.t}
           loading="lazy"

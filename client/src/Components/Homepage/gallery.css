@@ -127,6 +127,42 @@
 }
 .gr-card:hover .gr-img { transform: scale(1.04); }
 
+/* The glass reaches over the thumbnail. The glass pass draws each thumbnail
+   into its scene too (data-glass-image), so once it has, the <img> fades out
+   along the card's rim and the pass's copy shows through there, bent, frosted
+   and split into colour like the rest of the glass. Under the pane's inner
+   highlights. */
+.gr-thumb { --bezel: 40px; }
+/* the tint is only a placeholder; it would hide the glass behind the rim */
+.gr-thumb:has(.gr-img[data-glass-ready]) { background: transparent; }
+.gr-img[data-glass-ready] {
+  -webkit-mask:
+    linear-gradient(to bottom, transparent, rgb(0 0 0 / 0.45) calc(var(--bezel) * 0.5), #000 var(--bezel)),
+    linear-gradient(to right, transparent, rgb(0 0 0 / 0.45) calc(var(--bezel) * 0.5), #000 var(--bezel)),
+    linear-gradient(to left, transparent, rgb(0 0 0 / 0.45) calc(var(--bezel) * 0.5), #000 var(--bezel));
+  -webkit-mask-composite: source-in;
+  mask:
+    linear-gradient(to bottom, transparent, rgb(0 0 0 / 0.45) calc(var(--bezel) * 0.5), #000 var(--bezel)),
+    linear-gradient(to right, transparent, rgb(0 0 0 / 0.45) calc(var(--bezel) * 0.5), #000 var(--bezel)),
+    linear-gradient(to left, transparent, rgb(0 0 0 / 0.45) calc(var(--bezel) * 0.5), #000 var(--bezel));
+  mask-composite: intersect;
+}
+/* Runs past the thumbnail's bottom (clipped there) so the edge shading only
+   lines the card's real rim, not the seam above the title */
+.gr-thumb::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 -60px;
+  z-index: 1;
+  border-radius: 1.5rem 1.5rem 0 0;
+  pointer-events: none;
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.3),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    inset 0 12px 16px -10px rgba(255, 255, 255, 0.14),
+    inset 0 0 30px rgba(255, 255, 255, 0.06);
+}
+
 /* software icons cluster — reuses .nf-tools */
 .nf-tools {
   position: absolute;
@@ -444,6 +480,44 @@
   width: 100%;
   height: 100%;
   object-fit: contain;
+}
+
+/* The same glass as the gallery cards (.gr-thumb): once the glass pass has
+   drawn an image (data-glass-image), the <img> fades out along every edge of
+   its pane so the glass copy shows through, bent and split into colour */
+.gd-cover,
+.gd-asset { --bezel: 40px; }
+.gd-cover img[data-glass-ready],
+.gd-asset-frame > img[data-glass-ready] {
+  -webkit-mask:
+    linear-gradient(to bottom, transparent, rgb(0 0 0 / 0.45) calc(var(--bezel) * 0.5), #000 var(--bezel)),
+    linear-gradient(to top, transparent, rgb(0 0 0 / 0.45) calc(var(--bezel) * 0.5), #000 var(--bezel)),
+    linear-gradient(to right, transparent, rgb(0 0 0 / 0.45) calc(var(--bezel) * 0.5), #000 var(--bezel)),
+    linear-gradient(to left, transparent, rgb(0 0 0 / 0.45) calc(var(--bezel) * 0.5), #000 var(--bezel));
+  -webkit-mask-composite: source-in;
+  mask:
+    linear-gradient(to bottom, transparent, rgb(0 0 0 / 0.45) calc(var(--bezel) * 0.5), #000 var(--bezel)),
+    linear-gradient(to top, transparent, rgb(0 0 0 / 0.45) calc(var(--bezel) * 0.5), #000 var(--bezel)),
+    linear-gradient(to right, transparent, rgb(0 0 0 / 0.45) calc(var(--bezel) * 0.5), #000 var(--bezel)),
+    linear-gradient(to left, transparent, rgb(0 0 0 / 0.45) calc(var(--bezel) * 0.5), #000 var(--bezel));
+  mask-composite: intersect;
+}
+/* the frame's fill would hide the glass behind the rim */
+.gd-asset-frame:has(> img[data-glass-ready]) { background: transparent; }
+/* the pane's inner highlights, over the image as on the gallery cards */
+.gd-cover::after,
+.gd-asset::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.3),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    inset 0 12px 16px -10px rgba(255, 255, 255, 0.14),
+    inset 0 0 30px rgba(255, 255, 255, 0.06);
 }
 
 /* deep-linked asset highlight */

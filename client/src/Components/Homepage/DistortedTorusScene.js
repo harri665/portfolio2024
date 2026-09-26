@@ -84,12 +84,22 @@ const SCENE_PRESETS = {
 // Each site looks at the same prism through its own lens: the shader pulls
 // the spectrum toward two colours. The hub leaves it unfiltered.
 // `solidFocus` lights the liquid under the focused card as a white band along
-// its edge, instead of a pool of the drifting gradient
+// its edge, instead of a pool of the drifting gradient.
+// `settledGlow` keeps some of the drifting gradient across the whole settled
+// liquid behind the gallery, instead of only a glow just inside its edge.
+// `slosh` scales how far scrolling makes that liquid's surface wave (1 = default)
 const LENSES = {
-  // Steel: silver-white (#E6ECF2) into cool graphite (#7D8A99), pulled almost
-  // all the way from the shader's rainbow so no stray hues show through
-  cs: { a: [0.902, 0.925, 0.949], b: [0.49, 0.541, 0.6], strength: 0.92, solidFocus: true },
-  art: { a: [1.0, 0.36, 0.44], b: [1.0, 0.68, 0.3], strength: 0.72 },
+  // Steel: silver-white (#E6ECF2) into cool graphite (#7D8A99), with some of
+  // the shader's spectrum left showing through as an iridescent sheen, like
+  // anodised titanium. Settled behind the gallery, its colour drops to 25%.
+  cs: {
+    a: [0.902, 0.925, 0.949],
+    b: [0.49, 0.541, 0.6],
+    strength: 0.6,
+    solidFocus: true,
+    settledSaturation: 0.25,
+  },
+  art: { a: [1.0, 0.36, 0.44], b: [1.0, 0.68, 0.3], strength: 0.72, settledGlow: 0.24, slosh: 2.2 },
 };
 
 export default function DistortedTorusScene({
@@ -280,6 +290,8 @@ function LiquidDrip({ lens, state }) {
       focusB: { value: new THREE.Vector4(0, 0, 0, 0) },
       focusBAmount: { value: 0 },
       focusSolid: { value: lens?.solidFocus ? 1 : 0 },
+      settledSaturation: { value: lens?.settledSaturation ?? 1 },
+      settledGlow: { value: lens?.settledGlow ?? 0 },
       tintA: { value: new THREE.Vector3(...(lens?.a || [1, 1, 1])) },
       tintB: { value: new THREE.Vector3(...(lens?.b || [1, 1, 1])) },
       lensStrength: { value: lens?.strength || 0 },
@@ -356,7 +368,7 @@ function LiquidDrip({ lens, state }) {
     // the focused card lights the surface beneath it
     uniforms.settle.value = easeInOutCubic(phase(progress, SETTLE));
     uniforms.slosh.value =
-      THREE.MathUtils.clamp((state.velocity || 0) / 2200, -1, 1) * (small ? 7 : 11);
+      THREE.MathUtils.clamp((state.velocity || 0) / 2200, -1, 1) * (small ? 7 : 11) * (lens?.slosh ?? 1);
     const [lightA, lightB] = state.focusLights || [];
     uniforms.focusAAmount.value = lightA ? lightA[4] : 0;
     uniforms.focusBAmount.value = lightB ? lightB[4] : 0;
@@ -612,6 +624,8 @@ const liquidFragmentShader = `
   uniform vec4 focusB;
   uniform float focusBAmount;
   uniform float focusSolid;
+  uniform float settledSaturation;
+  uniform float settledGlow;
   uniform vec3 tintA;
   uniform vec3 tintB;
   uniform float lensStrength;
@@ -758,11 +772,14 @@ const liquidFragmentShader = `
     if (settle > 0.0) {
       float inside = max(-d, 0.0);
       vec3 lacquer = vec3(0.034, 0.037, 0.046);
-      lacquer += baseColor * exp(-inside / 22.0) * 0.12;
+      // the lens colour, muted to the lens's settled saturation
+      vec3 edgeColor = mix(vec3(dot(baseColor, vec3(0.333))), baseColor, settledSaturation);
+      lacquer += edgeColor * exp(-inside / 22.0) * 0.12;
+      lacquer += edgeColor * settledGlow;
       // gloss: the wet edges catch a little light, most visibly on the drips
-      lacquer += mix(vec3(1.0), baseColor, 0.5) * spec * 0.12;
+      lacquer += mix(vec3(1.0), edgeColor, 0.5) * spec * 0.12;
       float rim = 1.0 - smoothstep(0.0, 1.5, abs(d + 1.0));
-      lacquer += baseColor * rim * 0.14;
+      lacquer += edgeColor * rim * 0.14;
 
       if (focusAAmount > 0.001) lacquer += cardLight(p, focusA, focusAAmount, baseColor);
       if (focusBAmount > 0.001) lacquer += cardLight(p, focusB, focusBAmount, baseColor);
