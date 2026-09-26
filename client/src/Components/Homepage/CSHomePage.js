@@ -5,7 +5,12 @@ import { motion } from 'framer-motion';
 
 import Buttons from "./Buttons";
 import SubdomainNav from './SubdomainNav';
-import DistortedTorusScene from './DistortedTorusScene';
+import {
+  HOVER_LIFT,
+  PrismBackdrop,
+  PrismHero,
+  useScrollReveal,
+} from './Prism';
 import { SITE_MODES } from '../../utils/siteMode';
 import { apiUrl } from '../../utils/api';
 
@@ -351,12 +356,18 @@ export default function CSHomePage() {
 
 
   return (
-    <div className="houdini-canvas relative min-h-screen overflow-hidden text-white">
-      {/* <TorusBackdrop /> */}
+    <div className="relative min-h-screen overflow-hidden text-white">
+      <PrismBackdrop lens="cs" tone="page" />
       <SubdomainNav currentMode={SITE_MODES.CS} />
-      <HeroSection />
+      <PrismHero
+        fullHeight
+        title="Computer science."
+        subtitle="Software, tools, and research code, pulled live from GitHub."
+      >
+        <Buttons />
+      </PrismHero>
 
-      <main className="relative z-10 mx-auto max-w-7xl px-4 pb-20 sm:px-8">
+      <main id="projects" className="relative z-10 mx-auto max-w-7xl scroll-mt-24 px-4 pb-20 sm:px-8">
 
 
         {loading && <StateCard tone="neutral">Loading GitHub projects...</StateCard>}
@@ -371,7 +382,8 @@ export default function CSHomePage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.1, duration: 0.45 }}
-            className="grid grid-cols-1 gap-8 px-4 md:grid-cols-2 xl:grid-cols-3"
+            data-prism-panel
+            className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3"
           >
             {repos.map((repo, index) => (
               <RepoCard key={repo.id} repo={repo} index={index} imageUrl={repoImages[repo.full_name] ?? null} />
@@ -386,18 +398,17 @@ export default function CSHomePage() {
 function RepoCard({ repo, index, imageUrl }) {
   const demoUrl = normalizeHomepage(repo.homepage);
   const navigate = useNavigate();
+  const reveal = useScrollReveal(index);
 
   return (
     <motion.article
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: 0.02 * Math.min(index, 14), duration: 0.4 }}
-      whileHover={{ y: -4, boxShadow: '0 24px 60px rgba(0,0,0,0.45)' }}
+      {...reveal}
+      whileHover={HOVER_LIFT}
       onClick={() => navigate(`/${repo.name}`)}
-      className="group relative cursor-pointer overflow-hidden rounded-[1.5rem] border border-white/10 bg-white/5 shadow-[0_16px_45px_rgba(0,0,0,0.32)] backdrop-blur-xl"
+      data-liquid-glass="1.8"
+      className="liquid-glass solid-glow lens-cs group relative cursor-pointer overflow-hidden rounded-[1.5rem]"
     >
-      {/* Hover glow */}
-      <div className="pointer-events-none absolute inset-0 z-10 bg-gradient-to-br from-sky-400/10 via-white/4 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+      <span aria-hidden="true" className="liquid-glass-rim liquid-glass-over" />
 
       {imageUrl && <MediaPreview url={imageUrl} />}
 
@@ -424,7 +435,7 @@ function RepoCard({ repo, index, imageUrl }) {
             {repo.topics.slice(0, 4).map((topic) => (
               <span
                 key={topic}
-                className="rounded-full border border-blue-300/15 bg-blue-400/10 px-2.5 py-1 text-xs font-medium text-blue-100"
+                className="rounded-full border border-white/12 bg-white/5 px-2.5 py-1 text-xs font-medium text-white/75"
               >
                 {topic}
               </span>
@@ -466,7 +477,7 @@ function MediaPreview({ url }) {
   const fitClass = type === 'image' ? 'object-cover' : 'object-contain';
 
   return (
-    <div className="relative w-full overflow-hidden bg-[#0d0f14]" style={{ height: '11rem' }}>
+    <div className="relative z-10 w-full overflow-hidden bg-[#0d0f14]/80" style={{ height: '11rem' }}>
       {type === 'video' ? (
         <video
           src={url}
@@ -485,7 +496,7 @@ function MediaPreview({ url }) {
       ) : (
         <img src={url} alt="" className={`h-full w-full ${fitClass}`} />
       )}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[#08090c] to-transparent" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[#0f1117]/90 to-transparent" />
     </div>
   );
 }
@@ -504,51 +515,15 @@ function MetricCard({ label, value }) {
 }
 
 function StateCard({ children, tone = 'neutral' }) {
-  const toneClasses =
-    tone === 'error'
-      ? 'border-red-800/40 bg-red-900/10 text-red-400'
-      : 'border-[#2e3240] bg-[#1e2128] text-[#5a6070]';
+  const toneClasses = tone === 'error' ? 'text-red-300' : 'text-white/55';
 
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className={`rounded-lg border p-10 text-center font-mono text-xs ${toneClasses}`}
+      className={`prism-card p-10 text-center text-sm ${toneClasses}`}
     >
       {children}
     </motion.div>
-  );
-}
-
-function TorusBackdrop() {
-  return (
-    <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-[34rem]">
-      <div className="absolute inset-0 opacity-22">
-        <DistortedTorusScene variant="cs" className="h-full w-full" />
-      </div>
-      <div className="absolute inset-0 bg-gradient-to-b from-[#08090c]/5 via-[#08090c]/55 to-[#08090c]" />
-    </div>
-  );
-}
-
-function HeroSection() {
-  return (
-    <div className="relative h-[90vh] flex items-center justify-center overflow-hidden">
-      {/* Background Torus Scene */}
-        <DistortedTorusScene variant="cs" className="h-full w-full" />
-
-      {/* Hero Text Content with animations */}
-      <motion.div
-        className="absolute text-center z-10"
-        initial={{ opacity: 0, y: 50 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 1 }}
-      >
-        <h1 className="text-7xl font-extrabold tracking-tight text-white">
-          Harrison Martin
-        </h1>
-        <Buttons />
-      </motion.div>
-    </div>
   );
 }
