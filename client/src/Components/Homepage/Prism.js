@@ -48,10 +48,20 @@ export function PrismBackdrop({ lens = 'hub', tone = 'page', accent, image }) {
     }
   }, []);
 
+  // The scene scrolls with the page and is moved back over the viewport each
+  // frame, so its glass keeps up with the cards (see ScrollFollow). It spans
+  // the page's own box, clipped so it never lengthens the page; the page root
+  // must be positioned. The base colour and overlays stay fixed, filling in
+  // at the edges while it catches up.
   return (
-    <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-0 bg-[#08090c]">
-      <div className={`absolute inset-0 ${glass || flat ? '' : toneStyle.scene}`}>
+    <>
+      <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-0 bg-[#08090c]" />
+      <div
+        aria-hidden="true"
+        className={`pointer-events-none absolute inset-0 z-0 overflow-hidden ${glass || flat ? '' : toneStyle.scene}`}
+      >
         <DistortedTorusScene
+          followScroll
           variant={scene.variant}
           lens={lens === 'hub' ? null : lens}
           drip={drip}
@@ -68,20 +78,26 @@ export function PrismBackdrop({ lens = 'hub', tone = 'page', accent, image }) {
                   ? { selector: '[data-liquid-glass]', imageSelector: '[data-glass-image]', shade: false }
                   : undefined
           }
-          className="h-full w-full"
+          // 100vh is the large viewport on phones, so the canvas doesn't resize
+          // as the browser's toolbar collapses mid-scroll
+          className="absolute inset-x-0 top-0 h-screen"
           cameraPosition={scene.camera}
         />
       </div>
 
       {/* The grid and cover shade their own edges; these layers are for the knot */}
-      <div ref={overlaysRef} className={`absolute inset-0 ${flat ? 'hidden' : ''}`}>
+      <div
+        ref={overlaysRef}
+        aria-hidden="true"
+        className={`pointer-events-none fixed inset-0 z-0 ${flat ? 'hidden' : ''}`}
+      >
         {!glass && (
           <div className="absolute inset-0 [background-image:radial-gradient(circle_at_center,rgba(8,9,12,0.12),rgba(8,9,12,0.58)_56%,rgba(8,9,12,0.95)_82%)]" />
         )}
         <div className="absolute inset-0 bg-gradient-to-b from-[#08090c]/0 via-transparent to-[#08090c]" />
         {toneStyle.veil && <div className={`absolute inset-0 ${toneStyle.veil}`} />}
       </div>
-    </div>
+    </>
   );
 }
 
