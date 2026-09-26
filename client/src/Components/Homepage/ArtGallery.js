@@ -186,6 +186,7 @@ export default function ArtGallery() {
 
       <PrismHero
         fullHeight
+        peek
         title="3D art."
         subtitle={`${WORKS.length} projects in modeling, animation, and simulation.`}
       />
