@@ -17,12 +17,14 @@ export default function SubdomainNav({ currentMode }) {
       <div className="mx-auto flex max-w-7xl items-center justify-between rounded-full border border-white/10 bg-[#0f1115]/72 px-3 py-2 shadow-[0_14px_40px_rgba(0,0,0,0.35)] backdrop-blur-2xl sm:px-4">
         <a
           href={getSiteHref(SITE_MODES.ROOT)}
-          className="hidden px-2 text-[11px] font-semibold tracking-[0.2em] text-white/88 sm:inline sm:text-xs"
+          aria-label="Harrison Martin home"
+          className="shrink-0 px-2 text-xs font-semibold tracking-[0.2em] text-white/88"
         >
-          HARRISON MARTIN
+          <span className="sm:hidden">HM</span>
+          <span className="hidden sm:inline">HARRISON MARTIN</span>
         </a>
 
-        <div className="flex w-full items-center justify-between gap-1.5 sm:w-auto sm:justify-start sm:gap-2">
+        <div className="flex items-center gap-1 sm:gap-2">
           {navItems.map((item) => {
             const isActive = item.mode === currentMode;
 

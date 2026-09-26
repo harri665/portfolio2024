@@ -5,6 +5,8 @@ import ReactPlayer from 'react-player';
 import { apiUrl } from '../../utils/api';
 import CommentSection from '../Comments/CommentSection';
 import SubdomainNav from '../Homepage/SubdomainNav';
+import { HOVER_LIFT, PrismBackdrop, Reveal, useScrollReveal } from '../Homepage/Prism';
+import { motion } from 'framer-motion';
 import { getSiteHref, SITE_MODES } from '../../utils/siteMode';
 import '../Homepage/gallery.css';
 
@@ -161,7 +163,7 @@ const ArtProject = () => {
   const assets = validAssets(project.assets);
 
   return (
-    <PageShell>
+    <PageShell cover={project.cover_url}>
       <a href={getSiteHref(SITE_MODES.ART)} className="gd-back">
         <span className="gd-back-arrow">←</span>
         Art index
@@ -184,13 +186,15 @@ const ArtProject = () => {
       </header>
 
       {project.cover_url && (
-        <div className="gd-cover">
+        <Reveal className="gd-cover liquid-glass" data-liquid-glass>
+          <GlassHighlights over />
           <img src={project.cover_url} alt={project.title} />
-        </div>
+        </Reveal>
       )}
 
       <div className="gd-cols">
-        <section className="gd-panel">
+        <Reveal as="section" className="gd-panel liquid-glass" data-liquid-glass>
+          <GlassHighlights />
           <div className="gd-panel-head">
             <span className="gd-label">Overview</span>
           </div>
@@ -202,10 +206,11 @@ const ArtProject = () => {
               }}
             />
           </div>
-        </section>
+        </Reveal>
 
         <aside className="gd-rail">
-          <section className="gd-panel">
+          <Reveal as="section" index={1} className="gd-panel liquid-glass" data-liquid-glass>
+            <GlassHighlights />
             <div className="gd-panel-head">
               <span className="gd-label">Software</span>
             </div>
@@ -226,24 +231,24 @@ const ArtProject = () => {
                 <p className="gd-note">No software metadata available.</p>
               )}
             </div>
-          </section>
+          </Reveal>
 
         </aside>
       </div>
 
-      <section className="gd-panel">
-        <div className="gd-panel-head">
+      <section className="gd-gallery">
+        <div className="gd-gallery-head">
           <span className="gd-label">Gallery</span>
           <span className="gd-panel-count">
             {assets.length} {assets.length === 1 ? 'asset' : 'assets'}
           </span>
         </div>
-        <div className="gd-panel-body">
-          <div className="gd-assets">
+        <div className="gd-assets">
             {assets.map((asset, index) => (
-              <div
+              <AssetTile
                 key={asset.id}
-                ref={(el) => {
+                index={index}
+                tileRef={(el) => {
                   assetRefs.current[asset.id] = el;
                 }}
                 id={asset.id}
@@ -278,28 +283,58 @@ const ArtProject = () => {
                     />
                   )}
                 </div>
-              </div>
+              </AssetTile>
             ))}
-          </div>
         </div>
       </section>
 
       {/* Comments read better at text width than across the full asset grid */}
-      <div className="gd-comments">
+      <Reveal className="gd-comments">
         <CommentSection
           type="art"
           id={project.hash_id || identifier}
           variant="gallery"
         />
-      </div>
+      </Reveal>
     </PageShell>
   );
 };
 
-function PageShell({ children }) {
+// Glass rim and sheen; `over` lifts them above media inside the pane
+function GlassHighlights({ over = false }) {
+  const layer = over ? ' liquid-glass-over' : '';
+  return (
+    <>
+      <span aria-hidden="true" className={`liquid-glass-sheen${layer}`} />
+      <span aria-hidden="true" className={`liquid-glass-rim${layer}`} />
+    </>
+  );
+}
+
+// A glass asset tile that rises in as it scrolls into view, staggered across
+// its row. `tileRef` feeds the deep-link scroll to a specific asset.
+function AssetTile({ index, tileRef, className, children, ...props }) {
+  const reveal = useScrollReveal(index);
+  return (
+    <motion.div
+      ref={tileRef}
+      {...reveal}
+      whileHover={HOVER_LIFT}
+      className={`${className} liquid-glass`}
+      data-liquid-glass
+      {...props}
+    >
+      <GlassHighlights over />
+      {children}
+    </motion.div>
+  );
+}
+
+// `cover` becomes the page's backdrop once the project has loaded
+function PageShell({ cover, children }) {
   return (
     <div className="gx nf gd">
-      <div className="nf-dots" aria-hidden="true" />
+      <PrismBackdrop lens="art" tone="detail" image={cover} />
       <SubdomainNav currentMode={SITE_MODES.ART} />
       <div className="gx-shell" style={{ paddingTop: '108px' }}>
         {children}
