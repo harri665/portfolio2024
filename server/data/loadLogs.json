@@ -10246,5 +10246,551 @@
       "message": "reserved range",
       "query": "::1"
     }
+  },
+  {
+    "timestamp": "2026-09-26T04:14:29.145Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-26T04:14:29.220Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-26T04:19:25.394Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Chrome",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-26T04:19:25.475Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Chrome",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-26T04:19:38.111Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Chrome",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-26T04:19:38.199Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Chrome",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-26T04:26:48.979Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Chrome",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-26T04:26:49.069Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Chrome",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-26T04:27:32.278Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Chrome",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-26T04:27:32.358Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Chrome",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-26T04:29:58.851Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Chrome",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-26T04:29:58.936Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Chrome",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-26T04:30:30.843Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Chrome",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-26T04:30:30.926Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Chrome",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-26T05:03:21.558Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-26T05:03:21.626Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-26T05:03:28.310Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-26T05:03:28.388Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-26T05:03:30.452Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0",
+    "pageAccessed": "localhost/YG6eN3",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-26T05:03:33.261Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-26T05:03:34.167Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0",
+    "pageAccessed": "localhost/YG6eN3",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-26T05:03:35.360Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-26T05:03:37.510Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-26T05:03:37.595Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-26T05:03:49.623Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-26T05:03:49.731Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-26T06:18:22.307Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0",
+    "pageAccessed": "localhost/YG6eN3",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-26T06:41:00.362Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-26T06:41:00.395Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-27T06:08:07.808Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-27T06:08:07.875Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-27T06:08:11.491Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-27T06:08:11.545Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-27T06:08:17.623Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-27T06:08:17.673Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-27T06:11:23.978Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-27T06:11:23.985Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-27T06:11:28.568Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0",
+    "pageAccessed": "localhost/AITraffic",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
+  },
+  {
+    "timestamp": "2026-09-27T06:11:32.234Z",
+    "ip": "::1",
+    "device": "Windows 10.0",
+    "browser": "Edge",
+    "platform": "Microsoft Windows",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0",
+    "pageAccessed": "localhost/",
+    "location": {
+      "status": "fail",
+      "message": "reserved range",
+      "query": "::1"
+    }
   }
 ]

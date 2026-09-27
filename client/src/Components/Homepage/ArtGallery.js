@@ -2,13 +2,8 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import SubdomainNav from './SubdomainNav';
-import {
-  HOVER_LIFT,
-  PrismBackdrop,
-  PrismHero,
-  trackPointer,
-  useScrollReveal,
-} from './Prism';
+import { PrismBackdrop, PrismHero, trackPointer } from './Prism';
+import { GalleryMotionPicker, useGalleryMotion, useGalleryMotionName } from './galleryMotion';
 import { SITE_MODES } from '../../utils/siteMode';
 import './gallery.css';
 
@@ -132,15 +127,14 @@ function ToolBadge({ k }) {
 
 const MotionLink = motion(Link);
 
-function GRCard({ p, i }) {
+function GRCard({ p, i, motionName }) {
   const desc = p.d || `${p.assets} ${p.assets === 1 ? 'asset' : 'assets'} · open the project to see the full breakdown.`;
-  const reveal = useScrollReveal(i);
+  const cardMotion = useGalleryMotion(motionName, i);
 
   return (
     <MotionLink
       to={`/${p.id}`}
-      {...reveal}
-      whileHover={HOVER_LIFT}
+      {...cardMotion}
       className="gr-card liquid-glass prism-glow lens-art"
       onPointerMove={trackPointer}
       data-liquid-glass
@@ -179,6 +173,7 @@ function GRCard({ p, i }) {
 }
 
 export default function ArtGallery() {
+  const [motionName, setMotionName] = useGalleryMotionName();
   return (
     <div className="gx nf gr">
       <PrismBackdrop lens="art" tone="page" />
@@ -192,10 +187,11 @@ export default function ArtGallery() {
       />
 
       <div className="gx-shell">
-        <div className="gr-grid" data-prism-panel>
-          {WORKS.map((p, i) => <GRCard key={p.id} p={p} i={i} />)}
+        <div key={motionName} className="gr-grid" data-prism-panel>
+          {WORKS.map((p, i) => <GRCard key={p.id} p={p} i={i} motionName={motionName} />)}
         </div>
       </div>
+      <GalleryMotionPicker name={motionName} onChange={setMotionName} />
     </div>
   );
 }

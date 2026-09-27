@@ -1,5 +1,6 @@
-import { Canvas, useFrame } from '@react-three/fiber';
-import React, { useMemo, useRef } from 'react';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { cancelFrame, frame } from 'framer-motion';
+import React, { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 
 import ErrorBoundary from '../ErrorBoundary';
@@ -134,8 +135,13 @@ export default function DistortedTorusScene({
           dpr={[1, maxDpr]}
           gl={{ antialias: !glass }}
           resize={{ scroll: false }}
+          frameloop="never"
+          onCreated={({ clock }) => {
+            clock.autoStart = false;
+          }}
           style={{ width: '100%', height: '100%' }}
         >
+          <AfterMotion />
           // has to be first so every frame callback sees the canvas over the viewport
           {followScroll && <ScrollFollow layer={layer} />}
           <ambientLight intensity={preset.ambientLightIntensity} color="#ffffff" />
@@ -177,6 +183,23 @@ export default function DistortedTorusScene({
       </ErrorBoundary>
     </div>
   );
+}
+
+// Renders each frame after framer-motion has moved the page's cards. The
+// glass reads where the cards are, so on R3F's own loop (which can run first)
+// it drew them where they were a frame ago, trailing any card in motion.
+// The clock counts seconds from mount, as R3F's would.
+function AfterMotion() {
+  const advance = useThree((state) => state.advance);
+
+  useEffect(() => {
+    const start = performance.now();
+    const tick = ({ timestamp }) => advance(Math.max(0, (timestamp - start) / 1000));
+    frame.postRender(tick, true);
+    return () => cancelFrame(tick);
+  }, [advance]);
+
+  return null;
 }
 
 // a fixed canvas lags the page on phones (iOS especially) because the browser scrolls

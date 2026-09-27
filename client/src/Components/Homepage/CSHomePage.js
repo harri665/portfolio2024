@@ -5,12 +5,8 @@ import { motion } from 'framer-motion';
 
 import Buttons from "./Buttons";
 import SubdomainNav from './SubdomainNav';
-import {
-  HOVER_LIFT,
-  PrismBackdrop,
-  PrismHero,
-  useScrollReveal,
-} from './Prism';
+import { PrismBackdrop, PrismHero } from './Prism';
+import { GalleryMotionPicker, useGalleryMotion, useGalleryMotionName } from './galleryMotion';
 import { SITE_MODES } from '../../utils/siteMode';
 import { apiUrl } from '../../utils/api';
 
@@ -279,6 +275,7 @@ export default function CSHomePage() {
   const [repoImages, setRepoImages] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [motionName, setMotionName] = useGalleryMotionName();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -380,6 +377,7 @@ export default function CSHomePage() {
 
         {!loading && !error && repos.length > 0 && (
           <motion.section
+            key={motionName}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.1, duration: 0.45 }}
@@ -387,24 +385,30 @@ export default function CSHomePage() {
             className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3"
           >
             {repos.map((repo, index) => (
-              <RepoCard key={repo.id} repo={repo} index={index} imageUrl={repoImages[repo.full_name] ?? null} />
+              <RepoCard
+                key={repo.id}
+                repo={repo}
+                index={index}
+                motionName={motionName}
+                imageUrl={repoImages[repo.full_name] ?? null}
+              />
             ))}
           </motion.section>
         )}
       </main>
+      <GalleryMotionPicker name={motionName} onChange={setMotionName} />
     </div>
   );
 }
 
-function RepoCard({ repo, index, imageUrl }) {
+function RepoCard({ repo, index, motionName, imageUrl }) {
   const demoUrl = normalizeHomepage(repo.homepage);
   const navigate = useNavigate();
-  const reveal = useScrollReveal(index);
+  const cardMotion = useGalleryMotion(motionName, index);
 
   return (
     <motion.article
-      {...reveal}
-      whileHover={HOVER_LIFT}
+      {...cardMotion}
       onClick={() => navigate(`/${repo.name}`)}
       data-liquid-glass="1.8"
       className="liquid-glass solid-glow lens-cs group relative cursor-pointer overflow-hidden rounded-[1.5rem]"
