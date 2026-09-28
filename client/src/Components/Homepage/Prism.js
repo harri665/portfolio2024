@@ -70,12 +70,16 @@ export function PrismBackdrop({ lens = 'hub', tone = 'page', accent, image }) {
   // frame, so its glass keeps up with the cards (see ScrollFollow). It spans
   // the page's own box, clipped so it never lengthens the page; the page root
   // must be positioned. The base colour and overlays stay fixed, filling in
-  // at the edges while it catches up.
+  // at the edges while it catches up. The relit room can't trail the page
+  // like that, so it shows on a fixed layer of its own and this canvas draws
+  // only its glass (relight/roomLayer).
   return (
     <>
       <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-0 bg-bg" />
+      {/* data-backdrop-layer: the relit room's fixed layer goes just before it */}
       <div
         aria-hidden="true"
+        data-backdrop-layer
         className={`pointer-events-none absolute inset-0 z-0 overflow-hidden ${glass || flat || relight ? '' : toneStyle.scene}`}
       >
         <DistortedTorusScene

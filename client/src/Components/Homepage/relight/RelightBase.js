@@ -7,9 +7,13 @@
 
 // Light slots: two lights, double-buffered
 export const SLOTS = 4;
-// Timings of fewer rows than this are dominated by fixed per-pass costs, and
-// scaled up to a whole light they'd make the GPU look several times slower
-export const MIN_TIMED_ROWS = 16;
+// Bands are never fewer rows than this: below it, fixed per-pass costs
+// outweigh the rows (on WebGL, many times over)
+export const MIN_BAND_ROWS = 16;
+// Only evaluations of at least this share of a light are timed. Scaled up
+// to a whole light, a thin band's fixed cost makes the GPU look slow: on
+// WebGPU a 16-row band at 768 px reads ~16 ms for a light that takes ~8.
+const MIN_TIMED_SHARE = 0.25;
 
 export class RelightBase {
   constructor(scene, geom) {
@@ -35,7 +39,8 @@ export class RelightBase {
 
   // Whether an evaluation of rows r0 to r1 at `stride` is worth timing
   timeable(stride, r0, r1) {
-    return !this.timing.pending && r1 - r0 >= Math.min(MIN_TIMED_ROWS, this.rows(stride));
+    const rows = this.rows(stride);
+    return !this.timing.pending && r1 - r0 >= Math.min(rows, Math.max(MIN_BAND_ROWS, rows * MIN_TIMED_SHARE));
   }
 
   // ─── Timing ────────────────────────────────────────────────────────────
