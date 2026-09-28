@@ -527,7 +527,21 @@ export class RelightGPUEngine extends RelightBase {
     auxBuf.destroy();
 
     this.context = this.canvas.getContext('webgpu');
-    this.context.configure({ device: dev, format: this.format, alphaMode: 'opaque' });
+    this.configure();
+  }
+
+  configure() {
+    this.context.configure({ device: this.device, format: this.format, alphaMode: 'opaque' });
+  }
+
+  // firefox forgets the canvas config every snapshot so reconfigure each time
+  currentTexture() {
+    try {
+      return this.context.getCurrentTexture();
+    } catch (error) {
+      this.configure();
+      return this.context.getCurrentTexture();
+    }
   }
 
   // Evaluates `light` ({pos, radius}) at stride s into `slot`, rows r0 to r1
@@ -634,7 +648,7 @@ export class RelightGPUEngine extends RelightBase {
     const enc = dev.createCommandEncoder();
     const pass = enc.beginRenderPass({
       colorAttachments: [
-        { view: this.context.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] },
+        { view: this.currentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] },
       ],
     });
     pass.setPipeline(this.compositePipeline);
