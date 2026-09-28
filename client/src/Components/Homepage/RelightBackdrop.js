@@ -2,6 +2,7 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 
+import { AdaptiveQuality, gpuName, loadProfile, saveProfile, sceneKey } from './relight/adaptiveQuality';
 import { RelightEngine, loadRelightScene } from './relight/RelightEngine';
 import useCardLights, { CARD_SELECTOR } from './useCardLights';
 
@@ -20,6 +21,9 @@ import useCardLights, { CARD_SELECTOR } from './useCardLights';
 // full evaluation won't fit the frame budget. Once it rests, it's refined to
 // full resolution a band of rows per frame, into a second slot that swaps in
 // when done. A resting room costs one composite, and only when it changes.
+// The frame budget and the canvas's pixel ratio rise for as long as the page
+// holds 30 fps (relight/adaptiveQuality), and are remembered for the device's
+// next visit.
 
 const SCENE_URL = `${process.env.PUBLIC_URL}/relight/cornell`;
 const PANEL_SELECTOR = '[data-prism-panel]';
@@ -45,7 +49,15 @@ const KEY = { radius: 0.1, color: [1, 0.83, 0.64], intensity: 26 };
 // A steel-blue light hidden in the far top corner, so the room is never black
 const FILL = { pos: [0.64, 0.72, -0.64], radius: 0.07, color: [0.55, 0.7, 1], intensity: 9, hidden: true };
 
-export default function RelightBackdrop({ onProgress, onFail }) {
+// GPU time per frame for the network (ms), until the device shows what it can take
+const START_BUDGET = { compact: 5, full: 7 };
+// Highest canvas pixel ratio, if the screen has that many
+const MAX_DPR = { compact: 1.5, full: 2 };
+// How often what was learned is saved (s)
+const SAVE_EVERY = 5;
+
+// onDpr(ratio): the pixel ratio the canvas should draw at
+export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
   const renderer = useThree((state) => state.gl);
   const updateLights = useCardLights();
   const canHover = useMemo(
@@ -63,6 +75,9 @@ export default function RelightBackdrop({ onProgress, onFail }) {
 
   const st = useRef(null);
   if (!st.current) {
+    const gpu = gpuName(renderer.getContext());
+    const profile = loadProfile(gpu);
+    const device = window.devicePixelRatio || 1;
     st.current = {
       engine: null,
       target: null,
@@ -76,6 +91,16 @@ export default function RelightBackdrop({ onProgress, onFail }) {
       fill: makeLight(FILL.pos, FILL, [2, 3]),
       lastLevels: null,
       panel: null,
+      gpu,
+      profile,
+      savedAt: 0,
+      quality: new AdaptiveQuality({
+        budget: finite(profile?.budget, compact ? START_BUDGET.compact : START_BUDGET.full),
+        // phones start at 1, as the other backdrops draw them
+        dpr: finite(profile?.dpr, compact ? 1 : Math.min(device, 1.5)),
+        dprRange: [1, Math.max(1, Math.min(device, compact ? MAX_DPR.compact : MAX_DPR.full))],
+        failedDpr: finite(profile?.failedDpr, Infinity),
+      }),
     };
   }
 
@@ -94,6 +119,21 @@ export default function RelightBackdrop({ onProgress, onFail }) {
     }),
     []
   );
+
+  // The canvas starts at the remembered (or default) pixel ratio. What was
+  // learned is saved now and then, and as the page goes away.
+  useEffect(() => {
+    const state = st.current;
+    onDpr?.(state.quality.dpr);
+    const save = () => saveState(state);
+    window.addEventListener('pagehide', save);
+    return () => {
+      window.removeEventListener('pagehide', save);
+      save();
+    };
+    // onDpr is read once; later ratios go out from the frame loop
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Load the scene and build the network on three.js's own context
   useEffect(() => {
@@ -132,6 +172,10 @@ export default function RelightBackdrop({ onProgress, onFail }) {
           renderer.resetState();
         }
 
+        if (state.profile?.scene === sceneKey(engine)) {
+          engine.seedTiming(state.profile.byStride);
+        }
+
         const target = new THREE.WebGLRenderTarget(engine.W, engine.H, {
           depthBuffer: false,
           generateMipmaps: false,
@@ -152,6 +196,7 @@ export default function RelightBackdrop({ onProgress, onFail }) {
 
     return () => {
       controller.abort();
+      saveState(state);
       state.engine?.dispose();
       state.target?.dispose();
       state.engine = null;
@@ -222,7 +267,14 @@ export default function RelightBackdrop({ onProgress, onFail }) {
     // Also sets data-focus on the card in focus on touch screens
     updateLights(state.panel || document, size, delta);
 
-    const { engine } = state;
+    const { engine, quality } = state;
+    // The pixel ratio is left alone until the room has loaded and struck on
+    const age = engine && state.readyAt !== null ? now - state.readyAt : 0;
+    const dpr = quality.frame(delta, age > 1.5);
+    if (dpr !== null) {
+      onDpr?.(dpr);
+    }
+
     if (!engine) {
       uniforms.ready.value = 0;
       return;
@@ -231,7 +283,10 @@ export default function RelightBackdrop({ onProgress, onFail }) {
     if (state.readyAt === null) {
       state.readyAt = now;
     }
-    const age = now - state.readyAt;
+    if (now - state.savedAt > SAVE_EVERY) {
+      state.savedAt = now;
+      saveState(state);
+    }
 
     // ── Where the light wants to be: behind the card in focus, else under
     // the pointer, else at rest
@@ -269,7 +324,7 @@ export default function RelightBackdrop({ onProgress, onFail }) {
     keepInRoom(engine, key.pos, key.radius);
 
     // ── Evaluate what changed, within the frame budget
-    const budget = compact ? 5 : 7;
+    const { budget } = quality;
     const finest = refineStride(engine, budget);
     let dirty = false;
     const passes = [];
@@ -289,6 +344,9 @@ export default function RelightBackdrop({ onProgress, onFail }) {
       dirty = true;
     }
 
+    if (passes.length) {
+      quality.worked();
+    }
     if (passes.length || dirty) {
       // The engine drives the context directly, so three.js's cache of it
       // goes stale: hand over a clean state and take it back after
@@ -330,6 +388,23 @@ export default function RelightBackdrop({ onProgress, onFail }) {
       />
     </mesh>
   );
+}
+
+// Keeps what this visit learned for the next, once the network has been
+// measured (the first measurements include compiling its shaders)
+function saveState({ engine, gpu, quality }) {
+  if (!engine || engine.timing.samples <= 2 || engine.timing.seeded) {
+    return;
+  }
+  saveProfile({
+    gpu,
+    scene: sceneKey(engine),
+    byStride: engine.timing.byStride,
+    budget: quality.budget,
+    dpr: quality.dpr,
+    // Infinity (nothing failed) is stored as null
+    failedDpr: Number.isFinite(quality.failedDpr) ? quality.failedDpr : null,
+  });
 }
 
 function makeLight(pos, { radius, color, hidden = false }, slots) {
@@ -501,6 +576,10 @@ function strike(t) {
 
 function distance(a, b) {
   return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+}
+
+function finite(value, fallback) {
+  return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
 function clamp01(value) {

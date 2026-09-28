@@ -139,6 +139,9 @@ export default function DistortedTorusScene({
   }
   const [relightFailed, setRelightFailed] = useState(false);
   const relight = backdrop === 'relight' && !relightFailed;
+  // The relit room sets its own pixel ratio from how the device keeps up.
+  // It's held here because the Canvas re-applies its dpr prop on each render.
+  const [relightDpr, setRelightDpr] = useState(null);
 
   return (
     <div ref={layer} className={className}>
@@ -146,7 +149,7 @@ export default function DistortedTorusScene({
       <ErrorBoundary name="webgl">
         <Canvas
           camera={{ position: cameraPosition, fov: 60 }}
-          dpr={[1, maxDpr]}
+          dpr={relight && relightDpr ? relightDpr : [1, maxDpr]}
           // With glass on, the scene renders to a texture first, so
           // multisampling the screen would only cost fill rate
           gl={{ antialias: !glass }}
@@ -184,7 +187,11 @@ export default function DistortedTorusScene({
           {/* The driver mounts first so the knot and liquid read this frame's progress */}
           {drip && !relight && <DripDriver state={dripState.current} onProgress={onDrip} />}
           {relight ? (
-            <RelightBackdrop onProgress={onDrip} onFail={() => setRelightFailed(true)} />
+            <RelightBackdrop
+              onProgress={onDrip}
+              onFail={() => setRelightFailed(true)}
+              onDpr={setRelightDpr}
+            />
           ) : backdrop === 'caustics' ? (
             <Caustics lens={LENSES[lens]} />
           ) : backdrop === 'grid' ? (
