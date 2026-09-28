@@ -1,8 +1,11 @@
 // Fits the relight backdrop to the device it runs on. Nothing is benchmarked
 // up front and nothing extra is loaded: it watches the page's own frames and
-// spends the GPU on image quality for as long as the page holds 30 fps. The
-// display's own refresh rate isn't the goal; a frame that runs past 30 fps
-// says the last thing asked of the GPU was too much.
+// spends the GPU on image quality for as long as the page holds its floor:
+// 30 fps, or 60 on touch screens, where the canvas is moved back over the
+// viewport once a frame and a slow frame shows as the room trailing the
+// finger (ScrollFollow). The display's own refresh rate isn't the goal; a
+// frame that runs past the floor says the last thing asked of the GPU was
+// too much.
 //
 // Three settings follow from that:
 // - The network's budget per frame (ms of GPU time), which sets how coarse a
@@ -19,23 +22,17 @@
 //
 // What was learned is kept for the next visit (loadProfile, saveProfile).
 
-// The slowest frame rate the page may drop to while the light moves
-const MIN_FPS = 30;
-// A frame is late once it runs this far past that (ms). The slack keeps
-// frames that vsync rounds just past 33 ms (5 refreshes at 144 Hz, 9 at
-// 240 Hz) on time.
-const LATE_MS = 1000 / MIN_FPS + 5;
+export const MIN_FPS = 30;
+// ms. slack is for frames vsync rounds just past 33ms (5 refreshes at 144Hz, 9 at 240Hz)
+const LATE_SLACK = 5;
 // s, anything longer is a hidden tab or a stall
 const GAP = 0.25;
 const WORK_FRAMES = 2;
 
-// Budget (ms): between MIN and SHARE of a 30 fps frame, the rest left for the
-// glass and the page. Each on-time frame with work grows it by GROW; a late
-// one multiplies it by BACK_OFF and caps the climb at 90% of where it
-// failed, a cap that then rises by CREEP a frame, so the budget settles just
-// under what the GPU can take instead of missing a frame every second.
+// budget backs off on a late frame and caps at 90% of where it failed, then creeps back up,
+// so it settles just under what the gpu can take instead of missing a frame every second
 const BUDGET_MIN = 1;
-const BUDGET_MAX = (1000 / MIN_FPS) * 0.7;
+const BUDGET_SHARE = 0.7;
 const GROW = 1.02;
 const BACK_OFF = 0.75;
 const CREEP = 1.0005;
@@ -48,7 +45,9 @@ const DPR_KEEP = 0.02;
 const DPR_SETTLE = 12;
 
 export class AdaptiveQuality {
-  constructor({ budget, dpr, dprRange, failedDpr = Infinity }) {
+  constructor({ budget, dpr, dprRange, failedDpr = Infinity, minFps = MIN_FPS }) {
+    this.lateMs = 1000 / minFps + LATE_SLACK;
+    this.budgetMax = (1000 / minFps) * BUDGET_SHARE;
     this.frameNo = 0;
     this.lastWork = -Infinity;
     this.budget = budget;
@@ -69,7 +68,7 @@ export class AdaptiveQuality {
       return null;
     }
     const recent = this.frameNo - this.lastWork <= WORK_FRAMES;
-    const late = delta * 1000 > LATE_MS;
+    const late = delta * 1000 > this.lateMs;
 
     if (recent && late) {
       this.ceiling = this.budget * 0.9;
@@ -78,7 +77,7 @@ export class AdaptiveQuality {
       this.ceiling *= CREEP;
       this.budget = Math.min(this.ceiling, this.budget * GROW);
     }
-    this.budget = clamp(this.budget, BUDGET_MIN, BUDGET_MAX);
+    this.budget = clamp(this.budget, BUDGET_MIN, this.budgetMax);
 
     return !recent && judgeDpr ? this.judgeDpr(late) : null;
   }
@@ -167,12 +166,7 @@ function slowConnection() {
   return !!c && (c.saveData || /(^|-)[23]g$/.test(c.effectiveType || ''));
 }
 
-// ─── Kept between visits ───────────────────────────────────────────────────
-// One profile per browser, for its GPU: the network's measured costs (and
-// the size they were measured at), the budget, the pixel ratio (and the
-// lowest one that failed), and the size to load. A returning visitor starts
-// where the last visit settled instead of at a guess. Storage can be missing or throw
-// (private windows, blocked site data); the page just starts from defaults.
+// localStorage can throw (private windows etc), then we just use defaults
 
 const STORAGE_KEY = 'relight-quality';
 const MAX_AGE = 30 * 24 * 3600 * 1000;
@@ -192,10 +186,14 @@ function networkKey(engine) {
   return `${net.width}x${net.hidden}`;
 }
 
-// Starts `engine` from costs measured on an earlier visit, or at another
-// size this visit ({res, network, byStride})
+// only on the same backend, webgpu is ~5x faster
 export function seedCosts(engine, measured) {
-  if (!measured?.byStride || measured.network !== networkKey(engine) || !(measured.res > 0)) {
+  if (
+    !measured?.byStride ||
+    measured.network !== networkKey(engine) ||
+    (measured.backend ?? 'webgl') !== engine.backend ||
+    !(measured.res > 0)
+  ) {
     return;
   }
   const scale = (engine.W / measured.res) ** 2;
@@ -207,16 +205,22 @@ export function seedCosts(engine, measured) {
 }
 
 export function measuredCosts(engine) {
-  return { res: engine.W, network: networkKey(engine), byStride: { ...engine.timing.byStride } };
+  return {
+    res: engine.W,
+    network: networkKey(engine),
+    backend: engine.backend,
+    byStride: { ...engine.timing.byStride },
+  };
 }
 
 // first measurements include shader compiles so the engine drops them
-export function profileFor(gpu, engine, quality) {
+export function profileFor(gpu, fps, engine, quality) {
   if (!engine || !Object.keys(engine.timing.byStride).length) {
     return null;
   }
   return {
     gpu,
+    fps,
     ...measuredCosts(engine),
     budget: quality.budget,
     dpr: quality.dpr,
@@ -225,10 +229,11 @@ export function profileFor(gpu, engine, quality) {
   };
 }
 
-export function loadProfile(gpu) {
+export function loadProfile(gpu, fps) {
   try {
     const profile = JSON.parse(window.localStorage.getItem(STORAGE_KEY));
-    return profile?.gpu === gpu && Date.now() - profile.at < MAX_AGE ? profile : null;
+    const fits = profile?.gpu === gpu && (profile.fps ?? MIN_FPS) === fps;
+    return fits && Date.now() - profile.at < MAX_AGE ? profile : null;
   } catch {
     return null;
   }
