@@ -5,7 +5,8 @@ import DistortedTorusScene from './DistortedTorusScene';
 import './prism.css';
 
 // The shared 3D backdrop for every portfolio page. The hub shows the
-// light-beam prism; CS and Art show their distorted torus knots. `lens` tints
+// light-beam prism, Art its distorted torus knot, and CS a Cornell box relit
+// live by a neural network (RelightBackdrop). `lens` tints
 // the shader per site ('hub' is the full spectrum, 'cs' cool, 'art' warm);
 // `tone` sets how far it recedes behind the content on top of it.
 const TONES = {
@@ -34,10 +35,14 @@ export function PrismBackdrop({ lens = 'hub', tone = 'page', accent, image }) {
   // The hub's cards and headline are glass (LiquidGlassPass), which also
   // takes over the dim and vignette so the glass can sit above them
   const glass = lens === 'hub';
-  // On the CS and Art home pages the knot turns to liquid as you scroll and
-  // drips down to fill the gallery's background; the vignette fades out with it.
-  // Project pages keep the knot as a still backdrop behind their glass panels.
+  // On the Art home page the knot turns to liquid as you scroll and drips down
+  // to fill the gallery's background; on CS the camera walks into the Cornell
+  // box instead (or, where that can't run, CS drips its knot too). Either way
+  // the vignette fades out as it goes.
   const drip = tone === 'page' && lens !== 'hub';
+  const pageBackdrop = drip && lens === 'cs' ? 'relight' : 'knot';
+  // The Cornell box frames and dims itself, and its lamp has to stay bright
+  const relight = pageBackdrop === 'relight';
   const detailBackdrop = tone === 'detail' ? DETAIL_BACKDROPS[lens] || 'torus' : 'torus';
   // everything but the knot is drawn at full strength; it's quiet already
   const flat = detailBackdrop !== 'torus';
@@ -58,7 +63,7 @@ export function PrismBackdrop({ lens = 'hub', tone = 'page', accent, image }) {
       <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-0 bg-[#08090c]" />
       <div
         aria-hidden="true"
-        className={`pointer-events-none absolute inset-0 z-0 overflow-hidden ${glass || flat ? '' : toneStyle.scene}`}
+        className={`pointer-events-none absolute inset-0 z-0 overflow-hidden ${glass || flat || relight ? '' : toneStyle.scene}`}
       >
         <DistortedTorusScene
           followScroll
@@ -66,7 +71,7 @@ export function PrismBackdrop({ lens = 'hub', tone = 'page', accent, image }) {
           lens={lens === 'hub' ? null : lens}
           drip={drip}
           onDrip={drip ? handleDrip : undefined}
-          backdrop={flat ? detailBackdrop : 'knot'}
+          backdrop={flat ? detailBackdrop : pageBackdrop}
           accent={accent}
           image={image}
           glass={
@@ -91,7 +96,7 @@ export function PrismBackdrop({ lens = 'hub', tone = 'page', accent, image }) {
         aria-hidden="true"
         className={`pointer-events-none fixed inset-0 z-0 ${flat ? 'hidden' : ''}`}
       >
-        {!glass && (
+        {!glass && !relight && (
           <div className="absolute inset-0 [background-image:radial-gradient(circle_at_center,rgba(8,9,12,0.12),rgba(8,9,12,0.58)_56%,rgba(8,9,12,0.95)_82%)]" />
         )}
         <div className="absolute inset-0 bg-gradient-to-b from-[#08090c]/0 via-transparent to-[#08090c]" />
