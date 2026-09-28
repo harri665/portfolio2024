@@ -1,12 +1,13 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { cancelFrame, frame } from 'framer-motion';
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 
 import ErrorBoundary from '../ErrorBoundary';
 import Caustics from './Caustics';
 import { CoverBackdrop, DraftingGrid } from './ProjectBackdrops';
 import LiquidGlassPass from './LiquidGlassPass';
+import RelightBackdrop from './RelightBackdrop';
 import useCardLights from './useCardLights';
 
 // type: 'torusKnot',
@@ -106,8 +107,10 @@ export default function DistortedTorusScene({
   lens = null,
   drip = false,
   onDrip,
-  // 'knot' shows the preset's shape; the project pages swap it for 'grid'
-  // (with an `accent` colour), 'cover' (with an `image` URL) or 'caustics'
+  // 'knot' shows the preset's shape; the CS home page swaps it for 'relight'
+  // (falling back to the knot and its drip if that can't run), the project
+  // pages for 'grid' (with an `accent` colour), 'cover' (with an `image` URL)
+  // or 'caustics'
   backdrop = 'knot',
   accent,
   image,
@@ -126,6 +129,8 @@ export default function DistortedTorusScene({
   if (!dripState.current) {
     dripState.current = { progress: 0, rect: null };
   }
+  const [relightFailed, setRelightFailed] = useState(false);
+  const relight = backdrop === 'relight' && !relightFailed;
 
   return (
     <div ref={layer} className={className}>
@@ -162,8 +167,10 @@ export default function DistortedTorusScene({
             />
           ))}
 
-          {drip && <DripDriver state={dripState.current} onProgress={onDrip} />}
-          {backdrop === 'caustics' ? (
+          {drip && !relight && <DripDriver state={dripState.current} onProgress={onDrip} />}
+          {relight ? (
+            <RelightBackdrop onProgress={onDrip} onFail={() => setRelightFailed(true)} />
+          ) : backdrop === 'caustics' ? (
             <Caustics lens={LENSES[lens]} />
           ) : backdrop === 'grid' ? (
             <DraftingGrid lens={LENSES[lens]} accent={accent} />
@@ -176,7 +183,7 @@ export default function DistortedTorusScene({
               dripState={drip ? dripState.current : null}
             />
           )}
-          {drip && <LiquidDrip lens={LENSES[lens]} state={dripState.current} />}
+          {drip && !relight && <LiquidDrip lens={LENSES[lens]} state={dripState.current} />}
 
           {glass && <LiquidGlassPass {...glass} blurTaps={compact ? 6 : 12} />}
         </Canvas>
