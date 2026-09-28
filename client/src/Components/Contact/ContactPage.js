@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { motion } from 'framer-motion';
 import { apiUrl } from '../../utils/api';
 import SubdomainNav from '../Homepage/SubdomainNav';
 import { detectSiteMode } from '../../utils/siteMode';
+import Button from '../ui/Button';
+import Container from '../ui/Container';
 
 const MailIcon = (props) => (
   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
@@ -40,9 +41,11 @@ const DownloadIcon = (props) => (
 );
 
 const inputClass =
-  'w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder-white/30 transition-colors focus:border-[#0a84ff]/50 focus:outline-none focus:ring-2 focus:ring-[#0a84ff]/25';
+  'w-full rounded-field border border-line/12 bg-surface px-4 py-3 text-sm text-ink placeholder:text-ink-3 transition-colors focus:border-accent/60 focus:outline-none';
 
-const labelClass = 'mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-white/50';
+const labelClass = 'mb-2 block text-sm font-medium text-ink-2';
+
+const panelClass = 'rounded-card border border-line/9 bg-surface/85 p-6 sm:p-8';
 
 const ContactPage = () => {
   const siteMode = detectSiteMode();
@@ -73,7 +76,7 @@ const ContactPage = () => {
     }
 
     setIsSubmitting(true);
-    setStatus('Sending...');
+    setStatus('Sending…');
 
     let discordMessage = `> **New Contact Form Submission!**\n>\n> **Name:** ${formData.name}`;
     if (formData.email) discordMessage += `\n> **Email:** ${formData.email}`;
@@ -92,7 +95,7 @@ const ContactPage = () => {
         throw new Error(errorData.error || 'Network response was not ok');
       }
 
-      setStatus('Message sent successfully!');
+      setStatus('Sent. I’ll get back to you soon.');
       setFormData({ name: '', email: '', message: '', phone: '' });
     } catch (error) {
       console.error('Failed to send message:', error);
@@ -104,81 +107,54 @@ const ContactPage = () => {
   };
 
   return (
-    <div className="relative min-h-screen bg-[#08090c] text-white">
+    <div className="relative min-h-screen bg-bg text-ink">
       <SubdomainNav currentMode={siteMode} />
 
-      <main className="relative z-10 mx-auto max-w-7xl px-4 pb-20 pt-28 sm:px-8">
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.45 }}
-          className="mb-10"
-        >
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-white/48">
-            Get in Touch
+      <Container as="main" className="pb-24 pt-28 sm:pt-32">
+        <header className="mb-10">
+          <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">Contact</h1>
+          <p className="mt-4 max-w-2xl text-base leading-relaxed text-ink-2">
+            Email is the quickest way to reach me. The form sends me a message directly.
           </p>
-          <h1 className="mt-3 text-4xl font-semibold tracking-tight sm:text-5xl">Contact Me</h1>
-          <p className="mt-3 max-w-2xl text-base leading-relaxed text-white/60">
-            I'm always open to discussing new projects, creative ideas, or opportunities to be part of your vision.
-          </p>
-        </motion.div>
+        </header>
 
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[320px_1fr]">
-          {/* Contact links */}
-          <motion.div
-            initial={{ opacity: 0, y: 14 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.06, duration: 0.45 }}
-            className="rounded-[1.75rem] border border-white/10 bg-white/5 p-6 shadow-[0_18px_55px_rgba(0,0,0,0.28)] backdrop-blur-xl sm:p-8"
-          >
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/48">
-              Other Channels
-            </p>
-            <p className="mt-2 text-sm leading-relaxed text-white/60">
-              Feel free to connect directly on any of these platforms.
-            </p>
-
-            <div className="mt-6 flex flex-col gap-4">
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-[320px_1fr]">
+          <section className={panelClass} aria-label="Contact details">
+            <ul className="flex flex-col gap-3">
               {contactLinks.map(({ href, Icon, label, subtext }) => (
-                <a
-                  key={label}
-                  href={href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="group flex items-center gap-4 rounded-2xl border border-white/8 bg-white/3 px-4 py-3 transition-colors hover:border-white/15 hover:bg-white/8"
-                >
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/8 text-white/70 transition-colors group-hover:text-white">
-                    <Icon />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-white">{label}</p>
-                    <p className="truncate text-xs text-white/55">{subtext}</p>
-                  </div>
-                </a>
+                <li key={label}>
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="group flex items-center gap-4 rounded-field px-2 py-2 transition-colors hover:bg-line/6"
+                  >
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-field border border-line/12 text-ink-2 transition-colors group-hover:text-ink">
+                      <Icon />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-semibold text-ink">{label}</span>
+                      <span className="block truncate text-sm text-ink-3">{subtext}</span>
+                    </span>
+                  </a>
+                </li>
               ))}
-            </div>
-          </motion.div>
+            </ul>
+          </section>
 
-          {/* Contact form */}
-          <motion.div
-            initial={{ opacity: 0, y: 14 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1, duration: 0.45 }}
-            className="rounded-[1.75rem] border border-white/10 bg-white/5 p-6 shadow-[0_18px_55px_rgba(0,0,0,0.28)] backdrop-blur-xl sm:p-8"
-          >
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/48">
-              Send a Message
-            </p>
+          <section className={panelClass}>
+            <h2 className="text-xl font-semibold tracking-tight">Send a message</h2>
 
             <form onSubmit={handleSubmit} className="mt-6 flex flex-col gap-5">
               <div>
-                <label htmlFor="name" className={labelClass}>Full Name</label>
+                <label htmlFor="name" className={labelClass}>Name</label>
                 <input
                   type="text"
                   name="name"
                   id="name"
                   required
-                  placeholder="Harrison Martin"
+                  autoComplete="name"
+                  placeholder="Your name"
                   value={formData.name}
                   onChange={handleChange}
                   className={inputClass}
@@ -187,11 +163,12 @@ const ContactPage = () => {
 
               <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
                 <div>
-                  <label htmlFor="email" className={labelClass}>Email Address</label>
+                  <label htmlFor="email" className={labelClass}>Email</label>
                   <input
                     type="email"
                     name="email"
                     id="email"
+                    autoComplete="email"
                     placeholder="you@example.com"
                     value={formData.email}
                     onChange={handleChange}
@@ -199,11 +176,12 @@ const ContactPage = () => {
                   />
                 </div>
                 <div>
-                  <label htmlFor="phone" className={labelClass}>Phone Number</label>
+                  <label htmlFor="phone" className={labelClass}>Phone</label>
                   <input
                     type="tel"
                     name="phone"
                     id="phone"
+                    autoComplete="tel"
                     placeholder="(123) 456-7890"
                     value={formData.phone}
                     onChange={handleChange}
@@ -212,7 +190,7 @@ const ContactPage = () => {
                 </div>
               </div>
 
-              <p className="text-xs text-white/40">Please provide either an email or phone number.</p>
+              <p className="-mt-2 text-sm text-ink-3">Leave an email or a phone number so I can reply.</p>
 
               <div>
                 <label htmlFor="message" className={labelClass}>Message</label>
@@ -221,61 +199,38 @@ const ContactPage = () => {
                   id="message"
                   rows="6"
                   required
-                  placeholder="Tell me about your project or inquiry..."
+                  placeholder="What would you like to talk about?"
                   value={formData.message}
                   onChange={handleChange}
                   className={inputClass}
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-4 pt-1">
+              <div className="flex flex-wrap items-center justify-end gap-4 pt-1">
                 {status && (
-                  <p className={`text-sm ${status.includes('Error') ? 'text-red-400' : 'text-white/65'}`}>
+                  <p role="status" className={`text-sm ${status.includes('Error') ? 'text-red-300' : 'text-ink-2'}`}>
                     {status}
                   </p>
                 )}
-                <motion.button
-                  type="submit"
-                  disabled={isSubmitting}
-                  whileHover={{ y: -1 }}
-                  whileTap={{ scale: 0.98 }}
-                  className="rounded-full bg-[#0a84ff] px-6 py-2.5 text-sm font-semibold text-white shadow-[0_10px_20px_rgba(10,132,255,0.28)] transition-colors hover:bg-[#2997ff] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {isSubmitting ? 'Sending...' : 'Send Message'}
-                </motion.button>
+                <Button type="submit" variant="primary" disabled={isSubmitting}>
+                  {isSubmitting ? 'Sending…' : 'Send message'}
+                </Button>
               </div>
             </form>
-          </motion.div>
+          </section>
         </div>
 
-        {/* Resume */}
-        <motion.div
-          initial={{ opacity: 0, y: 14 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.16, duration: 0.45 }}
-          className="mt-6 rounded-[1.75rem] border border-white/10 bg-white/5 p-6 shadow-[0_18px_55px_rgba(0,0,0,0.28)] backdrop-blur-xl sm:p-8"
-        >
-          <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/48">Resume</p>
-              <h2 className="mt-2 text-2xl font-semibold tracking-tight">Download my resume</h2>
-              <p className="mt-1 text-sm text-white/60">
-                A detailed overview of my skills and work experience.
-              </p>
-            </div>
-            <a href="/harrison-martin-resume.pdf" download="Harrison-Martin-Resume.pdf" className="shrink-0">
-              <motion.div
-                whileHover={{ y: -1 }}
-                whileTap={{ scale: 0.98 }}
-                className="inline-flex items-center gap-2.5 rounded-full border border-white/12 bg-white/8 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-white/14"
-              >
-                <DownloadIcon />
-                Download PDF
-              </motion.div>
-            </a>
+        <section className={`${panelClass} mt-5 flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between`}>
+          <div>
+            <h2 className="text-xl font-semibold tracking-tight">Resume</h2>
+            <p className="mt-1 text-sm text-ink-2">Experience, skills, and education as a PDF.</p>
           </div>
-        </motion.div>
-      </main>
+          <Button href="/harrison-martin-resume.pdf" download="Harrison-Martin-Resume.pdf" className="shrink-0">
+            <DownloadIcon />
+            Download PDF
+          </Button>
+        </section>
+      </Container>
     </div>
   );
 };

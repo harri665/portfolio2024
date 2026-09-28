@@ -1,25 +1,17 @@
 /* art gallery, scoped under .gx */
 
 .gx {
-  --bg: #09090b;
-  --panel: rgba(255, 255, 255, 0.022);
-  --panel-2: rgba(255, 255, 255, 0.04);
-  --line: rgba(255, 255, 255, 0.09);
-  --line-strong: rgba(255, 255, 255, 0.18);
-  --text: #f4f4f5;
-  --muted: #a1a1aa;
-  --dim: #6b6b73;
-  --faint: #46464d;
-  --blue: #2b80ff;
-  --blue-bright: #2f8bff;
-  /* the Art lens accent, shared with the prism backdrop */
-  --accent: #ff9a7a;
-  --glass: rgba(15, 17, 23, 0.52);
-  --glass-line: rgba(255, 255, 255, 0.12);
+  --text: rgb(var(--ink));
+  --muted: rgb(var(--ink-2));
+  --dim: rgb(var(--ink-3));
+  --faint: rgb(var(--ink-3));
+  --hairline: rgb(var(--line) / 0.09);
+  --hairline-strong: rgb(var(--line) / 0.18);
+  --accent-color: oklch(var(--accent));
 
   position: relative;
   min-height: 100vh;
-  background: var(--bg);
+  background: rgb(var(--bg));
   color: var(--text);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -31,48 +23,6 @@
   box-sizing: border-box;
 }
 
-/* ============================================================
-   NF DIRECTION (flat, 3D art)
-   ============================================================ */
-/* labels use the same sans as the rest of the site */
-.gx.nf {
-  --mono: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-}
-
-.nf .gx-shell { position: relative; z-index: 1; }
-
-.gx-shell {
-  position: relative;
-  padding: 0 40px 60px;
-}
-
-.gx.gr .gx-shell { max-width: 1280px; margin: 0 auto; }
-
-/* ---- header ---- */
-.nf-head { margin: 34px 0 30px; }
-.nf-eyebrow {
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.22em;
-  color: var(--dim);
-  margin-bottom: 16px;
-  text-transform: uppercase;
-}
-.nf-title {
-  font-size: 54px;
-  line-height: 0.98;
-  font-weight: 700;
-  letter-spacing: -0.025em;
-  margin: 0;
-}
-.nf-meta {
-  font-family: var(--mono);
-  font-size: 12.5px;
-  color: var(--faint);
-  margin: 16px 0 0;
-}
-
 .gr-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -81,19 +31,16 @@
 
 @media (max-width: 1023px) {
   .gr-grid { grid-template-columns: repeat(2, 1fr); }
-  .gx-shell { padding: 0 24px 60px; }
 }
 
 @media (max-width: 639px) {
   .gr-grid { grid-template-columns: 1fr; }
-  .gx-shell { padding: 0 16px 60px; }
-  .nf-title { font-size: 38px; }
 }
 
 /* The glass itself comes from .liquid-glass and the WebGL refraction pass */
 .gr-card {
   position: relative;
-  border-radius: 1.5rem;
+  border-radius: var(--radius-lg);
   overflow: hidden;
   cursor: pointer;
   text-decoration: none;
@@ -106,7 +53,7 @@
   position: relative;
   aspect-ratio: 4 / 3;
   background: var(--tint, #141417);
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--hairline);
   overflow: hidden;
 }
 .gr-img {
@@ -147,7 +94,7 @@
   position: absolute;
   inset: 0 0 -60px;
   z-index: 1;
-  border-radius: 1.5rem 1.5rem 0 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   pointer-events: none;
   box-shadow:
     inset 0 1px 1px rgba(255, 255, 255, 0.3),
@@ -181,7 +128,7 @@
   border-radius: 7px;
   background: #16161a;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
-  font-family: var(--mono);
+  font-family: var(--font-sans);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.01em;
@@ -202,7 +149,7 @@
   top: 12px;
   left: 12px;
   z-index: 3;
-  font-family: var(--mono);
+  font-family: var(--font-sans);
   font-size: 10.5px;
   letter-spacing: 0.04em;
   color: #e7e7ea;
@@ -243,7 +190,7 @@
 .gr-link {
   font-size: 13px;
   font-weight: 600;
-  color: var(--accent);
+  color: var(--accent-color);
 }
 .gr-rev-title { display: none; }
 
@@ -264,76 +211,26 @@
   color: var(--text);
   line-height: 1.25;
 }
-.gr-arrow {
-  flex: 0 0 auto;
-  color: var(--faint);
-  font-size: 15px;
-  transition: color 0.2s, transform 0.2s;
-}
-.gr-card:hover .gr-arrow { color: var(--accent); transform: translateX(3px); }
 
-/* ============================================================
-   PROJECT DETAIL (GD) — single art project, same flat language
-   ============================================================ */
-/* The project page's small text sits on the liquid, so it needs more
-   contrast than the near-black page it was tuned for */
+/* text sits on the blurred cover which can be light, so bump the greys */
 .gx.gd {
-  --dim: #b4b4bc;
-  --faint: #9a9aa3;
+  --ink-2: 214 216 222;
+  --ink-3: 186 189 197;
 }
 
-.gd .gx-shell { position: relative; z-index: 1; max-width: 1440px; margin: 0 auto; }
-
-/* back link */
-.gd-back {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-family: var(--mono);
-  font-size: 11.5px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--dim);
-  text-decoration: none;
-  transition: color 0.2s;
-}
-.gd-back:hover { color: var(--text); }
-.gd-back-arrow { transition: transform 0.2s; }
-.gd-back:hover .gd-back-arrow { transform: translateX(-3px); }
-
-/* header */
-.gd .nf-head { margin: 26px 0 28px; }
-.gd .nf-title { font-size: 46px; }
-@media (max-width: 639px) {
-  .gd .nf-title { font-size: 32px; }
-}
-.gd-metaline {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  font-family: var(--mono);
-  font-size: 12.5px;
-  color: var(--faint);
-  margin: 16px 0 0;
-}
-.gd-sep { color: rgba(255, 255, 255, 0.14); }
 
 /* generic flat panel + section label */
 /* Panels, the cover and asset tiles are clear glass: .liquid-glass for the
    rim and sheen, the WebGL refraction pass for the frosting */
 .gd-panel {
   position: relative;
-  border-radius: 1.5rem;
+  border-radius: var(--radius-lg);
   overflow: hidden;
 }
 .gd-label {
-  font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: 14px;
   font-weight: 600;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  color: var(--dim);
+  color: var(--text);
 }
 .gd-panel-head {
   display: flex;
@@ -341,10 +238,10 @@
   justify-content: space-between;
   gap: 12px;
   padding: 13px 17px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--hairline);
 }
 .gd-panel-count {
-  font-family: var(--mono);
+  font-family: var(--font-sans);
   font-size: 11.5px;
   color: var(--faint);
 }
@@ -360,7 +257,7 @@
   max-width: 100%;
   margin: 0 auto 22px;
   position: relative;
-  border-radius: 1.5rem;
+  border-radius: var(--radius-lg);
   overflow: hidden;
   line-height: 0;
 }
@@ -378,6 +275,7 @@
   align-items: start;
   margin-bottom: 22px;
 }
+.gd-cols-single { grid-template-columns: minmax(0, 300px); }
 @media (max-width: 1023px) {
   .gd-cols { grid-template-columns: 1fr; }
 }
@@ -394,7 +292,7 @@
 .gd-prose > *:first-child { margin-top: 0; }
 .gd-prose > *:last-child { margin-bottom: 0; }
 .gd-prose p { margin: 0 0 1.1em; }
-.gd-prose a { color: var(--accent); text-decoration: none; }
+.gd-prose a { color: var(--accent-color); text-decoration: none; }
 .gd-prose a:hover { text-decoration: underline; }
 .gd-prose strong { color: var(--text); font-weight: 600; }
 .gd-prose h1,
@@ -420,14 +318,14 @@
   border-radius: 9px;
   background: #131317;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
-  font-family: var(--mono);
+  font-family: var(--font-sans);
   font-size: 11.5px;
   color: #d4d4d8;
 }
 .gd-chip img { width: 15px; height: 15px; object-fit: contain; border-radius: 3px; }
 
 .gd-note {
-  font-family: var(--mono);
+  font-family: var(--font-sans);
   font-size: 11.5px;
   color: var(--faint);
   margin: 0;
@@ -457,7 +355,7 @@
 }
 .gd-asset {
   position: relative;
-  border-radius: 1.25rem;
+  border-radius: var(--radius-lg);
   overflow: hidden;
 }
 .gd-asset-frame { position: relative; width: 100%; background: rgba(8, 9, 12, 0.6); line-height: 0; }
@@ -509,17 +407,16 @@
 }
 
 .gd-asset-focus {
-  border-color: var(--blue);
-  box-shadow: 0 0 0 3px rgba(43, 128, 255, 0.28);
+  box-shadow: 0 0 0 3px oklch(var(--accent) / 0.35);
   animation: gd-focus-pulse 1.4s ease-in-out infinite;
 }
 @keyframes gd-focus-pulse {
-  0%, 100% { box-shadow: 0 0 0 3px rgba(43, 128, 255, 0.28); }
-  50% { box-shadow: 0 0 0 6px rgba(43, 128, 255, 0.1); }
+  0%, 100% { box-shadow: 0 0 0 3px oklch(var(--accent) / 0.35); }
+  50% { box-shadow: 0 0 0 6px oklch(var(--accent) / 0.12); }
 }
 
 .gd-status {
-  font-family: var(--mono);
+  font-family: var(--font-sans);
   font-size: 12.5px;
   color: var(--dim);
   padding: 120px 0;
@@ -539,8 +436,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .gr-card,
-  .gr-img,
-  .gr-arrow { transition: none; }
+  .gr-img { transition: none; }
   .gr-card:hover .gr-img { transform: none; }
   .gd-asset-focus { animation: none; }
 }

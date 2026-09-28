@@ -11,6 +11,7 @@ import matter from 'gray-matter';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
 import { createOgHandler, isCrawler, detectSiteMode, siteOrigin } from './og.js';
+import { prettyRepoName, readmeMedia, readmeTitle } from './repoMeta.js';
 import { Client, GatewayIntentBits } from 'discord.js';
 import 'dotenv/config';
 
@@ -518,26 +519,14 @@ app.get('/api/github/repo', async (req, res) => {
   }
 });
 
-app.get('/api/github/readme', async (req, res) => {
-  const fullName = String(req.query.full_name || '').trim();
-  const forceRefresh =
-    req.query.refresh === '1' || String(req.query.refresh || '').toLowerCase() === 'true';
-
-  if (!fullName) {
-    return res.status(400).json({ error: 'Missing required query param: full_name' });
-  }
-
-  if (!/^[^/\s]+\/[^/\s]+$/.test(fullName)) {
-    return res.status(400).json({ error: 'full_name must be in "owner/repo" format' });
-  }
-
+async function getGitHubReadme(fullName, { forceRefresh = false } = {}) {
   const cachedEntry = getGitHubCacheEntry('readmes', fullName);
   if (!forceRefresh && isGitHubCacheEntryFresh(cachedEntry)) {
-    return res.json(cachedEntry.data);
+    return cachedEntry.data;
   }
 
+  const [owner, repo] = fullName.split('/');
   try {
-    const [owner, repo] = fullName.split('/');
     const response = await axios.get(
       `https://api.github.com/repos/${owner}/${repo}/readme`,
       { headers: getGitHubHeaders() }
@@ -545,11 +534,62 @@ app.get('/api/github/readme', async (req, res) => {
     const content = Buffer.from(response.data.content, 'base64').toString('utf-8');
     const data = { content, name: response.data.name };
     setGitHubCacheEntry('readmes', fullName, data);
-    res.json(data);
+    return data;
   } catch (error) {
     if (error.response?.status === 404) {
-      return res.json({ content: null, name: null });
+      return { content: null, name: null };
     }
+    throw error;
+  }
+}
+
+async function getGitHubLanguages(fullName, { forceRefresh = false } = {}) {
+  const cachedEntry = getGitHubCacheEntry('languages', fullName);
+  if (!forceRefresh && isGitHubCacheEntryFresh(cachedEntry)) {
+    return cachedEntry.data;
+  }
+
+  const [owner, repo] = fullName.split('/');
+  const response = await axios.get(
+    `https://api.github.com/repos/${owner}/${repo}/languages`,
+    { headers: getGitHubHeaders() }
+  );
+  setGitHubCacheEntry('languages', fullName, response.data);
+  return response.data;
+}
+
+function describeReadme(readme, fullName) {
+  const content = readme?.content || null;
+  return {
+    content,
+    title: readmeTitle(content),
+    media: readmeMedia(content, fullName),
+  };
+}
+
+function isFullName(value) {
+  return /^[^/\s]+\/[^/\s]+$/.test(value);
+}
+
+function isRefresh(req) {
+  return req.query.refresh === '1' || String(req.query.refresh || '').toLowerCase() === 'true';
+}
+
+app.get('/api/github/readme', async (req, res) => {
+  const fullName = String(req.query.full_name || '').trim();
+
+  if (!fullName) {
+    return res.status(400).json({ error: 'Missing required query param: full_name' });
+  }
+
+  if (!isFullName(fullName)) {
+    return res.status(400).json({ error: 'full_name must be in "owner/repo" format' });
+  }
+
+  try {
+    const readme = await getGitHubReadme(fullName, { forceRefresh: isRefresh(req) });
+    res.json({ ...describeReadme(readme, fullName), name: readme.name });
+  } catch (error) {
     const status = error.response?.status || 500;
     const message = error.response?.data?.message || `Failed to fetch README for ${fullName}`;
     console.error('Error in GitHub readme API route:', error.message || error);
@@ -557,36 +597,75 @@ app.get('/api/github/readme', async (req, res) => {
   }
 });
 
+// ?full_names=owner/a,owner/b. repos with unreadable readmes are skipped instead of failing everything
+app.get('/api/github/readme-meta', async (req, res) => {
+  const fullNames = String(req.query.full_names || '')
+    .split(',')
+    .map((name) => name.trim())
+    .filter(isFullName)
+    .slice(0, 100);
+
+  const entries = await Promise.all(
+    fullNames.map(async (fullName) => {
+      try {
+        const { title, media } = describeReadme(await getGitHubReadme(fullName), fullName);
+        return [fullName, { title, media }];
+      } catch (error) {
+        console.error(`README meta failed for ${fullName}:`, error.message || error);
+        return null;
+      }
+    })
+  );
+
+  res.json(Object.fromEntries(entries.filter(Boolean)));
+});
+
 app.get('/api/github/languages', async (req, res) => {
   const fullName = String(req.query.full_name || '').trim();
-  const forceRefresh =
-    req.query.refresh === '1' || String(req.query.refresh || '').toLowerCase() === 'true';
 
   if (!fullName) {
     return res.status(400).json({ error: 'Missing required query param: full_name' });
   }
 
-  if (!/^[^/\s]+\/[^/\s]+$/.test(fullName)) {
+  if (!isFullName(fullName)) {
     return res.status(400).json({ error: 'full_name must be in "owner/repo" format' });
   }
 
-  const cachedEntry = getGitHubCacheEntry('languages', fullName);
-  if (!forceRefresh && isGitHubCacheEntryFresh(cachedEntry)) {
-    return res.json(cachedEntry.data);
-  }
-
   try {
-    const [owner, repo] = fullName.split('/');
-    const response = await axios.get(
-      `https://api.github.com/repos/${owner}/${repo}/languages`,
-      { headers: getGitHubHeaders() }
-    );
-    setGitHubCacheEntry('languages', fullName, response.data);
-    res.json(response.data);
+    res.json(await getGitHubLanguages(fullName, { forceRefresh: isRefresh(req) }));
   } catch (error) {
     const status = error.response?.status || 500;
     const message = error.response?.data?.message || `Failed to fetch languages for ${fullName}`;
     console.error('Error in GitHub languages API route:', error.message || error);
+    res.status(status).json({ error: message });
+  }
+});
+
+// owner comes from the cs config so whitelisted repos from other accounts work too
+app.get('/api/cs/project/:repoName', async (req, res) => {
+  const fullName = resolveCsRepoFullName(req.params.repoName);
+  if (!fullName) {
+    return res.status(400).json({ error: 'Invalid repository name' });
+  }
+
+  try {
+    const [repo, readme, languages] = await Promise.all([
+      getGitHubRepoByFullName(fullName),
+      getGitHubReadme(fullName).catch(() => ({ content: null })),
+      getGitHubLanguages(fullName).catch(() => null),
+    ]);
+
+    res.json({
+      repo,
+      title: readmeTitle(readme.content) || prettyRepoName(repo.name),
+      readme: describeReadme(readme, fullName),
+      languages,
+    });
+  } catch (error) {
+    const status = error.response?.status || 500;
+    const message =
+      status === 404 ? 'This project could not be found.' : `Failed to load ${fullName}`;
+    console.error('Error in CS project API route:', error.message || error);
     res.status(status).json({ error: message });
   }
 });
@@ -1419,6 +1498,7 @@ const ogHandler = createOgHandler({
   blogImagesDir: BLOG_IMAGES_DIR,
   getArtProject: getArtProjectByIdentifier,
   getCsRepo: (fullName) => getGitHubRepoByFullName(fullName),
+  getCsReadme: async (fullName) => describeReadme(await getGitHubReadme(fullName), fullName),
   getCsRepoFullName: resolveCsRepoFullName,
   listBlogPosts: () => loadBlogPosts(),
   listArtProjects,

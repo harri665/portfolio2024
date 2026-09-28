@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { motion } from 'framer-motion';
 
 import { apiUrl } from '../../utils/api';
 import { getCommenterName, setCommenterName } from '../../utils/commenterIdentity';
@@ -7,83 +6,25 @@ import { getCommenterName, setCommenterName } from '../../utils/commenterIdentit
 const MAX_NAME = 60;
 const MAX_BODY = 2000;
 
-// Three looks: the Houdini node panels on the blog, the glass cards on the cs
-// project pages, and the flat bordered panels of the art gallery.
-const VARIANTS = {
-  houdini: {
-    section: 'rounded-lg border border-[#2e3240] bg-[#1e2128] overflow-hidden',
-    header:
-      'flex items-center gap-2 border-b border-[#2e3240] bg-[#252830] px-5 py-2.5',
-    headerDot: 'h-1.5 w-1.5 rounded-full bg-[#e07b39]',
-    headerText:
-      'font-mono text-[10px] uppercase tracking-widest text-[#4a5060]',
-    body: 'px-5 py-6 sm:px-8',
-    label:
-      'mb-1 block font-mono text-[10px] uppercase tracking-widest text-[#5a6070]',
-    input:
-      'w-full rounded border border-[#3a3d45] bg-[#252830] px-3 py-2 font-mono text-sm text-[#d0d4dc] outline-none transition-colors focus:border-[#e07b39]/50',
-    button:
-      'rounded bg-[#e07b39] px-4 py-2 font-mono text-sm font-semibold text-white transition-colors hover:bg-[#f59a5a] disabled:cursor-not-allowed disabled:opacity-50',
-    subtleButton:
-      'font-mono text-[10px] uppercase tracking-widest text-[#5a6070] transition-colors hover:text-[#e07b39]',
-    counter: 'font-mono text-[10px] text-[#4a5060]',
-    error: 'font-mono text-xs text-red-400',
-    empty: 'font-mono text-xs text-[#5a6070]',
-    divider: 'border-t border-[#2e3240] pt-4',
-    replyRail: 'border-l border-[#2e3240] pl-4',
-    author: 'font-mono text-sm font-semibold text-[#d0d4dc]',
-    timestamp: 'font-mono text-[10px] text-[#4a5060]',
-    text: 'mt-1.5 whitespace-pre-wrap break-words text-sm leading-relaxed text-[#a8adb8]',
-  },
-  glass: {
-    section:
-      'rounded-[1.75rem] border border-white/10 bg-white/5 shadow-[0_18px_45px_rgba(0,0,0,0.28)] backdrop-blur-xl overflow-hidden',
-    header: 'flex items-center gap-2 border-b border-white/10 px-6 py-4',
-    headerDot: 'h-1.5 w-1.5 rounded-full bg-[#0a84ff]',
-    headerText:
-      'text-xs font-semibold uppercase tracking-[0.2em] text-white/45',
-    body: 'px-6 py-6 sm:px-8',
-    label:
-      'mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-white/45',
-    input:
-      'w-full rounded-xl border border-white/12 bg-white/5 px-3 py-2 text-sm text-white outline-none transition-colors placeholder:text-white/30 focus:border-[#0a84ff]/60',
-    button:
-      'rounded-full bg-[#0a84ff] px-5 py-2.5 text-sm font-semibold text-white shadow-[0_10px_28px_rgba(10,132,255,0.32)] transition-colors hover:bg-[#2997ff] disabled:cursor-not-allowed disabled:opacity-50',
-    subtleButton:
-      'text-xs font-semibold uppercase tracking-[0.15em] text-white/40 transition-colors hover:text-[#0a84ff]',
-    counter: 'text-xs text-white/35',
-    error: 'text-xs text-red-300',
-    empty: 'text-sm text-white/40',
-    divider: 'border-t border-white/10 pt-4',
-    replyRail: 'border-l border-white/10 pl-4',
-    author: 'text-sm font-semibold text-white',
-    timestamp: 'text-xs text-white/35',
-    text: 'mt-1.5 whitespace-pre-wrap break-words text-sm leading-relaxed text-white/70',
-  },
-  gallery: {
-    section: 'rounded-2xl border border-white/[0.09] bg-[#0c0c0f] overflow-hidden',
-    header: 'flex items-center gap-2 border-b border-white/[0.09] px-[17px] py-3',
-    headerDot: 'h-1.5 w-1.5 rounded-full bg-[#2f8bff]',
-    headerText:
-      'font-mono text-[10.5px] font-semibold uppercase tracking-[0.2em] text-[#6b6b73]',
-    body: 'px-[17px] py-6 sm:px-6',
-    label:
-      'mb-1 block font-mono text-[10.5px] font-semibold uppercase tracking-[0.2em] text-[#6b6b73]',
-    input:
-      'w-full rounded-lg border border-white/[0.09] bg-[#121215] px-3 py-2 text-sm text-[#f4f4f5] outline-none transition-colors placeholder:text-[#46464d] focus:border-[#2f8bff]/60',
-    button:
-      'rounded-lg bg-[#2b80ff] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#2f8bff] disabled:cursor-not-allowed disabled:opacity-50',
-    subtleButton:
-      'font-mono text-[10.5px] font-semibold uppercase tracking-[0.15em] text-[#6b6b73] transition-colors hover:text-[#2f8bff]',
-    counter: 'font-mono text-[11px] text-[#46464d]',
-    error: 'text-xs text-red-300',
-    empty: 'font-mono text-xs text-[#6b6b73]',
-    divider: 'border-t border-white/[0.09] pt-4',
-    replyRail: 'border-l border-white/[0.09] pl-4',
-    author: 'text-sm font-semibold text-[#f4f4f5]',
-    timestamp: 'font-mono text-[11px] text-[#46464d]',
-    text: 'mt-1.5 whitespace-pre-wrap break-words text-sm leading-relaxed text-[#a1a1aa]',
-  },
+const STYLE = {
+  section: 'border-t border-line/9 pt-10',
+  heading: 'text-xl font-semibold tracking-tight text-ink',
+  count: 'ml-2 font-normal text-ink-3',
+  body: 'mt-6',
+  label: 'mb-1.5 block text-sm font-medium text-ink-2',
+  input:
+    'w-full rounded-field border border-line/12 bg-surface px-3 py-2 text-sm text-ink outline-none transition-colors placeholder:text-ink-3 focus:border-accent/60',
+  button:
+    'rounded-full bg-accent px-5 py-2 text-sm font-semibold text-on-accent transition-colors hover:bg-accent/85 disabled:cursor-not-allowed disabled:opacity-50',
+  subtleButton: 'text-sm text-ink-3 transition-colors hover:text-ink',
+  counter: 'text-xs tabular-nums text-ink-3',
+  error: 'text-sm text-red-300',
+  empty: 'text-sm text-ink-3',
+  divider: 'border-t border-line/9 pt-5',
+  replyRail: 'border-l border-line/12 pl-4',
+  author: 'text-sm font-semibold text-ink',
+  timestamp: 'text-xs text-ink-3',
+  text: 'mt-1.5 whitespace-pre-wrap break-words text-sm leading-relaxed text-ink-2',
 };
 
 function formatTimestamp(value) {
@@ -198,8 +139,8 @@ function CommentForm({
   );
 }
 
-export default function CommentSection({ type, id, variant = 'glass' }) {
-  const s = VARIANTS[variant] || VARIANTS.glass;
+export default function CommentSection({ type, id }) {
+  const s = STYLE;
 
   const [comments, setComments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -357,26 +298,19 @@ export default function CommentSection({ type, id, variant = 'glass' }) {
   }
 
   return (
-    <motion.section
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4 }}
-      className={s.section}
-    >
-      <div className={s.header}>
-        <div className={s.headerDot} />
-        <span className={s.headerText}>
-          comments{comments.length > 0 ? ` (${comments.length})` : ''}
-        </span>
-      </div>
+    <section className={s.section}>
+      <h2 className={s.heading}>
+        Comments
+        {comments.length > 0 && <span className={s.count}>{comments.length}</span>}
+      </h2>
 
       <div className={s.body}>
         {loading ? (
-          <p className={s.empty}>loading comments…</p>
+          <p className={s.empty}>Loading comments…</p>
         ) : loadError ? (
           <p className={s.error}>{loadError}</p>
         ) : thread.length === 0 ? (
-          <p className={s.empty}>No comments yet — be the first.</p>
+          <p className={s.empty}>No comments yet.</p>
         ) : (
           <div className="space-y-4">
             {thread.map((comment) => (
@@ -411,6 +345,6 @@ export default function CommentSection({ type, id, variant = 'glass' }) {
           />
         </div>
       </div>
-    </motion.section>
+    </section>
   );
 }

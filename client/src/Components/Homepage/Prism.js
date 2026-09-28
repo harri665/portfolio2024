@@ -11,8 +11,8 @@ import './prism.css';
 const TONES = {
   hub: { scene: 'opacity-60 sm:opacity-70', veil: '' },
   page: { scene: 'opacity-90', veil: '' },
-  quiet: { scene: 'opacity-35 sm:opacity-45', veil: 'bg-[#08090c]/55' },
-  detail: { scene: 'opacity-60 sm:opacity-70', veil: 'bg-[#08090c]/20' },
+  quiet: { scene: 'opacity-35 sm:opacity-45', veil: 'bg-bg/55' },
+  detail: { scene: 'opacity-60 sm:opacity-70', veil: 'bg-bg/20' },
 };
 
 // What sits behind each site's project pages, under the glass panels:
@@ -52,7 +52,7 @@ export function PrismBackdrop({ lens = 'hub', tone = 'page', accent, image }) {
   // at the edges while it catches up.
   return (
     <>
-      <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-0 bg-[#08090c]" />
+      <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-0 bg-bg" />
       <div
         aria-hidden="true"
         className={`pointer-events-none absolute inset-0 z-0 overflow-hidden ${glass || flat ? '' : toneStyle.scene}`}
@@ -89,18 +89,19 @@ export function PrismBackdrop({ lens = 'hub', tone = 'page', accent, image }) {
         {!glass && (
           <div className="absolute inset-0 [background-image:radial-gradient(circle_at_center,rgba(8,9,12,0.12),rgba(8,9,12,0.58)_56%,rgba(8,9,12,0.95)_82%)]" />
         )}
-        <div className="absolute inset-0 bg-gradient-to-b from-[#08090c]/0 via-transparent to-[#08090c]" />
+        <div className="absolute inset-0 bg-gradient-to-b from-bg/0 via-transparent to-bg" />
         {toneStyle.veil && <div className={`absolute inset-0 ${toneStyle.veil}`} />}
       </div>
     </>
   );
 }
 
-// The centred name / headline / subline block from the hub, shared so every
-// site opens the same way. `peek` stops a full-height hero short of the fold
-// so the top of the gallery below shows on load. It must leave enough of the
-// first cards on screen for their scroll reveal (15%, less the 40px they
-// start lowered by) to fire, or they peek in as empty space.
+// The headline block over a 3D scene: the hub's, centred, and the art
+// gallery's, left-aligned under the wordmark like every other section's
+// intro. `peek` stops a full-height hero short of the fold so the top of the
+// gallery below shows on load. It must leave enough of the first cards on
+// screen for their scroll reveal (15%, less the 40px they start lowered by)
+// to fire, or they peek in as empty space.
 export function PrismHero({
   title,
   subtitle,
@@ -108,63 +109,61 @@ export function PrismHero({
   fullHeight = false,
   peek = false,
   glassTitle = false,
+  align = 'center',
 }) {
-  return (
-    <header
-      className={[
-        'relative z-10 mx-auto flex w-full max-w-6xl flex-col items-center justify-center px-4 text-center sm:px-8',
-        fullHeight
-          ? [
-              'pb-10 pt-24 sm:pb-16 sm:pt-28',
-              peek ? 'min-h-[calc(100svh-6.5rem)] sm:min-h-[calc(100svh-7.5rem)]' : 'min-h-svh',
-            ].join(' ')
-          : 'min-h-[64vh] pb-12 pt-32',
-      ].join(' ')}
-    >
-      <motion.p
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-        className="mb-4 text-xs font-semibold uppercase tracking-[0.24em] text-white/58"
-      >
-        Harrison Martin
-      </motion.p>
+  const left = align === 'left';
 
-      <motion.h1
-        data-liquid-glass-text={glassTitle || undefined}
-        initial={{ opacity: 0, y: 14 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.05, duration: 0.6 }}
+  return (
+    <div className="px-3 sm:px-6">
+      <header
         className={[
-          'max-w-4xl text-4xl leading-tight tracking-tight sm:text-6xl lg:text-7xl',
-          glassTitle ? 'prism-text font-bold' : 'font-semibold',
+          'relative z-10 mx-auto flex w-full max-w-7xl flex-col justify-center px-5 sm:px-6',
+          left ? 'items-start text-left' : 'items-center text-center',
+          fullHeight
+            ? [
+                'pb-10 pt-24 sm:pb-16 sm:pt-28',
+                peek ? 'min-h-[calc(100svh-6.5rem)] sm:min-h-[calc(100svh-7.5rem)]' : 'min-h-svh',
+              ].join(' ')
+            : 'min-h-[64vh] pb-12 pt-32',
         ].join(' ')}
       >
-        {title}
-      </motion.h1>
-
-      {subtitle && (
-        <motion.p
-          initial={{ opacity: 0, y: 12 }}
+        <motion.h1
+          data-liquid-glass-text={glassTitle || undefined}
+          initial={{ opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1, duration: 0.6 }}
-          className="mt-4 max-w-2xl text-base leading-relaxed text-white/68 sm:text-lg"
+          transition={{ duration: 0.6 }}
+          className={[
+            'max-w-4xl leading-none tracking-tight text-ink',
+            left ? 'text-6xl sm:text-8xl lg:text-9xl' : 'text-4xl sm:text-6xl lg:text-7xl',
+            glassTitle ? 'prism-text font-bold' : 'font-semibold',
+          ].join(' ')}
         >
-          {subtitle}
-        </motion.p>
-      )}
+          {title}
+        </motion.h1>
 
-      {children && (
-        <motion.div
-          initial={{ opacity: 0, y: 18 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.18, duration: 0.6 }}
-          className="w-full"
-        >
-          {children}
-        </motion.div>
-      )}
-    </header>
+        {subtitle && (
+          <motion.p
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.08, duration: 0.6 }}
+            className="mt-5 max-w-2xl text-base leading-relaxed text-ink-2 sm:text-lg"
+          >
+            {subtitle}
+          </motion.p>
+        )}
+
+        {children && (
+          <motion.div
+            initial={{ opacity: 0, y: 18 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.18, duration: 0.6 }}
+            className="w-full"
+          >
+            {children}
+          </motion.div>
+        )}
+      </header>
+    </div>
   );
 }
 
