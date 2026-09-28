@@ -1,9 +1,10 @@
 import { useFrame, useThree } from '@react-three/fiber';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 
 import {
   AdaptiveQuality,
+  MIN_FPS,
   REFINE_FRAMES,
   firstTier,
   gpuName,
@@ -14,7 +15,10 @@ import {
   seedCosts,
   upgradeTier,
 } from './relight/adaptiveQuality';
-import { RelightEngine, loadRelightScene } from './relight/RelightEngine';
+import { MIN_TIMED_ROWS } from './relight/RelightBase';
+import { RelightEngine } from './relight/RelightEngine';
+import { RelightGPUEngine, requestRelightDevice } from './relight/RelightGPU';
+import { encodePixels, loadRelightScene } from './relight/scene';
 import useCardLights, { CARD_SELECTOR } from './useCardLights';
 
 // ─── CS: a Cornell box lit by a neural network ─────────────────────────────
@@ -28,20 +32,28 @@ import useCardLights, { CARD_SELECTOR } from './useCardLights';
 // moves behind whichever card you hover (on touch screens, the one in focus),
 // so each pane is lit from behind by the room's bounce light.
 //
+// The network runs on WebGPU where the browser has it (relight/RelightGPU),
+// about five times faster than on three.js's WebGL2 context, where it runs
+// otherwise (relight/RelightEngine); add ?relight=webgl to the URL to compare.
 // Only a light that moves is re-evaluated, on every 2nd to 16th pixel if a
 // full evaluation won't fit the frame budget. Once it rests, it's refined to
 // full resolution a band of rows per frame, into a second slot that swaps in
 // when done. A resting room costs one composite, and only when it changes.
 // The frame budget, the canvas's pixel ratio and the image size rise for as
-// long as the page holds 30 fps (relight/adaptiveQuality), and are remembered
-// for the device's next visit. A larger size is fetched in the background
-// and swapped in once ready.
+// long as the page holds 30 fps, 60 on touch screens (relight/adaptiveQuality),
+// and are remembered for the device's next visit. A larger size is fetched in
+// the background and swapped in once ready. Refinement waits while the page
+// scrolls, so those frames go to keeping the canvas over the viewport.
 
 const SCENE_URL = `${process.env.PUBLIC_URL}/relight/cornell`;
 // The room at 512 px is scene.json and pixels.bin; other sizes carry theirs
 const NATIVE = 512;
 const tierSuffix = (tier) => (tier === NATIVE ? '' : `-${tier}`);
 const PANEL_SELECTOR = '[data-prism-panel]';
+// The hero the room is framed in on phones (PrismHero)
+const HERO_SELECTOR = '[data-prism-hero]';
+// Top of the hero's space on phones, below the nav bar (px)
+const NAV_CLEAR = 72;
 // Scroll range of the walk-in, as the knot's drip uses it: from this far down
 // the page until the gallery's top edge rises to END_TOP (viewport heights)
 const START = 0.03;
@@ -51,6 +63,8 @@ const END_TOP = 0.14;
 const MOVE_EPS = 0.004;
 // How long a light rests before its preview is refined (s)
 const REFINE_DELAY = 0.12;
+// The page counts as scrolling until it has held still this long (s)
+const SCROLL_REST = 0.15;
 
 // World-space depth of the light: mid-room under the pointer, near the back
 // wall behind a card. The box spans -1..1 on every axis, the camera looks
@@ -70,6 +84,13 @@ const START_BUDGET = { compact: 5, full: 7 };
 const MAX_DPR = { compact: 1.5, full: 2 };
 // How often what was learned is saved (s)
 const SAVE_EVERY = 5;
+// Size of one of the WebGL engine's activation arrays (bytes): larger runs
+// faster (32 MB ~20% over 8 MB) but phones have less memory to give
+const BAND_BYTES = { compact: 16 << 20, full: 32 << 20 };
+// Frame-rate floor on touch screens. The canvas scrolls with the page and is
+// moved back over the viewport once a frame (ScrollFollow), so at 30 fps the
+// room visibly trails the finger.
+const TOUCH_FPS = 60;
 
 // onDpr(ratio): the pixel ratio the canvas should draw at
 export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
@@ -88,15 +109,23 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
     []
   );
 
+  // WebGL after a WebGPU device is lost, or when the URL asks for it
+  const [webgl, setWebgl] = useState(
+    () => new URLSearchParams(window.location.search).get('relight') === 'webgl'
+  );
+
   const st = useRef(null);
   if (!st.current) {
     const gpu = gpuName(renderer.getContext());
-    const profile = loadProfile(gpu);
+    const fps = compact ? TOUCH_FPS : MIN_FPS;
+    const profile = loadProfile(gpu, fps);
     const device = window.devicePixelRatio || 1;
     st.current = {
       engine: null,
-      target: null,
+      built: null, // the engine with its image and how to show it (buildEngine)
       framebuffer: null,
+      device: null, // a promise of the WebGPU device, or of null
+      bandBytes: compact ? BAND_BYTES.compact : BAND_BYTES.full,
       readyAt: null,
       progress: 0,
       box: { left: 0, top: 0, size: 1 },
@@ -106,7 +135,11 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
       fill: makeLight(FILL.pos, FILL, [2, 3]),
       lastLevels: null,
       panel: null,
+      hero: null,
+      scrollY: 0,
+      scrolledAt: -Infinity,
       gpu,
+      fps,
       profile,
       savedAt: 0,
       tier: firstTier(profile, compact),
@@ -120,6 +153,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
         dpr: finite(profile?.dpr, compact ? 1 : Math.min(device, 1.5)),
         dprRange: [1, Math.max(1, Math.min(device, compact ? MAX_DPR.compact : MAX_DPR.full))],
         failedDpr: finite(profile?.failedDpr, Infinity),
+        minFps: fps,
       }),
     };
   }
@@ -155,10 +189,38 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Load the scene and build the network on three.js's own context
+  // The WebGPU device, asked for once and kept across image sizes. A device
+  // that's lost (a GPU reset, a driver update) hands over to WebGL.
+  const deviceFor = (state) => {
+    if (!state.device) {
+      state.device = requestRelightDevice()
+        .catch(() => null)
+        .then((device) => {
+          device?.lost.then((info) => {
+            if (info.reason !== 'destroyed') {
+              console.warn('Relight backdrop lost its WebGPU device:', info.message);
+              setWebgl(true);
+            }
+          });
+          return device;
+        });
+    }
+    return state.device;
+  };
+  useEffect(() => {
+    const state = st.current;
+    return () => {
+      const device = state.device;
+      state.device = null;
+      device?.then((d) => d?.destroy());
+    };
+  }, []);
+
+  // Load the scene and build the network, on WebGPU or three.js's own context
   useEffect(() => {
     const state = st.current;
     const controller = new AbortController();
+    const { signal } = controller;
     const ctx = renderer.getContext();
     const fail = (error) => {
       if (error?.name !== 'AbortError') {
@@ -177,52 +239,59 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
     }
 
     // A missing size falls back to the one every device can have
-    const load = (tier) => loadRelightScene(SCENE_URL, controller.signal, tierSuffix(tier));
-    load(state.tier)
-      .catch((error) => {
-        if (error?.name === 'AbortError' || state.tier === NATIVE) {
-          throw error;
-        }
-        state.tier = NATIVE;
-        return load(NATIVE);
-      })
-      .then((data) => {
-        if (controller.signal.aborted) {
-          return;
-        }
-        const built = buildEngine(renderer, data);
-        seedCosts(built.engine, state.profile);
-        install(state, built, uniforms);
-      })
-      .catch(fail);
+    const load = (tier) => loadRelightScene(SCENE_URL, signal, tierSuffix(tier));
+    const start = async () => {
+      const [device, data] = await Promise.all([
+        webgl ? null : deviceFor(state),
+        load(state.tier).catch((error) => {
+          if (error?.name === 'AbortError' || state.tier === NATIVE) {
+            throw error;
+          }
+          state.tier = NATIVE;
+          return load(NATIVE);
+        }),
+      ]);
+      const built = await buildEngine(renderer, data, device, state.bandBytes, signal);
+      if (signal.aborted) {
+        built.dispose();
+        return;
+      }
+      seedCosts(built.engine, state.profile);
+      install(state, built, uniforms);
+    };
+    start().catch(fail);
 
     return () => {
       controller.abort();
       state.upgrading?.abort();
       state.upgrading = null;
       saveState(state);
-      state.engine?.dispose();
-      state.target?.dispose();
+      state.built?.dispose();
+      state.built = null;
       state.engine = null;
-      state.target = null;
+      state.readyAt = null;
       uniforms.tRelight.value = null;
     };
     // onFail only matters once; a new one mustn't rebuild the network
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [renderer, uniforms]);
+  }, [renderer, uniforms, webgl]);
 
   // Fetches and prepares the room at `tier` px while the current one keeps
   // running, then swaps it in, starting from the current one's costs
   const startUpgrade = (tier) => {
     const state = st.current;
     const controller = new AbortController();
+    const { signal } = controller;
     state.upgrading = controller;
-    loadRelightScene(SCENE_URL, controller.signal, tierSuffix(tier))
-      .then((data) => {
-        if (controller.signal.aborted || !state.engine) {
+    // on the device the current one runs on
+    const device = state.engine.backend === 'webgpu' ? state.device : null;
+    Promise.all([device, loadRelightScene(SCENE_URL, signal, tierSuffix(tier))])
+      .then(([gpu, data]) => buildEngine(renderer, data, gpu, state.bandBytes, signal))
+      .then((built) => {
+        if (signal.aborted || !state.engine) {
+          built.dispose();
           return;
         }
-        const built = buildEngine(renderer, data);
         seedCosts(built.engine, measuredCosts(state.engine));
         install(state, built, uniforms);
         state.tier = tier;
@@ -280,15 +349,22 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
     if (onProgress && progress !== previous) {
       onProgress(progress);
     }
+    if (window.scrollY !== state.scrollY) {
+      state.scrollY = window.scrollY;
+      state.scrolledAt = now;
+    }
+    const scrolling = now - state.scrolledAt < SCROLL_REST;
 
     // ── Where the image sits: a framed window on the hero, cover behind the gallery
     const walk = easeInOutCubic(progress);
     const small = vw < 640;
-    const heroSize = small ? Math.min(vw * 1.12, vh * 0.6) : Math.min(vw * 0.9, vh * 0.86);
+    const [heroSize, heroY] = small
+      ? phoneHero(state, vw, vh)
+      : [Math.min(vw * 0.9, vh * 0.86), vh * 0.5];
     state.shownPx = heroSize * viewport.dpr;
     const coverSize = Math.max(vw, vh) * 1.04;
     const boxSize = THREE.MathUtils.lerp(heroSize, coverSize, walk);
-    const centerY = THREE.MathUtils.lerp(vh * (small ? 0.44 : 0.5), vh * 0.5, walk);
+    const centerY = THREE.MathUtils.lerp(heroY, vh * 0.5, walk);
     state.box = { left: vw / 2 - boxSize / 2, top: centerY - boxSize / 2, size: boxSize };
 
     uniforms.dpr.value = viewport.dpr;
@@ -371,10 +447,10 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
     const finest = refineStride(engine, budget);
     let dirty = false;
     const passes = [];
-    if (needsWork(key, now, finest)) {
+    if (needsWork(key, now, finest, scrolling)) {
       passes.push(key);
     }
-    if (needsWork(fill, now, finest) && (!passes.length || !fill.evalPos)) {
+    if (needsWork(fill, now, finest, scrolling) && (!passes.length || !fill.evalPos)) {
       passes.push(fill);
     }
 
@@ -391,9 +467,12 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
       quality.worked();
     }
     if (passes.length || dirty) {
-      // The engine drives the context directly, so three.js's cache of it
-      // goes stale: hand over a clean state and take it back after
-      renderer.resetState();
+      // The WebGL engine drives three.js's context directly, so three.js's
+      // cache of it goes stale: hand over a clean state and take it back after
+      const shared = engine.backend === 'webgl';
+      if (shared) {
+        renderer.resetState();
+      }
       passes.forEach((light) => {
         if (step(engine, light, now, budget / passes.length, finest)) {
           dirty = true;
@@ -404,8 +483,11 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
           [shown(key, KEY.intensity * keyLevel), shown(fill, FILL.intensity * fillLevel)],
           state.framebuffer
         );
+        state.built.present();
       }
-      renderer.resetState();
+      if (shared) {
+        renderer.resetState();
+      }
     }
 
     // A soft bloom around the key light's disc, which the tonemap flattens
@@ -433,17 +515,71 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
   );
 }
 
+// The room's size and centre on a phone's hero (px): as large as the space
+// between the nav bar and the first cards allows, a little wider than the
+// screen so its walls feather off the edges
+function phoneHero(state, vw, vh) {
+  if (!state.hero?.isConnected) {
+    state.hero = document.querySelector(HERO_SELECTOR);
+  }
+  if (!state.hero) {
+    return [Math.min(vw * 1.12, vh * 0.6), vh * 0.44];
+  }
+  // where the hero ends at the top of the page
+  const bottom = state.hero.getBoundingClientRect().bottom + window.scrollY;
+  const space = Math.max(bottom - NAV_CLEAR, vh * 0.4);
+  return [Math.min(vw * 1.2, space), NAV_CLEAR + space / 2];
+}
+
 // Keeps what this visit learned for the next
-function saveState({ engine, gpu, quality }) {
-  const profile = profileFor(gpu, engine, quality);
+function saveState({ engine, gpu, fps, quality }) {
+  const profile = profileFor(gpu, fps, engine, quality);
   if (profile) {
     saveProfile(profile);
   }
 }
 
-// The network for a loaded scene, on three.js's context, and the render
-// target it composites into
-function buildEngine(renderer, data) {
+// The network for a loaded scene: on `device` (WebGPU) if there is one and
+// it can run it, else on three.js's context. Returns { engine, texture,
+// framebuffer, present, dispose }: the texture the backdrop samples, the
+// framebuffer to composite into (WebGL), present() to call after each
+// composite, and dispose() for all of it.
+async function buildEngine(renderer, data, device, bandBytes, signal) {
+  if (device) {
+    try {
+      const engine = await RelightGPUEngine.create(device, data);
+      // Each composite comes over as an ImageBitmap, uploaded as the
+      // backdrop draws. Its rows are bottom first already.
+      const texture = new THREE.Texture();
+      texture.flipY = false;
+      texture.generateMipmaps = false;
+      texture.minFilter = THREE.LinearFilter;
+      texture.magFilter = THREE.LinearFilter;
+      return {
+        engine,
+        texture,
+        framebuffer: null,
+        present: () => {
+          const previous = texture.image;
+          texture.image = engine.snapshot();
+          texture.needsUpdate = true;
+          previous?.close?.();
+        },
+        dispose: () => {
+          texture.image?.close?.();
+          engine.dispose();
+          texture.dispose();
+        },
+      };
+    } catch (error) {
+      if (signal.aborted) {
+        throw error;
+      }
+      console.warn('Relight backdrop running on WebGL instead of WebGPU:', error);
+    }
+  }
+
+  const pixels = await encodePixels(data, signal);
   const ctx = renderer.getContext();
   renderer.resetState();
   ctx.pixelStorei(ctx.UNPACK_FLIP_Y_WEBGL, false);
@@ -451,7 +587,7 @@ function buildEngine(renderer, data) {
   ctx.pixelStorei(ctx.UNPACK_ALIGNMENT, 4);
   let engine;
   try {
-    engine = new RelightEngine(ctx, data);
+    engine = new RelightEngine(ctx, data, pixels, { bandBytes });
   } finally {
     renderer.resetState();
   }
@@ -467,19 +603,27 @@ function buildEngine(renderer, data) {
   renderer.setRenderTarget(target);
   const framebuffer = ctx.getParameter(ctx.FRAMEBUFFER_BINDING);
   renderer.setRenderTarget(previous);
-  return { engine, target, framebuffer };
+  return {
+    engine,
+    texture: target.texture,
+    framebuffer,
+    present: () => {},
+    dispose: () => {
+      engine.dispose();
+      target.dispose();
+    },
+  };
 }
 
 // Puts a built network in place of the one running (if any). Its slots are
 // empty, so both lights are evaluated afresh, in the same frame, before the
 // next composite.
-function install(state, { engine, target, framebuffer }, uniforms) {
-  state.engine?.dispose();
-  state.target?.dispose();
-  state.engine = engine;
-  state.target = target;
-  state.framebuffer = framebuffer;
-  uniforms.tRelight.value = target.texture;
+function install(state, built, uniforms) {
+  state.built?.dispose();
+  state.built = built;
+  state.engine = built.engine;
+  state.framebuffer = built.framebuffer;
+  uniforms.tRelight.value = built.texture;
   [state.key, state.fill].forEach((light) =>
     Object.assign(light, { evalPos: null, shown: 0, stride: 0, refineStride: 0, refineRow: 0 })
   );
@@ -504,11 +648,12 @@ function makeLight(pos, { radius, color, hidden = false }, slots) {
   };
 }
 
-function needsWork(light, now, finest) {
+// A moved light always needs work; refining a resting one waits out a scroll
+function needsWork(light, now, finest, scrolling) {
   return (
     !light.evalPos ||
     distance(light.pos, light.evalPos) > MOVE_EPS ||
-    (light.stride > finest && now - light.still > REFINE_DELAY)
+    (!scrolling && light.stride > finest && now - light.still > REFINE_DELAY)
   );
 }
 
@@ -534,9 +679,10 @@ function step(engine, light, now, budget, finest) {
     const other = 1 - light.shown;
     const total = engine.rows(finest);
     const cost = engine.evalCost(finest);
-    // as many rows as fit the budget; on a slow GPU a few at a time
-    const rows = cost ? Math.floor((total * budget) / cost / 4) * 4 : 16;
-    const r1 = Math.min(total, light.refineRow + THREE.MathUtils.clamp(rows, 4, total));
+    // as many rows as fit the budget; on a slow GPU a few at a time, though
+    // never so few that the pass costs more than its rows (or can't be timed)
+    const rows = cost ? Math.floor((total * budget) / cost / 4) * 4 : MIN_TIMED_ROWS;
+    const r1 = Math.min(total, light.refineRow + THREE.MathUtils.clamp(rows, MIN_TIMED_ROWS, total));
     engine.evaluate({ pos: light.evalPos, radius: light.radius }, light.slots[other], finest, light.refineRow, r1);
     light.refineRow = r1;
     if (r1 >= total) {

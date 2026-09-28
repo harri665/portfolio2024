@@ -166,9 +166,10 @@ function CoverFill({ image }) {
 // The headline block over a 3D scene: the hub's, centred, and the art
 // gallery's, left-aligned under the wordmark like every other section's
 // intro. `peek` stops a full-height hero short of the fold so the top of the
-// gallery below shows on load. It must leave enough of the first cards on
-// screen for their scroll reveal (15%, less the 40px they start lowered by)
-// to fire, or they peek in as empty space.
+// gallery below shows on load; on phones only a sliver, which leaves the
+// scene behind the headline room to breathe. The first cards reveal anyway,
+// as their scroll reveal reaches below the screen (useScrollReveal).
+// The CS page's Cornell box fits itself to the hero (data-prism-hero).
 export function PrismHero({
   title,
   subtitle,
@@ -183,13 +184,14 @@ export function PrismHero({
   return (
     <div className="px-3 sm:px-6">
       <header
+        data-prism-hero
         className={[
           'relative z-10 mx-auto flex w-full max-w-7xl flex-col justify-center px-5 sm:px-6',
           left ? 'items-start text-left' : 'items-center text-center',
           fullHeight
             ? [
                 'pb-10 pt-24 sm:pb-16 sm:pt-28',
-                peek ? 'min-h-[calc(100svh-6.5rem)] sm:min-h-[calc(100svh-7.5rem)]' : 'min-h-svh',
+                peek ? 'min-h-[calc(100svh-3.5rem)] sm:min-h-[calc(100svh-7.5rem)]' : 'min-h-svh',
               ].join(' ')
             : 'min-h-[64vh] pb-12 pt-32',
         ].join(' ')}
@@ -236,7 +238,11 @@ export function PrismHero({
 
 // Gallery cards fade in and rise as they scroll into view, each row staggered
 // left to right. Spread onto a motion component; it animates once per card.
-// `amount` is the share of the element that has to be on screen first.
+// `amount` is the share of the element that has to be on screen first,
+// counting REVEAL_REACH below the screen's edge: a card starts rising just
+// before it arrives, and one peeking under a hero reveals on load.
+const REVEAL_REACH = '0px 0px 96px 0px';
+
 export function useScrollReveal(index = 0, amount = 0.15) {
   const reduceMotion = useReducedMotion();
   return {
@@ -246,7 +252,7 @@ export function useScrollReveal(index = 0, amount = 0.15) {
       y: 0,
       transition: { duration: 0.7, ease: [0.22, 1, 0.36, 1], delay: (index % 3) * 0.08 },
     },
-    viewport: { once: true, amount },
+    viewport: { once: true, amount, margin: REVEAL_REACH },
   };
 }
 
