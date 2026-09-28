@@ -1,12 +1,11 @@
 // the room on its own fixed canvas. in the three.js canvas it rode up with every scroll
 // and snapped back (browser scrolls on its own thread), so that canvas only draws the glass now
 
-// The relit image placed in the page: a window with soft rounded edges on the
-// hero that grows past the screen's edges, dimmed and a little desaturated
-// so glass and text read over it, plus a bloom around the light. GLSL ES 1.0,
-// without a precision (three.js adds its own).
+// catmull-rom upscale (5 bilinear taps) since it's shown several times larger on phones,
+// clamped to the 4 nearest pixels so the light's disc doesn't ring dark
 export const ROOM_FRAGMENT = `
   uniform sampler2D tRelight;
+  uniform vec2 texSize;
   uniform float dpr;
   uniform vec2 viewport;
   uniform vec4 box;
@@ -16,6 +15,33 @@ export const ROOM_FRAGMENT = `
   uniform float hotKeep;
   uniform vec3 glowAt;
   uniform vec3 glowColor;
+
+  vec3 sharpSample(vec2 uv) {
+    vec2 pos = uv * texSize;
+    vec2 c = floor(pos - 0.5) + 0.5;
+    vec2 f = pos - c;
+    vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+    vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+    vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+    vec2 w3 = f * f * (-0.5 + 0.5 * f);
+    vec2 w12 = w1 + w2;
+    vec2 t0 = (c - 1.0) / texSize;
+    vec2 t3 = (c + 2.0) / texSize;
+    vec2 t12 = (c + w2 / w12) / texSize;
+    vec3 sum = texture2D(tRelight, vec2(t12.x, t0.y)).rgb * (w12.x * w0.y)
+      + texture2D(tRelight, vec2(t0.x, t12.y)).rgb * (w0.x * w12.y)
+      + texture2D(tRelight, t12).rgb * (w12.x * w12.y)
+      + texture2D(tRelight, vec2(t3.x, t12.y)).rgb * (w3.x * w12.y)
+      + texture2D(tRelight, vec2(t12.x, t3.y)).rgb * (w12.x * w3.y);
+    float weight = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;
+    vec2 a = c / texSize;
+    vec2 b = (c + 1.0) / texSize;
+    vec3 p00 = texture2D(tRelight, a).rgb;
+    vec3 p10 = texture2D(tRelight, vec2(b.x, a.y)).rgb;
+    vec3 p01 = texture2D(tRelight, vec2(a.x, b.y)).rgb;
+    vec3 p11 = texture2D(tRelight, b).rgb;
+    return clamp(sum / weight, min(min(p00, p10), min(p01, p11)), max(max(p00, p10), max(p01, p11)));
+  }
 
   float sdRoundBox(vec2 p, vec2 halfSize, float r) {
     vec2 q = abs(p) - halfSize + r;
@@ -32,7 +58,7 @@ export const ROOM_FRAGMENT = `
       float d = sdRoundBox(uv - 0.5, vec2(0.5), 0.05);
       float mask = 1.0 - smoothstep(-box.w, 0.0, d);
       if (mask > 0.0) {
-        vec3 image = texture2D(tRelight, vec2(uv.x, 1.0 - uv.y)).rgb;
+        vec3 image = sharpSample(vec2(uv.x, 1.0 - uv.y));
         float luma = dot(image, vec3(0.2126, 0.7152, 0.0722));
         float hot = smoothstep(0.82, 0.97, luma) * hotKeep;
         image = mix(mix(vec3(luma), image, saturation) * dim, image, hot);
@@ -56,7 +82,7 @@ const VERTEX = `
   }
 `;
 
-const UNIFORMS = ['dpr', 'viewport', 'box', 'ready', 'dim', 'saturation', 'hotKeep', 'glowAt', 'glowColor'];
+const UNIFORMS = ['texSize', 'dpr', 'viewport', 'box', 'ready', 'dim', 'saturation', 'hotKeep', 'glowAt', 'glowColor'];
 
 export class RoomLayer {
   constructor(before) {
