@@ -2,12 +2,12 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import SubdomainNav from './SubdomainNav';
+import { PrismBackdrop, PrismHero, trackPointer } from './Prism';
 import { SITE_MODES } from '../../utils/siteMode';
 import { apiUrl } from '../../utils/api';
 import { prettyRepoName } from '../../utils/repoTitle';
 import Button from '../ui/Button';
 import Container from '../ui/Container';
-import SectionIntro from '../ui/SectionIntro';
 import Tag from '../ui/Tag';
 
 const GITHUB_USERNAME = 'harri665';
@@ -246,11 +246,16 @@ export default function CSHomePage() {
   }, [repos]);
 
   return (
-    <div className="drafting-grid relative min-h-screen text-ink">
+    <div className="relative min-h-screen bg-bg text-ink">
+      <PrismBackdrop lens="cs" tone="page" />
       <SubdomainNav currentMode={SITE_MODES.CS} />
-      <SectionIntro title="Computer science">
-        Software, tools, and research code, pulled live from GitHub.
-      </SectionIntro>
+      <PrismHero
+        fullHeight
+        peek
+        align="left"
+        title="Computer science"
+        subtitle="Software, tools, and research code, pulled live from GitHub."
+      />
 
       <Container as="main" id="projects" className="relative z-10 pb-24">
         {loading && <p className="py-10 text-sm text-ink-3">Loading projects from GitHub…</p>}
@@ -261,7 +266,9 @@ export default function CSHomePage() {
         )}
 
         {!loading && !error && repos.length > 0 && (
-          <section className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+          // data-prism-panel: the Cornell box's camera walks in as this rises
+          // (RelightBackdrop), and its light moves behind the hovered card
+          <section data-prism-panel className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
             {repos.map((repo) => (
               <RepoCard key={repo.id} repo={repo} meta={readmeMeta[repo.full_name]} />
             ))}
@@ -294,11 +301,17 @@ function RepoCard({ repo, meta }) {
       onPointerLeave={() => setEngaged(false)}
       onFocus={() => setEngaged(true)}
       onBlur={() => setEngaged(false)}
-      className="group relative flex flex-col overflow-hidden rounded-card border border-line/9 bg-surface/85 transition-colors hover:border-line/20"
+      onPointerMove={trackPointer}
+      // glass over the relit room, which bends it at the rim (LiquidGlassPass)
+      data-liquid-glass
+      className="liquid-glass prism-glow lens-cs group relative flex flex-col overflow-hidden rounded-card"
     >
+      <span aria-hidden="true" className="liquid-glass-rim" />
       {meta?.media && <MediaPreview media={meta.media} engaged={engaged} />}
 
-      <div className="flex flex-1 flex-col p-5">
+      {/* above the glass rim; a flex item needs no position for its z-index,
+          so the title link still stretches over the whole card */}
+      <div className="z-[2] flex flex-1 flex-col p-5">
         <p className="flex flex-wrap gap-x-4 text-sm text-ink-3">
           {repo.language && <span className="text-accent">{repo.language}</span>}
           <span>Updated {formatDate(repo.pushed_at)}</span>
@@ -374,7 +387,7 @@ function MediaPreview({ media, engaged }) {
   const fitClass = isVideo ? 'object-contain' : 'object-cover';
 
   return (
-    <div className="relative aspect-[16/9] w-full overflow-hidden border-b border-line/9 bg-bg">
+    <div className="relative z-[2] aspect-[16/9] w-full overflow-hidden border-b border-line/9 bg-bg">
       {isVideo ? (
         <video
           ref={videoRef}
