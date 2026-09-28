@@ -2,7 +2,18 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 
-import { AdaptiveQuality, gpuName, loadProfile, saveProfile, sceneKey } from './relight/adaptiveQuality';
+import {
+  AdaptiveQuality,
+  REFINE_FRAMES,
+  firstTier,
+  gpuName,
+  loadProfile,
+  measuredCosts,
+  profileFor,
+  saveProfile,
+  seedCosts,
+  upgradeTier,
+} from './relight/adaptiveQuality';
 import { RelightEngine, loadRelightScene } from './relight/RelightEngine';
 import useCardLights, { CARD_SELECTOR } from './useCardLights';
 
@@ -21,11 +32,14 @@ import useCardLights, { CARD_SELECTOR } from './useCardLights';
 // full evaluation won't fit the frame budget. Once it rests, it's refined to
 // full resolution a band of rows per frame, into a second slot that swaps in
 // when done. A resting room costs one composite, and only when it changes.
-// The frame budget and the canvas's pixel ratio rise for as long as the page
-// holds 30 fps (relight/adaptiveQuality), and are remembered for the device's
-// next visit.
+// The frame budget, the canvas's pixel ratio and the image size rise for as
+// long as the page holds 30 fps (relight/adaptiveQuality), and are remembered
+// for the device's next visit. A larger size is fetched in the background
+// and swapped in once ready.
 
 const SCENE_URL = `${process.env.PUBLIC_URL}/relight/cornell`;
+const NATIVE = 512;
+const tierSuffix = (tier) => (tier === NATIVE ? '' : `-${tier}`);
 const PANEL_SELECTOR = '[data-prism-panel]';
 // walk-in scroll range, in viewport heights
 const START = 0.03;
@@ -88,6 +102,11 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
       gpu,
       profile,
       savedAt: 0,
+      tier: firstTier(profile, compact),
+      upgrading: null, // the AbortController of a larger size on its way
+      upgradeFailed: false,
+      upgradeCheckedAt: 0,
+      shownPx: 0,
       quality: new AdaptiveQuality({
         budget: finite(profile?.budget, compact ? START_BUDGET.compact : START_BUDGET.full),
         dpr: finite(profile?.dpr, compact ? 1 : Math.min(device, 1.5)),
@@ -146,46 +165,30 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
       return undefined;
     }
 
-    loadRelightScene(SCENE_URL, controller.signal)
+    // A missing size falls back to the one every device can have
+    const load = (tier) => loadRelightScene(SCENE_URL, controller.signal, tierSuffix(tier));
+    load(state.tier)
+      .catch((error) => {
+        if (error?.name === 'AbortError' || state.tier === NATIVE) {
+          throw error;
+        }
+        state.tier = NATIVE;
+        return load(NATIVE);
+      })
       .then((data) => {
         if (controller.signal.aborted) {
           return;
         }
-        renderer.resetState();
-        ctx.pixelStorei(ctx.UNPACK_FLIP_Y_WEBGL, false);
-        ctx.pixelStorei(ctx.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
-        ctx.pixelStorei(ctx.UNPACK_ALIGNMENT, 4);
-        let engine;
-        try {
-          engine = new RelightEngine(ctx, data);
-        } finally {
-          renderer.resetState();
-        }
-
-        if (state.profile?.scene === sceneKey(engine)) {
-          engine.seedTiming(state.profile.byStride);
-        }
-
-        const target = new THREE.WebGLRenderTarget(engine.W, engine.H, {
-          depthBuffer: false,
-          generateMipmaps: false,
-          minFilter: THREE.LinearFilter,
-          magFilter: THREE.LinearFilter,
-        });
-        // Let three.js create the target's framebuffer, then borrow it
-        const previous = renderer.getRenderTarget();
-        renderer.setRenderTarget(target);
-        state.framebuffer = ctx.getParameter(ctx.FRAMEBUFFER_BINDING);
-        renderer.setRenderTarget(previous);
-
-        state.engine = engine;
-        state.target = target;
-        uniforms.tRelight.value = target.texture;
+        const built = buildEngine(renderer, data);
+        seedCosts(built.engine, state.profile);
+        install(state, built, uniforms);
       })
       .catch(fail);
 
     return () => {
       controller.abort();
+      state.upgrading?.abort();
+      state.upgrading = null;
       saveState(state);
       state.engine?.dispose();
       state.target?.dispose();
@@ -195,6 +198,35 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [renderer, uniforms]);
+
+  // Fetches and prepares the room at `tier` px while the current one keeps
+  // running, then swaps it in, starting from the current one's costs
+  const startUpgrade = (tier) => {
+    const state = st.current;
+    const controller = new AbortController();
+    state.upgrading = controller;
+    loadRelightScene(SCENE_URL, controller.signal, tierSuffix(tier))
+      .then((data) => {
+        if (controller.signal.aborted || !state.engine) {
+          return;
+        }
+        const built = buildEngine(renderer, data);
+        seedCosts(built.engine, measuredCosts(state.engine));
+        install(state, built, uniforms);
+        state.tier = tier;
+      })
+      .catch((error) => {
+        if (error?.name !== 'AbortError') {
+          console.warn(`Relight backdrop staying at ${state.tier} px:`, error);
+          state.upgradeFailed = true;
+        }
+      })
+      .finally(() => {
+        if (state.upgrading === controller) {
+          state.upgrading = null;
+        }
+      });
+  };
 
   useEffect(() => {
     if (!canHover) {
@@ -237,6 +269,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
     const walk = easeInOutCubic(progress);
     const small = vw < 640;
     const heroSize = small ? Math.min(vw * 1.12, vh * 0.6) : Math.min(vw * 0.9, vh * 0.86);
+    state.shownPx = heroSize * viewport.dpr;
     const coverSize = Math.max(vw, vh) * 1.04;
     const boxSize = THREE.MathUtils.lerp(heroSize, coverSize, walk);
     const centerY = THREE.MathUtils.lerp(vh * (small ? 0.44 : 0.5), vh * 0.5, walk);
@@ -253,7 +286,8 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
 
     const { engine, quality } = state;
     const age = engine && state.readyAt !== null ? now - state.readyAt : 0;
-    const dpr = quality.frame(delta, age > 1.5);
+    // ...and held while a larger size is prepared, which costs CPU, not pixels
+    const dpr = quality.frame(delta, age > 1.5, !!state.upgrading);
     if (dpr !== null) {
       onDpr?.(dpr);
     }
@@ -269,6 +303,14 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
     if (now - state.savedAt > SAVE_EVERY) {
       state.savedAt = now;
       saveState(state);
+    }
+    // Once a second, whether the GPU has room for a larger image
+    if (!state.upgrading && !state.upgradeFailed && age > 2 && now - state.upgradeCheckedAt > 1) {
+      state.upgradeCheckedAt = now;
+      const next = upgradeTier(engine, quality.budget, state.shownPx);
+      if (next) {
+        startUpgrade(next);
+      }
     }
 
     const { key, fill } = state;
@@ -369,20 +411,53 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
   );
 }
 
-// Keeps what this visit learned for the next, once the network has been
-// measured (the first measurements include compiling its shaders)
 function saveState({ engine, gpu, quality }) {
-  if (!engine || engine.timing.samples <= 2 || engine.timing.seeded) {
-    return;
+  const profile = profileFor(gpu, engine, quality);
+  if (profile) {
+    saveProfile(profile);
   }
-  saveProfile({
-    gpu,
-    scene: sceneKey(engine),
-    byStride: engine.timing.byStride,
-    budget: quality.budget,
-    dpr: quality.dpr,
-    failedDpr: Number.isFinite(quality.failedDpr) ? quality.failedDpr : null,
+}
+
+// The network for a loaded scene, on three.js's context, and the render
+// target it composites into
+function buildEngine(renderer, data) {
+  const ctx = renderer.getContext();
+  renderer.resetState();
+  ctx.pixelStorei(ctx.UNPACK_FLIP_Y_WEBGL, false);
+  ctx.pixelStorei(ctx.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+  ctx.pixelStorei(ctx.UNPACK_ALIGNMENT, 4);
+  let engine;
+  try {
+    engine = new RelightEngine(ctx, data);
+  } finally {
+    renderer.resetState();
+  }
+
+  const target = new THREE.WebGLRenderTarget(engine.W, engine.H, {
+    depthBuffer: false,
+    generateMipmaps: false,
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
   });
+  // Let three.js create the target's framebuffer, then borrow it
+  const previous = renderer.getRenderTarget();
+  renderer.setRenderTarget(target);
+  const framebuffer = ctx.getParameter(ctx.FRAMEBUFFER_BINDING);
+  renderer.setRenderTarget(previous);
+  return { engine, target, framebuffer };
+}
+
+function install(state, { engine, target, framebuffer }, uniforms) {
+  state.engine?.dispose();
+  state.target?.dispose();
+  state.engine = engine;
+  state.target = target;
+  state.framebuffer = framebuffer;
+  uniforms.tRelight.value = target.texture;
+  [state.key, state.fill].forEach((light) =>
+    Object.assign(light, { evalPos: null, shown: 0, stride: 0, refineStride: 0, refineRow: 0 })
+  );
+  state.lastLevels = null;
 }
 
 function makeLight(pos, { radius, color, hidden = false }, slots) {
@@ -456,7 +531,7 @@ function refineStride(engine, budget) {
   if (engine.evalCost(1) === null) {
     return 4;
   }
-  return [1, 2, 4].find((s) => engine.evalCost(s) <= budget * 40) ?? 8;
+  return [1, 2, 4].find((s) => engine.evalCost(s) <= budget * REFINE_FRAMES) ?? 8;
 }
 
 // The finest stride whose evaluation fits the budget; unmeasured, a cheap one

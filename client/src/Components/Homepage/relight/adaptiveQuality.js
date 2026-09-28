@@ -4,7 +4,7 @@
 // display's own refresh rate isn't the goal; a frame that runs past 30 fps
 // says the last thing asked of the GPU was too much.
 //
-// Two settings follow from that:
+// Three settings follow from that:
 // - The network's budget per frame (ms of GPU time), which sets how coarse a
 //   moving light's preview is and how far a resting one is refined. It grows
 //   while frames that ran the network stay on time and backs off when one is
@@ -13,6 +13,9 @@
 //   most of all. It's judged only on frames with no network work, so the two
 //   don't chase each other: a resting room that still misses frames has too
 //   many pixels, and one that never does can afford more.
+// - The image size the network runs at (its tier). The first visit loads a
+//   small or a middle one; once the network has been timed, a GPU with room
+//   to spare fetches the next size up in the background and swaps it in.
 //
 // What was learned is kept for the next visit (loadProfile, saveProfile).
 
@@ -58,10 +61,11 @@ export class AdaptiveQuality {
 
   // Once a frame, before any work, with the frame's delta (s). `judgeDpr`
   // lets the pixel ratio change; keep it off while loading, when the CPU
-  // work would read as too many pixels. Returns a new pixel ratio, or null.
-  frame(delta, judgeDpr) {
+  // work would read as too many pixels. `hold` leaves everything be (while a
+  // tier is prepared). Returns a new pixel ratio, or null.
+  frame(delta, judgeDpr, hold = false) {
     this.frameNo += 1;
-    if (!(delta > 0) || delta > GAP) {
+    if (!(delta > 0) || delta > GAP || hold) {
       return null;
     }
     const recent = this.frameNo - this.lastWork <= WORK_FRAMES;
@@ -124,10 +128,50 @@ export class AdaptiveQuality {
   }
 }
 
+export const TIERS = [384, 512, 768];
+export const REFINE_FRAMES = 40;
+const UPGRADE_FRAMES = 12;
+
+// largest size is only ever reached by timing the gpu
+export function firstTier(profile, compact) {
+  if (TIERS.includes(profile?.tier)) {
+    return profile.tier;
+  }
+  return compact || slowConnection() ? TIERS[0] : TIERS[1];
+}
+
+export function upgradeTier(engine, budget, shownPx) {
+  const next = TIERS[TIERS.indexOf(engine.W) + 1];
+  const cost = engine.evalCost(1);
+  if (!next || cost === null || engine.timing.seeded || slowConnection()) {
+    return null;
+  }
+  // the largest needs ~100MB while it's prepared
+  if (next > TIERS[1] && navigator.deviceMemory && navigator.deviceMemory < 4) {
+    return null;
+  }
+  if (shownPx <= engine.W) {
+    return null;
+  }
+  return cost * (next / engine.W) ** 2 <= budget * UPGRADE_FRAMES ? next : null;
+}
+
+function nextVisitTier(engine, budget) {
+  const i = TIERS.indexOf(engine.W);
+  const cost = engine.evalCost(1);
+  return i > 0 && cost !== null && cost > budget * REFINE_FRAMES ? TIERS[i - 1] : engine.W;
+}
+
+function slowConnection() {
+  const c = navigator.connection;
+  return !!c && (c.saveData || /(^|-)[23]g$/.test(c.effectiveType || ''));
+}
+
 // ─── Kept between visits ───────────────────────────────────────────────────
-// One profile per browser, for its GPU: the network's measured costs, the
-// budget, and the pixel ratio (and the lowest one that failed). A returning visitor starts where the last
-// visit settled instead of at a guess. Storage can be missing or throw
+// One profile per browser, for its GPU: the network's measured costs (and
+// the size they were measured at), the budget, the pixel ratio (and the
+// lowest one that failed), and the size to load. A returning visitor starts
+// where the last visit settled instead of at a guess. Storage can be missing or throw
 // (private windows, blocked site data); the page just starts from defaults.
 
 const STORAGE_KEY = 'relight-quality';
@@ -143,10 +187,42 @@ export function gpuName(gl) {
   return ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : plain;
 }
 
-// Measured costs only carry over to a network of the same size
-export function sceneKey(engine) {
+function networkKey(engine) {
   const net = engine.scene.network;
-  return `${engine.W}x${engine.H}/${net.width}x${net.hidden}`;
+  return `${net.width}x${net.hidden}`;
+}
+
+// Starts `engine` from costs measured on an earlier visit, or at another
+// size this visit ({res, network, byStride})
+export function seedCosts(engine, measured) {
+  if (!measured?.byStride || measured.network !== networkKey(engine) || !(measured.res > 0)) {
+    return;
+  }
+  const scale = (engine.W / measured.res) ** 2;
+  const byStride = {};
+  Object.entries(measured.byStride).forEach(([s, ms]) => {
+    byStride[s] = ms * scale;
+  });
+  engine.seedTiming(byStride);
+}
+
+export function measuredCosts(engine) {
+  return { res: engine.W, network: networkKey(engine), byStride: { ...engine.timing.byStride } };
+}
+
+// first measurements include shader compiles so the engine drops them
+export function profileFor(gpu, engine, quality) {
+  if (!engine || !Object.keys(engine.timing.byStride).length) {
+    return null;
+  }
+  return {
+    gpu,
+    ...measuredCosts(engine),
+    budget: quality.budget,
+    dpr: quality.dpr,
+    failedDpr: Number.isFinite(quality.failedDpr) ? quality.failedDpr : null,
+    tier: nextVisitTier(engine, quality.budget),
+  };
 }
 
 export function loadProfile(gpu) {
