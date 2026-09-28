@@ -2,145 +2,19 @@
 // trimmed port of the WebGL2 runtime from my relight project, a browser
 // implementation of Neural Render Proxies (Sancho et al., EGSR 2026). It keeps
 // only the forward pass, and it runs on three.js's own WebGL2 context, so its
-// image is an ordinary render target that the glass pass can bend.
+// image is an ordinary render target that the glass pass can bend. Where
+// WebGPU is available, RelightGPU runs the same network about four times
+// faster; this is the fallback.
 //
 // no compute shaders in webgl2 so the MLP is a chain of fragment passes over bands of rows,
 // ping-ponging activations between two texture arrays
 
-// Light slots in the output array: two lights, double-buffered
-export const SLOTS = 4;
-// Target size of one activation texture array
-const BAND_BYTES = 8 << 20;
+import { RelightBase, SLOTS } from './RelightBase';
 
-const f16tab = (() => {
-  const t = new Float32Array(65536);
-  for (let h = 0; h < 65536; h += 1) {
-    const s = h & 0x8000 ? -1 : 1;
-    const e = (h >> 10) & 31;
-    const m = h & 1023;
-    t[h] = e === 0 ? s * m * 2 ** -24 : e === 31 ? (m ? NaN : s * Infinity) : s * (1 + m / 1024) * 2 ** (e - 15);
-  }
-  return t;
-})();
+export { SLOTS };
 
-function typed(buf, entry) {
-  const n = entry.shape.reduce((a, b) => a * b, 1);
-  if (entry.dtype === 'float32') {
-    return new Float32Array(buf, entry.offset, n);
-  }
-  const h = new Uint16Array(buf, entry.offset, n);
-  const out = new Float32Array(n);
-  for (let i = 0; i < n; i += 1) {
-    out[i] = f16tab[h[i]];
-  }
-  return out;
-}
-
-const nextTask = () => new Promise((resolve) => setTimeout(resolve, 0));
-// ms between yields to the page
-const SLICE_MS = 6;
-
-// Fetches a scene exported by the relight project (scene.json, model.bin,
-// pixels.bin) and does the CPU-side preparation: the network's
-// light-independent inputs for every pixel (its grid encoding and the aux
-// features). Yields every few ms so the page keeps scrolling meanwhile.
-// `suffix` picks another image size of the same network (scene-768.json and
-// pixels-768.bin for '-768'); model.bin is shared.
-export async function loadRelightScene(base, signal, suffix = '') {
-  const get = async (file) => {
-    const response = await fetch(`${base}/${file}`, { signal });
-    if (!response.ok) {
-      throw new Error(`failed to load ${file} (${response.status})`);
-    }
-    return response;
-  };
-  const scene = await (await get(`scene${suffix}.json`)).json();
-  const [model, pixels] = await Promise.all(
-    ['model.bin', `pixels${suffix}.bin`].map(async (file) => (await get(file)).arrayBuffer())
-  );
-  await nextTask();
-
-  const W = scene.width;
-  const H = scene.height;
-  const NP = W * H;
-  const net = scene.network;
-  if (net.light_grid) {
-    throw new Error('light_grid models are not supported');
-  }
-
-  let gridLen = 0;
-  const gridOff = scene.model.grids.map((g) => {
-    const offset = gridLen;
-    gridLen += g.shape[0] * g.shape[1] * g.shape[2];
-    return offset;
-  });
-  const grid = new Float32Array(gridLen);
-  scene.model.grids.forEach((g, i) => grid.set(typed(model, g), gridOff[i]));
-  const layers = scene.model.layers.map((l) => ({
-    w: typed(model, l.weight),
-    b: typed(model, l.bias),
-    shape: l.weight.shape,
-  }));
-  const aux = typed(pixels, scene.pixels.aux);
-  const geom = typed(pixels, scene.pixels.geom);
-  const normal = typed(pixels, scene.pixels.normal);
-  await nextTask();
-
-  const auxDim = net.aux_dim ?? 7;
-  const levels = net.grid_res.length;
-  const F = net.feats;
-  const ENC = levels * F;
-  const XG = Math.ceil((ENC + auxDim) / 4);
-  // [group][pixel][4]
-  const X = new Float32Array(XG * NP * 4);
-  const put = (p, f, v) => {
-    X[((f >> 2) * NP + p) * 4 + (f & 3)] = v;
-  };
-  let slice = performance.now();
-  for (let y = 0; y < H; y += 1) {
-    const v = (y + 0.5) / H;
-    for (let x = 0; x < W; x += 1) {
-      const p = y * W + x;
-      const u = (x + 0.5) / W;
-      for (let l = 0; l < levels; l += 1) {
-        const R = net.grid_res[l];
-        const b = gridOff[l];
-        const fx = u * (R - 1);
-        const fy = v * (R - 1);
-        const x0 = Math.min(Math.floor(fx), R - 2);
-        const y0 = Math.min(Math.floor(fy), R - 2);
-        const tx = fx - x0;
-        const ty = fy - y0;
-        const i00 = b + (y0 * R + x0) * F;
-        const i10 = i00 + R * F;
-        for (let f = 0; f < F; f += 1) {
-          const top = grid[i00 + f] + (grid[i00 + F + f] - grid[i00 + f]) * tx;
-          const bot = grid[i10 + f] + (grid[i10 + F + f] - grid[i10 + f]) * tx;
-          put(p, l * F + f, top + (bot - top) * ty);
-        }
-      }
-      for (let j = 0; j < auxDim; j += 1) {
-        put(p, ENC + j, aux[p * auxDim + j]);
-      }
-    }
-    if (performance.now() - slice > SLICE_MS) {
-      await nextTask();
-      if (signal?.aborted) {
-        throw new DOMException('aborted', 'AbortError');
-      }
-      slice = performance.now();
-    }
-  }
-
-  const normal4 = new Float32Array(NP * 4);
-  for (let p = 0; p < NP; p += 1) {
-    normal4[p * 4] = normal[p * 3];
-    normal4[p * 4 + 1] = normal[p * 3 + 1];
-    normal4[p * 4 + 2] = normal[p * 3 + 2];
-  }
-
-  return { scene, layers, X, XG, geom, normal4 };
-}
+// 32MB ran ~20% faster than 8MB
+const BAND_BYTES = 16 << 20;
 
 const VS = `#version 300 es
 void main() {
@@ -318,30 +192,21 @@ function packLayer(layer, nIn, kin, out, inCol) {
   });
 }
 
-// Builds everything on `gl` straight away. The caller must hand over a clean
-// GL state (three.js: renderer.resetState()) and reset three.js's cache after
-// every call into the engine, which leaves its own bindings behind.
-export class RelightEngine {
-  constructor(gl, { scene, layers, X, XG, geom, normal4 }) {
+// Builds everything on `gl` straight away, from a loaded scene
+// (loadRelightScene) and its encoded pixels (encodePixels). The caller must
+// hand over a clean GL state (three.js: renderer.resetState()) and reset
+// three.js's cache after every call into the engine, which leaves its own
+// bindings behind. bandBytes: the size of one activation texture array.
+export class RelightEngine extends RelightBase {
+  constructor(gl, { scene, layers, geom }, { X, XG, normal4 }, { bandBytes = BAND_BYTES } = {}) {
+    super(scene, geom);
     this.gl = gl;
+    this.backend = 'webgl';
     if (!gl.getExtension('EXT_color_buffer_float') && !gl.getExtension('EXT_color_buffer_half_float')) {
       throw new Error('this GPU cannot render to floating-point textures');
     }
     this.timer = gl.getExtension('EXT_disjoint_timer_query_webgl2');
-    this.scene = scene;
-    this.geom = geom;
-    const W = scene.width;
-    const H = scene.height;
-    this.W = W;
-    this.H = H;
-
-    const M = scene.camera.to_world;
-    const col = (j) => [M[0][j], M[1][j], M[2][j]];
-    const tx = Math.tan((scene.camera.fov * Math.PI) / 360);
-    this.cam = { X: col(0), Y: col(1), Z: col(2), O: col(3), tx, ty: (tx * H) / W };
-    [this.lo, this.hi] = scene.light_bbox;
-    [this.rmin, this.rmax] = scene.radius_range;
-    this.timing = { byStride: {}, samples: 0, pending: null, seeded: false };
+    const { W, H } = this;
     this.resources = { textures: [], framebuffers: [], programs: [], buffers: [] };
 
     const net = scene.network;
@@ -409,7 +274,7 @@ export class RelightEngine {
 
     this.vao = gl.createVertexArray();
     this.pComp = this.program(compositeFS(W, H), 'composite');
-    const th = Math.max(8, Math.min(H, Math.floor(BAND_BYTES / (W * G * 8))));
+    const th = Math.max(8, Math.min(H, Math.floor(bandBytes / (W * G * 8))));
     const arrs = [0, 1].map(() => this.texture(A2, gl.RGBA16F, W, th, G));
     this.net = {
       th,
@@ -514,10 +379,6 @@ export class RelightEngine {
 
   // ─── Evaluation ────────────────────────────────────────────────────────
 
-  rows(stride = 1) {
-    return Math.ceil(this.H / stride);
-  }
-
   // Evaluates `light` ({pos, radius}) at stride s into `slot`, rows r0 to r1
   // of its item grid (all of them by default)
   evaluate(light, slot, stride = 1, r0 = 0, r1 = this.rows(stride)) {
@@ -535,7 +396,7 @@ export class RelightEngine {
       gl.uniform1i(P.u.stride, stride);
     };
 
-    this.startTiming(stride, (r1 - r0) / this.rows(stride));
+    this.startTiming(stride, r0, r1);
     gl.bindVertexArray(this.vao);
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, this.geomTex);
@@ -614,18 +475,17 @@ export class RelightEngine {
   }
 
   // ─── Timing ────────────────────────────────────────────────────────────
-  // GPU time per evaluation, as ms for a whole light at each stride. A timer
-  // query when the GPU has one, otherwise a fence (which also counts whatever
-  // three.js queued before, so it errs slow).
+  // A timer query when the GPU has one, otherwise a fence (which also counts
+  // whatever three.js queued before, so it errs slow)
 
-  startTiming(stride, share) {
+  startTiming(stride, r0, r1) {
     const gl = this.gl;
-    if (this.timing.pending || share <= 0) {
+    if (!this.timeable(stride, r0, r1)) {
       this.timing.skip = true;
       return;
     }
     this.timing.skip = false;
-    const pending = { stride, share, start: performance.now() };
+    const pending = { stride, share: (r1 - r0) / this.rows(stride), start: performance.now() };
     if (this.timer) {
       pending.query = gl.createQuery();
       gl.beginQuery(this.timer.TIME_ELAPSED_EXT, pending.query);
@@ -670,76 +530,7 @@ export class RelightEngine {
       gl.deleteSync(pending.sync);
     }
     this.timing.pending = null;
-    this.timing.samples += 1;
-    // first runs include shader compiles
-    if (ms === null || this.timing.samples <= 2) {
-      return;
-    }
-    const full = ms / pending.share;
-    if (this.timing.seeded) {
-      this.timing.seeded = false;
-      this.timing.byStride = {};
-    }
-    const t = this.timing.byStride;
-    const s = pending.stride;
-    // drops fast, rises slow, so one stall doesn't make a fast gpu look slow
-    t[s] = !t[s] ? full : full < t[s] ? 0.5 * t[s] + 0.5 * full : 0.9 * t[s] + 0.1 * full;
-  }
-
-  seedTiming(byStride) {
-    const t = {};
-    Object.entries(byStride || {}).forEach(([s, ms]) => {
-      if (Number(s) >= 1 && Number.isFinite(ms) && ms > 0) {
-        t[s] = ms;
-      }
-    });
-    if (Object.keys(t).length) {
-      this.timing.byStride = t;
-      this.timing.seeded = true;
-    }
-  }
-
-  // each measured stride k predicts t[k] * (k / s)^2
-  evalCost(s) {
-    const t = this.timing.byStride;
-    const known = Object.keys(t).map(Number);
-    if (!known.length) {
-      return null;
-    }
-    return Math.min(...known.map((k) => t[k] * (k / s) ** 2));
-  }
-
-  // ─── Camera and lights ─────────────────────────────────────────────────
-
-  normLight(l) {
-    const { lo, hi } = this;
-    return [0, 1, 2]
-      .map((i) => (2 * (l.pos[i] - lo[i])) / (hi[i] - lo[i]) - 1)
-      .concat([(2 * (l.radius - this.rmin)) / (this.rmax - this.rmin) - 1]);
-  }
-
-  project(p) {
-    const { X, Y, Z, O, tx, ty } = this.cam;
-    const v = [p[0] - O[0], p[1] - O[1], p[2] - O[2]];
-    const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    const zc = dot(v, Z);
-    return { u: 0.5 - dot(v, X) / (zc * 2 * tx), v: 0.5 - dot(v, Y) / (zc * 2 * ty), z: zc };
-  }
-
-  unproject(u, v, zc) {
-    const { X, Y, Z, O, tx, ty } = this.cam;
-    const xc = (0.5 - u) * 2 * tx * zc;
-    const yc = (0.5 - v) * 2 * ty * zc;
-    return [0, 1, 2].map((i) => O[i] + X[i] * xc + Y[i] * yc + Z[i] * zc);
-  }
-
-  // Distance from the camera to the first surface through image uv, or
-  // Infinity where the ray leaves the scene
-  surfaceDistance(u, v) {
-    const x = Math.min(this.W - 1, Math.max(0, Math.floor(u * this.W)));
-    const y = Math.min(this.H - 1, Math.max(0, Math.floor(v * this.H)));
-    const t = this.geom[(y * this.W + x) * 4 + 3];
-    return t > 0 ? t : Infinity;
+    this.recordTiming(pending.stride, pending.share, ms);
   }
 
   dispose() {
