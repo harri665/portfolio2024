@@ -38,6 +38,16 @@
   text-shadow: 0 1px 14px rgba(0, 0, 0, 0.35);
 }
 
+/* faint tint so the nav stays readable over text */
+.liquid-glass.glass-bar {
+  background-color: rgb(8 9 12 / 0.22);
+}
+
+.liquid-glass.glass-bar.glass-bar-frost {
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  backdrop-filter: blur(10px) saturate(140%);
+}
+
 .liquid-glass-rim {
   position: absolute;
   inset: 0;

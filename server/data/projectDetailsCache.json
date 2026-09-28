@@ -964,5 +964,91 @@
     "hash_id": "8BP25Q",
     "visible": true,
     "is_promotional": false
+  },
+  "g0ZEnE": {
+    "liked": false,
+    "tags": [
+      "NoAI"
+    ],
+    "hide_as_adult": false,
+    "visible_on_artstation": true,
+    "assets": [
+      {
+        "has_image": true,
+        "has_embedded_player": true,
+        "player_embedded": "https://cdn.artstation.com/p/video_sources/002/091/846/0145.mp4",
+        "oembed": {
+          "width": 1920,
+          "height": 1080,
+          "provider_name": "ArtStation"
+        },
+        "id": 78247277,
+        "title": null,
+        "title_formatted": "",
+        "image_url": "https://cdnb.artstation.com/p/assets/video_clips/images/078/247/277/large/harri-thumb.jpg?1721613180",
+        "width": 1920,
+        "height": 1080,
+        "position": null,
+        "asset_type": "video_clip",
+        "viewport_constraint_type": "constrained"
+      }
+    ],
+    "collections": [],
+    "user": {
+      "followed": false,
+      "following_back": false,
+      "blocked": false,
+      "is_staff": false,
+      "is_plus_member": false,
+      "is_studio_account": false,
+      "is_school_account": false,
+      "id": 1472254,
+      "username": "harr1",
+      "headline": "I just enjoy 3D art ",
+      "full_name": "Harri",
+      "permalink": "https://www.artstation.com/harr1",
+      "medium_avatar_url": "https://cdna.artstation.com/p/users/avatars/001/472/254/medium/712569197465d666574c1e6088e8d5e0.jpg?1685992015",
+      "large_avatar_url": "https://cdna.artstation.com/p/users/avatars/001/472/254/large/712569197465d666574c1e6088e8d5e0.jpg?1685992015",
+      "small_cover_url": "https://cdna.artstation.com/p/users/covers/001/472/254/small/11f2795c90f5ecb15465b0ee08802d60.jpg?1686034559",
+      "pro_member": false
+    },
+    "medium": null,
+    "mediums": [],
+    "categories": [],
+    "software_items": [
+      {
+        "icon_url": "https://cdna.artstation.com/p/softwares/icons/000/000/018/default/Houdini.png?1424684347",
+        "name": "Houdini"
+      },
+      {
+        "icon_url": "https://cdna.artstation.com/p/softwares/icons/000/000/008/default/blender_icon_1024x1024.png?1570478232",
+        "name": "Blender"
+      },
+      {
+        "icon_url": "https://cdna.artstation.com/p/softwares/icons/000/000/044/default/UE-Icon-2023-White.png?1742929206",
+        "name": "Unreal Engine"
+      }
+    ],
+    "id": 18731983,
+    "user_id": 1472254,
+    "title": "Fire Tornado",
+    "description": "<p>Learning Pyro simulation in Houdini and decided to make a cool looking fire tornado! </p>",
+    "description_html": "<p>Learning Pyro simulation in Houdini and decided to make a cool looking fire tornado! </p>",
+    "created_at": "2024-07-21T20:53:12.338-05:00",
+    "updated_at": "2025-09-15T16:39:17.798-05:00",
+    "views_count": 25,
+    "likes_count": 4,
+    "comments_count": 1,
+    "permalink": "https://www.artstation.com/artwork/g0ZEnE",
+    "cover_url": "https://cdnb.artstation.com/p/assets/video_clips/images/078/247/277/medium/harri-thumb.jpg?1721613180",
+    "published_at": "2024-07-21T21:01:25.878-05:00",
+    "editor_pick": false,
+    "adult_content": false,
+    "admin_adult_content": false,
+    "slug": "tornado-sim-test",
+    "suppressed": false,
+    "hash_id": "g0ZEnE",
+    "visible": true,
+    "is_promotional": false
   }
 }

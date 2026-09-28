@@ -130,7 +130,6 @@ function ToolBadge({ k }) {
 const MotionLink = motion(Link);
 
 function GRCard({ p, i, motionName }) {
-  const desc = p.d || `${p.assets} ${p.assets === 1 ? 'asset' : 'assets'} · open the project to see the full breakdown.`;
   const cardMotion = useGalleryMotion(motionName, i);
 
   return (
@@ -143,31 +142,22 @@ function GRCard({ p, i, motionName }) {
       data-glass-split="0.5"
       data-glass-bezel="1.0"
     >
-      <span aria-hidden="true" className="liquid-glass-sheen liquid-glass-over" />
-      <span aria-hidden="true" className="liquid-glass-rim liquid-glass-over" />
+      <span aria-hidden="true" className="liquid-glass-rim" />
       <div className="gr-thumb" style={{ '--tint': TINTS[i % TINTS.length] }}>
-        {/* data-glass-image: the glass pass draws this too, so the card's
-            glass bends and splits it along the rim (LiquidGlassPass) */}
         <img
           className="gr-img"
-          data-glass-image
           src={p.img}
-          alt={p.t}
+          alt=""
           loading="lazy"
           onError={(e) => { e.currentTarget.style.display = 'none'; }}
         />
-        {p.video && <span className="gr-vid">&#9654; video</span>}
-        <div className="nf-tools gr-toolpos">
+      </div>
+      <div className="gr-body">
+        <h2 className="gr-name">{p.t}</h2>
+        {p.d && <p className="gr-desc">{p.d}</p>}
+        <div className="gr-tools">
           {p.sw.map((k) => <ToolBadge key={k} k={k} />)}
         </div>
-        <div className="gr-reveal">
-          <span className="gr-rev-title">{p.t}</span>
-          <p>{desc}</p>
-          <span className="gr-link">View project</span>
-        </div>
-      </div>
-      <div className="gr-meta">
-        <span className="gr-name">{p.t}</span>
       </div>
     </MotionLink>
   );
