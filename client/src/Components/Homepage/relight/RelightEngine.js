@@ -47,12 +47,16 @@ function typed(buf, entry) {
 }
 
 const nextTask = () => new Promise((resolve) => setTimeout(resolve, 0));
+// Longest stretch of preparation between yields to the page (ms)
+const SLICE_MS = 6;
 
 // Fetches a scene exported by the relight project (scene.json, model.bin,
 // pixels.bin) and does the CPU-side preparation: the network's
 // light-independent inputs for every pixel (its grid encoding and the aux
-// features). Yields now and then so the page keeps scrolling meanwhile.
-export async function loadRelightScene(base, signal) {
+// features). Yields every few ms so the page keeps scrolling meanwhile.
+// `suffix` picks another image size of the same network (scene-768.json and
+// pixels-768.bin for '-768'); model.bin is shared.
+export async function loadRelightScene(base, signal, suffix = '') {
   const get = async (file) => {
     const response = await fetch(`${base}/${file}`, { signal });
     if (!response.ok) {
@@ -60,9 +64,9 @@ export async function loadRelightScene(base, signal) {
     }
     return response;
   };
-  const scene = await (await get('scene.json')).json();
+  const scene = await (await get(`scene${suffix}.json`)).json();
   const [model, pixels] = await Promise.all(
-    ['model.bin', 'pixels.bin'].map(async (file) => (await get(file)).arrayBuffer())
+    ['model.bin', `pixels${suffix}.bin`].map(async (file) => (await get(file)).arrayBuffer())
   );
   await nextTask();
 
@@ -102,6 +106,7 @@ export async function loadRelightScene(base, signal) {
   const put = (p, f, v) => {
     X[((f >> 2) * NP + p) * 4 + (f & 3)] = v;
   };
+  let slice = performance.now();
   for (let y = 0; y < H; y += 1) {
     const v = (y + 0.5) / H;
     for (let x = 0; x < W; x += 1) {
@@ -128,8 +133,12 @@ export async function loadRelightScene(base, signal) {
         put(p, ENC + j, aux[p * auxDim + j]);
       }
     }
-    if ((y & 63) === 63) {
+    if (performance.now() - slice > SLICE_MS) {
       await nextTask();
+      if (signal?.aborted) {
+        throw new DOMException('aborted', 'AbortError');
+      }
+      slice = performance.now();
     }
   }
 
