@@ -45,10 +45,11 @@ import useCardLights, { CARD_SELECTOR } from './useCardLights';
 // full resolution a band of rows per frame, into a second slot that swaps in
 // when done. A resting room costs one composite, and only when it changes.
 // The frame budget, the canvas's pixel ratio and the image size rise for as
-// long as the page holds 30 fps, 60 on touch screens (relight/adaptiveQuality),
-// and are remembered for the device's next visit. A larger size is fetched in
-// the background and swapped in once ready. Refinement waits while the page
-// scrolls, so those frames go to keeping the canvas over the viewport.
+// long as the page holds 30 fps (relight/adaptiveQuality), and are remembered
+// for the device's next visit. A larger size is fetched in the background and
+// swapped in once ready. Refinement waits while the page scrolls, so those
+// frames go to keeping the canvas over the viewport. The fixed layer draws at
+// the screen's own pixel ratio, up to ROOM_MAX_DPR, whatever the canvas's.
 
 const SCENE_URL = `${process.env.PUBLIC_URL}/relight/cornell`;
 // The room at 512 px is scene.json and pixels.bin; other sizes carry theirs
@@ -94,10 +95,11 @@ const PUBLISH_EVERY = 0.5;
 // Size of one of the WebGL engine's activation arrays (bytes): larger runs
 // faster (32 MB ~20% over 8 MB) but phones have less memory to give
 const BAND_BYTES = { compact: 16 << 20, full: 32 << 20 };
-// Frame-rate floor on touch screens. The canvas scrolls with the page and is
-// moved back over the viewport once a frame (ScrollFollow), so at 30 fps the
-// room visibly trails the finger.
-const TOUCH_FPS = 60;
+// Highest pixel ratio the fixed layer draws the room at. The layer is one
+// cheap pass, redrawn only when it changes; drawn at the canvas's ratio (1 on
+// phones), the screen scaled it up again after the room's own upscale, and on
+// a 3x phone the room looked a third of its resolution.
+const ROOM_MAX_DPR = 2;
 
 // onDpr(ratio): the pixel ratio the canvas should draw at
 export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
@@ -124,7 +126,10 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
   const st = useRef(null);
   if (!st.current) {
     const gpu = gpuName(renderer.getContext());
-    const fps = compact ? TOUCH_FPS : MIN_FPS;
+    // Touch screens held 60 fps while the room scrolled with the canvas and
+    // trailed the finger; on its fixed layer it doesn't, and at 60 the
+    // network had half the time and phones saw a coarse room
+    const fps = MIN_FPS;
     const profile = loadProfile(gpu, fps);
     const device = window.devicePixelRatio || 1;
     st.current = {
@@ -157,6 +162,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
       upgradeFailed: false,
       upgradeCheckedAt: 0,
       shownPx: 0,
+      roomDpr: 1,
       quality: new AdaptiveQuality({
         budget: finite(profile?.budget, compact ? START_BUDGET.compact : START_BUDGET.full),
         // phones start at 1, as the other backdrops draw them
@@ -171,6 +177,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
   const uniforms = useMemo(
     () => ({
       tRelight: { value: null },
+      texSize: { value: new THREE.Vector2(1, 1) },
       dpr: { value: 1 },
       viewport: { value: new THREE.Vector2(1, 1) },
       box: { value: new THREE.Vector4(0, 0, 1, 0.1) }, // left, top, size (px), edge feather (uv)
@@ -399,7 +406,9 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
     const [heroSize, heroY] = small
       ? phoneHero(state, vw, vh)
       : [Math.min(vw * 0.9, vh * 0.86), vh * 0.5];
-    state.shownPx = heroSize * viewport.dpr;
+    const roomDpr = state.layer ? Math.min(window.devicePixelRatio || 1, ROOM_MAX_DPR) : viewport.dpr;
+    state.shownPx = heroSize * roomDpr;
+    state.roomDpr = roomDpr;
     const coverSize = Math.max(vw, vh) * 1.04;
     const boxSize = THREE.MathUtils.lerp(heroSize, coverSize, walk);
     const centerY = THREE.MathUtils.lerp(heroY, vh * 0.5, walk);
@@ -426,7 +435,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
 
     if (!engine) {
       uniforms.ready.value = 0;
-      state.layer?.draw(uniforms, vw, vh, viewport.dpr);
+      state.layer?.draw(uniforms, vw, vh, roomDpr);
       return;
     }
     engine.pollTiming();
@@ -531,7 +540,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
       uniforms.glowColor.value.set(KEY.color[0] * glow, KEY.color[1] * glow, KEY.color[2] * glow);
     }
     uniforms.ready.value = clamp01(age / 0.5);
-    state.layer?.draw(uniforms, vw, vh, viewport.dpr);
+    state.layer?.draw(uniforms, vw, vh, roomDpr);
 
     if (now - state.publishedAt > PUBLISH_EVERY) {
       state.publishedAt = now;
@@ -591,6 +600,7 @@ function publish(state) {
     moving: previewStride(engine, quality.budget),
     resting: refineStride(engine, quality.budget),
     fixedLayer: !!state.layer,
+    roomDpr: state.roomDpr,
     fromProfile: state.fromProfile,
     upgrading: !!state.upgrading,
   });
@@ -668,6 +678,7 @@ function install(state, built, uniforms) {
   state.built = built;
   state.engine = built.engine;
   uniforms.tRelight.value = built.texture;
+  uniforms.texSize.value.set(built.engine.W, built.engine.H);
   [state.key, state.fill].forEach((light) =>
     Object.assign(light, { evalPos: null, shown: 0, stride: 0, refineStride: 0, refineRow: 0 })
   );

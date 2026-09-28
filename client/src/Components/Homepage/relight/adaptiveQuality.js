@@ -1,17 +1,16 @@
 // Fits the relight backdrop to the device it runs on. Nothing is benchmarked
 // up front and nothing extra is loaded: it watches the page's own frames and
-// spends the GPU on image quality for as long as the page holds its floor:
-// 30 fps, or 60 on touch screens, where the canvas is moved back over the
-// viewport once a frame and a slow frame shows as the room trailing the
-// finger (ScrollFollow). The display's own refresh rate isn't the goal; a
-// frame that runs past the floor says the last thing asked of the GPU was
-// too much.
+// spends the GPU on image quality for as long as the page holds 30 fps. The
+// display's own refresh rate isn't the goal; a frame that runs past the floor
+// says the last thing asked of the GPU may have been too much.
 //
 // Three settings follow from that:
 // - The network's budget per frame (ms of GPU time), which sets how coarse a
 //   moving light's preview is and how far a resting one is refined. It grows
-//   while frames that ran the network stay on time and backs off when one is
-//   late.
+//   while frames that ran the network stay on time and backs off when they
+//   run late more often than the frames that didn't: on a phone the page
+//   itself misses frames (a slow CPU, the browser scrolling), and taking the
+//   network's budget away for those only coarsened the image.
 // - The canvas's pixel ratio, which sets what every frame costs, the glass
 //   most of all. It's judged only on frames with no network work, so the two
 //   don't chase each other: a resting room that still misses frames has too
@@ -33,6 +32,13 @@ const LATE_SLACK = 5;
 const GAP = 0.25;
 // Frames this soon after network work carry its cost
 const WORK_FRAMES = 2;
+// How quickly the late rates of frames with and without network work follow
+// the latest frames (about the last 1 / RATE_ALPHA of each)
+const RATE_ALPHA = 0.05;
+// A late frame with network work is the network's when frames with work run
+// late this much more often than the rest. One late frame on a page that
+// otherwise holds its floor is enough.
+const BLAME = 0.03;
 
 // Budget (ms): between MIN and SHARE of a frame at the floor, the rest left
 // for the glass and the page. Each on-time frame with work grows it by GROW;
@@ -69,6 +75,7 @@ export class AdaptiveQuality {
     [this.dprMin, this.dprMax] = dprRange;
     this.dpr = clamp(dpr, this.dprMin, this.dprMax);
     this.failedDpr = failedDpr;
+    this.lateRate = { work: 0, idle: 0 };
     this.window = { frames: 0, late: 0, good: 0, settle: 0 };
   }
 
@@ -83,11 +90,14 @@ export class AdaptiveQuality {
     }
     const recent = this.frameNo - this.lastWork <= WORK_FRAMES;
     const late = delta * 1000 > this.lateMs;
+    const rates = this.lateRate;
+    const kind = recent ? 'work' : 'idle';
+    rates[kind] += RATE_ALPHA * ((late ? 1 : 0) - rates[kind]);
 
-    if (recent && late) {
+    if (recent && late && rates.work > rates.idle + BLAME) {
       this.ceiling = this.budget * 0.9;
       this.budget *= BACK_OFF;
-    } else if (recent) {
+    } else if (recent && !late) {
       this.ceiling *= CREEP;
       this.budget = Math.min(this.ceiling, this.budget * GROW);
     }

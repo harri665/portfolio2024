@@ -96,7 +96,7 @@ function Config({ status: s }) {
     ['Resting light', `refined to ${every(s.resting)}`],
     ['Pixel ratio', `${s.dpr}×`],
     ['Frame-rate floor', `${s.fps} fps${s.fps > 30 ? ' (touch screen)' : ''}`],
-    ['Room layer', s.fixedLayer ? 'fixed to the screen' : 'scrolls with the page'],
+    ['Room layer', s.fixedLayer ? `fixed to the screen, at ${s.roomDpr}×` : 'scrolls with the page'],
     ['Settings', s.fromProfile ? 'tuned on an earlier visit' : 'being tuned on this visit'],
   ];
   return <Rows rows={rows} className="mt-4" />;
