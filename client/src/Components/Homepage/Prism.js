@@ -1,4 +1,4 @@
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 
 import DistortedTorusScene from './DistortedTorusScene';
@@ -17,7 +17,8 @@ const TONES = {
 
 // What sits behind each site's project pages, under the glass panels:
 //   'grid'     - a still drafting dot grid, tinted by the repo's language (CS)
-//   'cover'    - the project's own cover image, blurred and dimmed (Art)
+//   'cover'    - the project's own cover image, blurred and dimmed (Art),
+//                drawn in CSS rather than WebGL (CoverFill)
 //   'caustics' - slow light patterns
 //   'torus'    - the site's knot, as on the home pages
 const DETAIL_BACKDROPS = { cs: 'grid', art: 'cover' };
@@ -48,6 +49,18 @@ export function PrismBackdrop({ lens = 'hub', tone = 'page', accent, image }) {
     }
   }, []);
 
+  // The art project page has no WebGL glass, so its backdrop needs no canvas:
+  // a fixed CSS layer can't trail a fast scroll the way a canvas catching up
+  // with the page does, and it shows as soon as the cover image does
+  if (flat && detailBackdrop === 'cover') {
+    return (
+      <>
+        <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-0 bg-bg" />
+        {image && <CoverFill image={image} />}
+      </>
+    );
+  }
+
   // The scene scrolls with the page and is moved back over the viewport each
   // frame, so its glass keeps up with the cards (see ScrollFollow). It spans
   // the page's own box, clipped so it never lengthens the page; the page root
@@ -72,11 +85,11 @@ export function PrismBackdrop({ lens = 'hub', tone = 'page', accent, image }) {
           glass={
             glass
               ? { selector: '[data-liquid-glass]', textSelector: '[data-liquid-glass-text]' }
-              : tone === 'detail'
-                ? { selector: '[data-liquid-glass]', imageSelector: '[data-glass-image]', shade: false, frost: 2.5 }
-                : drip
-                  ? { selector: '[data-liquid-glass]', imageSelector: '[data-glass-image]', shade: false }
-                  : undefined
+              : drip
+                ? { selector: '[data-liquid-glass]', imageSelector: '[data-glass-image]', shade: false }
+                : // project pages: CSS glass only; the WebGL bevel bent the
+                  // edges of their images and videos and was heavy on phones
+                  undefined
           }
           // 100vh is the large viewport on phones, so the canvas doesn't resize
           // as the browser's toolbar collapses mid-scroll
@@ -98,6 +111,50 @@ export function PrismBackdrop({ lens = 'hub', tone = 'page', accent, image }) {
         {toneStyle.veil && <div className={`absolute inset-0 ${toneStyle.veil}`} />}
       </div>
     </>
+  );
+}
+
+// The art project page's backdrop: its cover image, cropped to fill the
+// screen, heavily blurred and dimmed, darkest toward the bottom where the
+// reading is. It uses the cover's own URL (CSS needs no CORS proxy, unlike
+// WebGL), which the page's cover <img> has already loaded, and fades in once
+// the image is ready.
+function CoverFill({ image }) {
+  const [loaded, setLoaded] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const probe = new Image();
+    probe.onload = () => {
+      if (!cancelled) {
+        setLoaded(image);
+      }
+    };
+    probe.src = image;
+    return () => {
+      cancelled = true;
+    };
+  }, [image]);
+
+  return (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none fixed inset-0 z-0 overflow-hidden transition-opacity duration-500"
+      style={{ opacity: loaded === image ? 1 : 0 }}
+    >
+      <div
+        className="absolute inset-0 bg-cover bg-center"
+        style={{
+          backgroundImage: `url("${image}")`,
+          // zoomed in a little, heavily blurred, a little desaturated and dimmed
+          transform: 'scale(1.3)',
+          filter: 'blur(56px) saturate(0.8) brightness(0.5)',
+        }}
+      />
+      {/* darkest toward the bottom and the edges */}
+      <div className="absolute inset-0 bg-gradient-to-b from-bg/0 via-bg/25 to-bg/55" />
+      <div className="absolute inset-0 [background-image:radial-gradient(ellipse_at_center,transparent_35%,rgb(var(--bg)/0.6)_100%)]" />
+    </div>
   );
 }
 

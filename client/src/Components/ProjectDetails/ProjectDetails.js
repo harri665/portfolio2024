@@ -175,26 +175,21 @@ const ArtProject = () => {
       <PageHeader
         back={BACK}
         title={title}
-        meta={[
-          formatDate(project.published_at),
-          assets.length > 1 && `${assets.length} assets`,
-          softwareItems.length > 0 && softwareItems.map((software) => software.name).join(', '),
-        ]}
+        // the software has its own panel below, so the header keeps only the date
+        meta={[formatDate(project.published_at)]}
         className="mb-10"
       />
 
       {project.cover_url && (
-        <Reveal className="gd-cover liquid-glass" data-liquid-glass {...GALLERY_GLASS}>
-          <GlassHighlights over />
-          <img src={project.cover_url} alt={title} data-glass-image />
+        <Reveal className="gd-cover">
+          <img src={project.cover_url} alt={title} />
         </Reveal>
       )}
 
       {(hasOverview || softwareItems.length > 0) && (
         <div className={`gd-cols${hasOverview ? '' : ' gd-cols-single'}`}>
           {hasOverview && (
-            <Reveal as="section" className="gd-panel liquid-glass" data-liquid-glass {...GALLERY_GLASS}>
-              <GlassHighlights />
+            <Reveal as="section" className="gd-panel">
               <div className="gd-panel-head">
                 <h2 className="gd-label">Overview</h2>
               </div>
@@ -209,8 +204,7 @@ const ArtProject = () => {
 
           {softwareItems.length > 0 && (
             <aside className="gd-rail">
-              <Reveal as="section" index={1} className="gd-panel liquid-glass" data-liquid-glass {...GALLERY_GLASS}>
-                <GlassHighlights />
+              <Reveal as="section" index={1} className="gd-panel">
                 <div className="gd-panel-head">
                   <h2 className="gd-label">Software</h2>
                 </div>
@@ -255,7 +249,6 @@ const ArtProject = () => {
                       src={asset.image_url}
                       alt={`Asset ${index + 1}`}
                       loading="lazy"
-                      data-glass-image
                     />
                   ) : (
                     <ReactPlayer
@@ -293,23 +286,7 @@ const ArtProject = () => {
   );
 };
 
-// The art gallery cards' glass (ArtGallery): a lighter prism split and the
-// standard rim. Images marked data-glass-image are drawn into the glass too,
-// so it bends and splits them along the rim like the gallery thumbnails.
-const GALLERY_GLASS = { 'data-glass-split': '0.5', 'data-glass-bezel': '1.0' };
-
-// Glass rim and sheen; `over` lifts them above media inside the pane
-function GlassHighlights({ over = false }) {
-  const layer = over ? ' liquid-glass-over' : '';
-  return (
-    <>
-      <span aria-hidden="true" className={`liquid-glass-sheen${layer}`} />
-      <span aria-hidden="true" className={`liquid-glass-rim${layer}`} />
-    </>
-  );
-}
-
-// A glass asset tile that rises in as it scrolls into view, staggered across
+// An asset tile that rises in as it scrolls into view, staggered across
 // its row. `tileRef` feeds the deep-link scroll to a specific asset.
 function AssetTile({ index, tileRef, className, children, ...props }) {
   const reveal = useScrollReveal(index);
@@ -318,12 +295,9 @@ function AssetTile({ index, tileRef, className, children, ...props }) {
       ref={tileRef}
       {...reveal}
       whileHover={HOVER_LIFT}
-      className={`${className} liquid-glass`}
-      data-liquid-glass
-      {...GALLERY_GLASS}
+      className={className}
       {...props}
     >
-      <GlassHighlights over />
       {children}
     </motion.div>
   );

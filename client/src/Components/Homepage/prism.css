@@ -48,6 +48,19 @@
   text-shadow: 0 1px 14px rgba(0, 0, 0, 0.35);
 }
 
+/* The top bar is the same clear glass as the hub cards, so the WebGL pass's
+   bend and colour split read through it. Page content scrolls under it,
+   though, so a faint dark tint keeps the nav legible over text. */
+.liquid-glass.glass-bar {
+  background-color: rgb(8 9 12 / 0.22);
+}
+
+/* Browsers that can't bend the backdrop in CSS (SubdomainNav) frost it */
+.liquid-glass.glass-bar.glass-bar-frost {
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  backdrop-filter: blur(10px) saturate(140%);
+}
+
 /* Specular rim: light catching the top-left and bottom-right edges */
 .liquid-glass-rim {
   position: absolute;
