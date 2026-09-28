@@ -472,6 +472,11 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
     if (age < 1.4 && !state.pointer && !state.card.uv) {
       aim = INTRO_FROM.map((v, i) => THREE.MathUtils.lerp(v, REST[i], easeInOutCubic(clamp01((age - 0.35) / 1.05))));
     }
+    // Where it comes to rest is in the room too. Held back only on the way,
+    // behind a card deep in the room it crept across the image as it settled,
+    // and wherever it was held off a surface it shook.
+    aim = [...aim];
+    keepInRoom(engine, aim, key.radius);
 
     if (reduceMotion) {
       key.pos = [...aim];
@@ -782,7 +787,11 @@ function keepInRoom(engine, pos, radius) {
   if (p.z <= 0) {
     return;
   }
-  const r = radius / (p.z * 2 * tx);
+  // The patch of surface around it, as wide as the light looks at the front
+  // of the room, where it looks largest. Measured where it is, pulling it
+  // forward widened the patch onto a nearer edge, which pulled it further,
+  // and letting it back narrowed it again: it flipped between the two.
+  const r = radius / ((O[2] - engine.hi[2]) * 2 * tx);
   const surface = Math.min(
     engine.surfaceDistance(p.u, p.v),
     engine.surfaceDistance(p.u - r, p.v),
