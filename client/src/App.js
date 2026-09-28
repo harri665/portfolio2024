@@ -10,6 +10,7 @@ import ProjectDetails from './Components/ProjectDetails/ProjectDetails';
 import CSProjectDetails from './Components/ProjectDetails/CSProjectDetails';
 import AdminApp from './Components/Admin/AdminApp';
 import ContactPage from './Components/Contact/ContactPage';
+import ColophonPage from './Components/Colophon/ColophonPage';
 import BlogIndex from './Components/Blog/BlogIndex';
 import BlogPost from './Components/Blog/BlogPost';
 import { apiUrl } from './utils/api';
@@ -85,6 +86,7 @@ function MainRoutes({ siteMode }) {
       {siteMode === SITE_MODES.CS && <Route path="/:repoName" element={<CSProjectDetails />} />}
       {siteMode === SITE_MODES.BLOG && <Route path="/:slug" element={<BlogPost />} />}
       <Route path="/contact" element={<ContactPage />} />
+      <Route path="/colophon" element={<ColophonPage />} />
       {/* Add more routes here if needed */}
     </Routes>
   );

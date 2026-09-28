@@ -7,7 +7,10 @@ import CommentSection from '../Comments/CommentSection';
 import SubdomainNav from '../Homepage/SubdomainNav';
 import { HOVER_LIFT, PrismBackdrop, Reveal, useScrollReveal } from '../Homepage/Prism';
 import { motion } from 'framer-motion';
-import { getSiteHref, SITE_MODES } from '../../utils/siteMode';
+import { SITE_MODES } from '../../utils/siteMode';
+import { WORKS } from '../Homepage/ArtGallery';
+import Container from '../ui/Container';
+import PageHeader from '../ui/PageHeader';
 import '../Homepage/gallery.css';
 
 function formatDate(value) {
@@ -20,6 +23,11 @@ function formatDate(value) {
     month: 'short',
     day: 'numeric',
   });
+}
+
+// Descriptions come from ArtStation as HTML; an empty one is often just <p></p>
+function hasText(html) {
+  return Boolean(html && html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim());
 }
 
 function validAssets(assets) {
@@ -139,18 +147,13 @@ const ArtProject = () => {
     }, 500);
   }, [loading, project]);
 
-  if (loading) {
+  if (loading || error) {
     return (
       <PageShell>
-        <div className="gd-status">loading project…</div>
-      </PageShell>
-    );
-  }
-
-  if (error) {
-    return (
-      <PageShell>
-        <div className="gd-status gd-status-error">error: {error}</div>
+        <PageHeader back={BACK} title={error ? 'This project didn’t load' : ''} />
+        <p className={`mt-4 text-sm ${error ? 'text-red-300' : 'text-ink-3'}`}>
+          {error || 'Loading project…'}
+        </p>
       </PageShell>
     );
   }
@@ -161,89 +164,81 @@ const ArtProject = () => {
 
   const softwareItems = project.software_items || [];
   const assets = validAssets(project.assets);
+  const hasOverview = hasText(project.description_html);
+  // The ArtStation title can lose its capitals ("Roam Vr Room"); the gallery's is hand-written
+  const title = WORKS.find((w) => w.id === identifier || w.id === project.hash_id)?.t || project.title;
+  // A single image is already the cover, so a gallery of it would repeat it
+  const showGallery = !(assets.length === 1 && assets[0].asset_type === 'image' && project.cover_url);
 
   return (
     <PageShell cover={project.cover_url}>
-      <a href={getSiteHref(SITE_MODES.ART)} className="gd-back">
-        <span className="gd-back-arrow">←</span>
-        Art index
-      </a>
-
-      <header className="nf-head">
-        <div className="nf-eyebrow">3D Art / Project</div>
-        <h1 className="nf-title">{project.title}</h1>
-        <p className="gd-metaline">
-          <span>{formatDate(project.published_at)}</span>
-          <span className="gd-sep">·</span>
-          <span>{assets.length} {assets.length === 1 ? 'asset' : 'assets'}</span>
-          {softwareItems.length > 0 && (
-            <>
-              <span className="gd-sep">·</span>
-              <span>{softwareItems.map((software) => software.name).join(', ')}</span>
-            </>
-          )}
-        </p>
-      </header>
+      <PageHeader
+        back={BACK}
+        title={title}
+        meta={[
+          formatDate(project.published_at),
+          assets.length > 1 && `${assets.length} assets`,
+          softwareItems.length > 0 && softwareItems.map((software) => software.name).join(', '),
+        ]}
+        className="mb-10"
+      />
 
       {project.cover_url && (
         <Reveal className="gd-cover liquid-glass" data-liquid-glass {...GALLERY_GLASS}>
           <GlassHighlights over />
-          <img src={project.cover_url} alt={project.title} data-glass-image />
+          <img src={project.cover_url} alt={title} data-glass-image />
         </Reveal>
       )}
 
-      <div className="gd-cols">
-        <Reveal as="section" className="gd-panel liquid-glass" data-liquid-glass {...GALLERY_GLASS}>
-          <GlassHighlights />
-          <div className="gd-panel-head">
-            <span className="gd-label">Overview</span>
-          </div>
-          <div className="gd-panel-body">
-            <div
-              className="gd-prose"
-              dangerouslySetInnerHTML={{
-                __html: project.description_html || '<p>No description available.</p>',
-              }}
-            />
-          </div>
-        </Reveal>
+      {(hasOverview || softwareItems.length > 0) && (
+        <div className={`gd-cols${hasOverview ? '' : ' gd-cols-single'}`}>
+          {hasOverview && (
+            <Reveal as="section" className="gd-panel liquid-glass" data-liquid-glass {...GALLERY_GLASS}>
+              <GlassHighlights />
+              <div className="gd-panel-head">
+                <h2 className="gd-label">Overview</h2>
+              </div>
+              <div className="gd-panel-body">
+                <div
+                  className="gd-prose"
+                  dangerouslySetInnerHTML={{ __html: project.description_html }}
+                />
+              </div>
+            </Reveal>
+          )}
 
-        <aside className="gd-rail">
-          <Reveal as="section" index={1} className="gd-panel liquid-glass" data-liquid-glass {...GALLERY_GLASS}>
-            <GlassHighlights />
-            <div className="gd-panel-head">
-              <span className="gd-label">Software</span>
-            </div>
-            <div className="gd-panel-body">
-              {softwareItems.length > 0 ? (
-                <div className="gd-chips">
-                  {softwareItems.map((software) => (
-                    <span
-                      key={`${software.name}-${software.id || software.icon_url}`}
-                      className="gd-chip"
-                    >
-                      <img src={software.icon_url} alt="" aria-hidden="true" />
-                      {software.name}
-                    </span>
-                  ))}
+          {softwareItems.length > 0 && (
+            <aside className="gd-rail">
+              <Reveal as="section" index={1} className="gd-panel liquid-glass" data-liquid-glass {...GALLERY_GLASS}>
+                <GlassHighlights />
+                <div className="gd-panel-head">
+                  <h2 className="gd-label">Software</h2>
                 </div>
-              ) : (
-                <p className="gd-note">No software metadata available.</p>
-              )}
-            </div>
-          </Reveal>
-
-        </aside>
-      </div>
-
-      <section className="gd-gallery">
-        <div className="gd-gallery-head">
-          <span className="gd-label">Gallery</span>
-          <span className="gd-panel-count">
-            {assets.length} {assets.length === 1 ? 'asset' : 'assets'}
-          </span>
+                <div className="gd-panel-body">
+                  <div className="gd-chips">
+                    {softwareItems.map((software) => (
+                      <span
+                        key={`${software.name}-${software.id || software.icon_url}`}
+                        className="gd-chip"
+                      >
+                        <img src={software.icon_url} alt="" aria-hidden="true" />
+                        {software.name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </Reveal>
+            </aside>
+          )}
         </div>
-        <div className="gd-assets">
+      )}
+
+      {showGallery && (
+        <section className="gd-gallery">
+          <div className="gd-gallery-head">
+            <h2 className="gd-label">Gallery</h2>
+          </div>
+          <div className="gd-assets">
             {assets.map((asset, index) => (
               <AssetTile
                 key={asset.id}
@@ -286,16 +281,13 @@ const ArtProject = () => {
                 </div>
               </AssetTile>
             ))}
-        </div>
-      </section>
+          </div>
+        </section>
+      )}
 
       {/* Comments read better at text width than across the full asset grid */}
       <Reveal className="gd-comments">
-        <CommentSection
-          type="art"
-          id={project.hash_id || identifier}
-          variant="gallery"
-        />
+        <CommentSection type="art" id={project.hash_id || identifier} />
       </Reveal>
     </PageShell>
   );
@@ -343,11 +335,13 @@ function PageShell({ cover, children }) {
     <div className="gx nf gd">
       <PrismBackdrop lens="art" tone="detail" image={cover} />
       <SubdomainNav currentMode={SITE_MODES.ART} />
-      <div className="gx-shell" style={{ paddingTop: '108px' }}>
+      <Container as="main" className="relative z-[1] pb-24 pt-28 sm:pt-32">
         {children}
-      </div>
+      </Container>
     </div>
   );
 }
+
+const BACK = { label: 'Art', to: '/' };
 
 export default ArtProject;

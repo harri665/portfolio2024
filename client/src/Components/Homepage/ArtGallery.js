@@ -5,6 +5,7 @@ import SubdomainNav from './SubdomainNav';
 import { PrismBackdrop, PrismHero, trackPointer } from './Prism';
 import { GalleryMotionPicker, useGalleryMotion, useGalleryMotionName } from './galleryMotion';
 import { SITE_MODES } from '../../utils/siteMode';
+import Container from '../ui/Container';
 import './gallery.css';
 
 const TINTS = [
@@ -25,7 +26,8 @@ const SOFTWARE = {
   maya:         { ab: 'My', fg: '#3fb6c9', slug: 'autodeskmaya' },
 };
 
-const WORKS = [
+// Also read by the project page, whose ArtStation title can differ in case
+export const WORKS = [
   { t: 'Train Heist Short Animation', video: true, sw: ['blender','houdini','premiere','aftereffects'],
     img: 'https://cdna.artstation.com/p/assets/covers/images/087/345/632/small_square/harri-harri-timeline-17-frame-at-0m5s.jpg?1745531768',
     id: 'YG6eN3', assets: 6, likes: 2, d: '' },
@@ -166,7 +168,6 @@ function GRCard({ p, i, motionName }) {
       </div>
       <div className="gr-meta">
         <span className="gr-name">{p.t}</span>
-        <span className="gr-arrow">→</span>
       </div>
     </MotionLink>
   );
@@ -182,15 +183,16 @@ export default function ArtGallery() {
       <PrismHero
         fullHeight
         peek
-        title="3D art."
+        align="left"
+        title="3D art"
         subtitle={`${WORKS.length} projects in modeling, animation, and simulation.`}
       />
 
-      <div className="gx-shell">
+      <Container className="relative z-[1] pb-16">
         <div key={motionName} className="gr-grid" data-prism-panel>
           {WORKS.map((p, i) => <GRCard key={p.id} p={p} i={i} motionName={motionName} />)}
         </div>
-      </div>
+      </Container>
       <GalleryMotionPicker name={motionName} onChange={setMotionName} />
     </div>
   );

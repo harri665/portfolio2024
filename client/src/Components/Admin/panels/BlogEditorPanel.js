@@ -378,7 +378,7 @@ export default function BlogEditorPanel({ adminFetch }) {
             spellCheck={false}
           />
         ) : (
-          <div className="blog-prose px-5 py-6 sm:px-8" style={{ minHeight: '520px' }}>
+          <div className="prose-doc prose-reading px-5 py-6 sm:px-8" style={{ minHeight: '520px' }}>
             {content ? (
               <ReactMarkdown
                 remarkPlugins={[remarkGfm, [remarkWikiLinks, { apiBase: getApiBaseUrl() }]]}

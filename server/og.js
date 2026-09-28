@@ -7,6 +7,7 @@
 import fs from 'fs';
 import path from 'path';
 import matter from 'gray-matter';
+import { prettyRepoName } from './repoMeta.js';
 
 // Matches link-unfurling bots and search crawlers. Deliberately broad — a real
 // browser UA contains none of these words.
@@ -297,28 +298,31 @@ async function resolveArtProject({ identifier, origin, getArtProject }) {
   };
 }
 
-async function resolveCsProject({ repoName, getCsRepoFullName, getCsRepo }) {
+async function resolveCsProject({ repoName, getCsRepoFullName, getCsRepo, getCsReadme }) {
   const fullName = getCsRepoFullName(repoName);
   if (!fullName) return null;
 
-  let repo = null;
-  try {
-    repo = await getCsRepo(fullName);
-  } catch {
-    repo = null;
-  }
+  const [repo, readme] = await Promise.all([
+    getCsRepo(fullName).catch(() => null),
+    getCsReadme ? getCsReadme(fullName).catch(() => null) : null,
+  ]);
 
   // Unknown repo — let the caller fall back to the generic site card rather
   // than advertising a page that doesn't exist.
   if (!repo?.name) return null;
 
   return {
-    title: repo.name,
+    // The same title and picture the page itself shows (repoMeta.js)
+    title: readme?.title || prettyRepoName(repo.name),
     description:
       truncate(repo.description) ||
       (repo.language ? `${repo.language} project by Harrison Martin.` : SITES.cs.description),
-    // GitHub renders a card with the repo name, description, and owner avatar.
-    image: `https://opengraph.githubassets.com/1/${fullName}`,
+    // A card can't play video, so a README that opens with one falls back to
+    // GitHub's own card with the repo name, description, and owner avatar.
+    image:
+      readme?.media?.type === 'image'
+        ? readme.media.url
+        : `https://opengraph.githubassets.com/1/${fullName}`,
     type: 'article',
     tags: Array.isArray(repo?.topics) ? repo.topics.slice(0, 8) : [],
   };
@@ -435,6 +439,7 @@ function buildJsonLd({ mode, url, title, description, image, resolved, isHome, l
 
 const RESERVED_PATHS = new Set([
   'contact',
+  'colophon',
   'admin',
   'cs-admin',
   'art-admin',
@@ -461,6 +466,7 @@ function withTimeout(promise, ms) {
  *   blogImagesDir    — directory holding the blog images
  *   getArtProject    — async (identifier) => ArtStation project JSON | null
  *   getCsRepo        — async ("owner/repo") => GitHub repo JSON | null
+ *   getCsReadme      — async ("owner/repo") => { title, media } from its README
  *   getCsRepoFullName— (repoName) => "owner/repo"
  *   listBlogPosts    — async () => [{ slug, title, description, cover, date }]
  *   listArtProjects  — async () => [{ identifier, title, description, image }]
@@ -507,6 +513,7 @@ export function createOgHandler(deps) {
             resolveCsProject({
               repoName: slug,
               getCsRepo: deps.getCsRepo,
+              getCsReadme: deps.getCsReadme,
               getCsRepoFullName: deps.getCsRepoFullName,
             }),
             RESOLVE_TIMEOUT_MS

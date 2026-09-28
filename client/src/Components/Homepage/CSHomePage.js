@@ -1,14 +1,14 @@
-import React, { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import React, { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 
-
-import Buttons from "./Buttons";
 import SubdomainNav from './SubdomainNav';
-import { PrismBackdrop, PrismHero } from './Prism';
-import { GalleryMotionPicker, useGalleryMotion, useGalleryMotionName } from './galleryMotion';
 import { SITE_MODES } from '../../utils/siteMode';
 import { apiUrl } from '../../utils/api';
+import { prettyRepoName } from '../../utils/repoTitle';
+import Button from '../ui/Button';
+import Container from '../ui/Container';
+import SectionIntro from '../ui/SectionIntro';
+import Tag from '../ui/Tag';
 
 const GITHUB_USERNAME = 'harri665';
 
@@ -170,47 +170,6 @@ async function fetchExternalWhitelistedRepos(whitelistConfig, signal) {
   return results.filter(Boolean);
 }
 
-function resolveGithubImageUrl(src, fullName, defaultBranch) {
-  if (!src) return null;
-  if (/^https?:\/\//i.test(src)) {
-    return src.replace(
-      /^https:\/\/github\.com\/([^/]+\/[^/]+)\/blob\//,
-      'https://raw.githubusercontent.com/$1/'
-    );
-  }
-  const branch = defaultBranch || 'main';
-  const clean = src.replace(/^\.\//, '');
-  return `https://raw.githubusercontent.com/${fullName}/${branch}/${clean}`;
-}
-
-function extractFirstMedia(markdown, fullName, defaultBranch) {
-  if (!markdown) return null;
-
-  // Markdown image/video syntax: ![alt](url)
-  const mdMatch = markdown.match(/!\[.*?\]\(([^)\s]+)/);
-  if (mdMatch) return resolveGithubImageUrl(mdMatch[1], fullName, defaultBranch);
-
-  // HTML <video src="..."> or <video ...><source src="...">
-  const videoSrcMatch = markdown.match(/<video[^>]+src=["']([^"']+)["']/i)
-    || markdown.match(/<source[^>]+src=["']([^"']+\.mp4[^"']*)["']/i);
-  if (videoSrcMatch) return resolveGithubImageUrl(videoSrcMatch[1], fullName, defaultBranch);
-
-  // HTML <img src="..."> — quoted then unquoted
-  const imgMatch = markdown.match(/<img[^>]+src=["']([^"']+)["']/i)
-    || markdown.match(/<img[^>]+src=([^\s>]+)/i);
-  if (imgMatch) return resolveGithubImageUrl(imgMatch[1], fullName, defaultBranch);
-
-  return null;
-}
-
-function getMediaType(url) {
-  if (!url) return 'image';
-  const path = (() => { try { return new URL(url).pathname; } catch { return url; } })().toLowerCase();
-  if (path.endsWith('.mp4') || path.endsWith('.webm') || path.endsWith('.mov')) return 'video';
-  if (path.endsWith('.gif')) return 'gif';
-  return 'image';
-}
-
 function mergeRepos(primaryRepos, additionalRepos) {
   const merged = new Map();
 
@@ -224,58 +183,12 @@ function mergeRepos(primaryRepos, additionalRepos) {
   return Array.from(merged.values());
 }
 
-// ── Houdini node colour palette (mirrors BlogCard) ────────────────────────────
-const NODE_STYLES = [
-  {
-    header: 'bg-gradient-to-r from-[#0a4035] to-[#0d5045]',
-    border: 'border-[#1a6b5c]',
-    dot: 'bg-teal-400 shadow-[0_0_5px_rgba(45,212,191,0.7)]',
-    tag: 'border-teal-500/30 bg-teal-500/10 text-teal-300',
-    link: 'text-teal-400 hover:text-teal-300',
-    label: 'text-teal-300/70',
-    btn: 'border-teal-500/30 bg-teal-500/10 text-teal-300 hover:bg-teal-500/20',
-  },
-  {
-    header: 'bg-gradient-to-r from-[#4a2000] to-[#5c2a00]',
-    border: 'border-[#8b4500]',
-    dot: 'bg-orange-400 shadow-[0_0_5px_rgba(251,146,60,0.7)]',
-    tag: 'border-orange-500/30 bg-orange-500/10 text-orange-300',
-    link: 'text-orange-400 hover:text-orange-300',
-    label: 'text-orange-300/70',
-    btn: 'border-orange-500/30 bg-orange-500/10 text-orange-300 hover:bg-orange-500/20',
-  },
-  {
-    header: 'bg-gradient-to-r from-[#0a2a4a] to-[#0d3560]',
-    border: 'border-[#1a5090]',
-    dot: 'bg-blue-400 shadow-[0_0_5px_rgba(96,165,250,0.7)]',
-    tag: 'border-blue-500/30 bg-blue-500/10 text-blue-300',
-    link: 'text-blue-400 hover:text-blue-300',
-    label: 'text-blue-300/70',
-    btn: 'border-blue-500/30 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20',
-  },
-  {
-    header: 'bg-gradient-to-r from-[#2d0a4a] to-[#38105a]',
-    border: 'border-[#5a1a90]',
-    dot: 'bg-purple-400 shadow-[0_0_5px_rgba(192,132,252,0.7)]',
-    tag: 'border-purple-500/30 bg-purple-500/10 text-purple-300',
-    link: 'text-purple-400 hover:text-purple-300',
-    label: 'text-purple-300/70',
-    btn: 'border-purple-500/30 bg-purple-500/10 text-purple-300 hover:bg-purple-500/20',
-  },
-];
-
-function nodeStyle(name) {
-  let hash = 0;
-  for (const c of (name || '')) hash = (hash * 31 + c.charCodeAt(0)) & 0xffff;
-  return NODE_STYLES[hash % NODE_STYLES.length];
-}
-
 export default function CSHomePage() {
   const [repos, setRepos] = useState([]);
-  const [repoImages, setRepoImages] = useState({});
+  // README-derived extras per repo: { title, media: { url, type } }
+  const [readmeMeta, setReadmeMeta] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [motionName, setMotionName] = useGalleryMotionName();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -315,224 +228,176 @@ export default function CSHomePage() {
     return () => controller.abort();
   }, []);
 
+  // Titles and preview media come from the READMEs, read and cached by the
+  // server, so browsing the page never spends the visitor's GitHub rate limit
   useEffect(() => {
-    if (repos.length === 0) return;
+    if (repos.length === 0) return undefined;
     const controller = new AbortController();
-    const ghHeaders = { Accept: 'application/vnd.github+json' };
+    const fullNames = repos.map((repo) => repo.full_name).join(',');
 
-    async function fetchReadmeImages() {
-      const entries = await Promise.all(
-        repos.map(async (repo) => {
-          try {
-            const res = await fetch(
-              `https://api.github.com/repos/${repo.full_name}/readme`,
-              { signal: controller.signal, headers: ghHeaders }
-            );
-            if (!res.ok) return [repo.full_name, null];
-            const json = await res.json();
-            const bytes = Uint8Array.from(
-              atob(json.content.replace(/\n/g, '')),
-              (c) => c.charCodeAt(0)
-            );
-            const markdown = new TextDecoder('utf-8').decode(bytes);
-            return [repo.full_name, extractFirstMedia(markdown, repo.full_name, repo.default_branch)];
-          } catch {
-            return [repo.full_name, null];
-          }
-        })
-      );
-      setRepoImages(Object.fromEntries(entries));
-    }
+    fetch(apiUrl(`/github/readme-meta?${new URLSearchParams({ full_names: fullNames })}`), {
+      signal: controller.signal,
+    })
+      .then((res) => (res.ok ? res.json() : {}))
+      .then(setReadmeMeta)
+      .catch(() => {});
 
-    fetchReadmeImages();
     return () => controller.abort();
   }, [repos]);
 
-
-
-
-
   return (
-    <div className="relative min-h-screen overflow-hidden text-white">
-      <PrismBackdrop lens="cs" tone="page" />
+    <div className="drafting-grid relative min-h-screen text-ink">
       <SubdomainNav currentMode={SITE_MODES.CS} />
-      <PrismHero
-        fullHeight
-        peek
-        title="Computer science."
-        subtitle="Software, tools, and research code, pulled live from GitHub."
-      >
-        <Buttons />
-      </PrismHero>
+      <SectionIntro title="Computer science">
+        Software, tools, and research code, pulled live from GitHub.
+      </SectionIntro>
 
-      <main id="projects" className="relative z-10 mx-auto max-w-7xl scroll-mt-24 px-4 pb-20 sm:px-8">
-
-
-        {loading && <StateCard tone="neutral">Loading GitHub projects...</StateCard>}
-        {error && <StateCard tone="error">{error}</StateCard>}
+      <Container as="main" id="projects" className="relative z-10 pb-24">
+        {loading && <p className="py-10 text-sm text-ink-3">Loading projects from GitHub…</p>}
+        {error && <p className="py-10 text-sm text-red-300">{error}</p>}
 
         {!loading && !error && repos.length === 0 && (
-          <StateCard tone="neutral">No repositories found.</StateCard>
+          <p className="py-10 text-sm text-ink-3">No repositories found.</p>
         )}
 
         {!loading && !error && repos.length > 0 && (
-          <motion.section
-            key={motionName}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.1, duration: 0.45 }}
-            data-prism-panel
-            className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3"
-          >
-            {repos.map((repo, index) => (
-              <RepoCard
-                key={repo.id}
-                repo={repo}
-                index={index}
-                motionName={motionName}
-                imageUrl={repoImages[repo.full_name] ?? null}
-              />
+          <section className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+            {repos.map((repo) => (
+              <RepoCard key={repo.id} repo={repo} meta={readmeMeta[repo.full_name]} />
             ))}
-          </motion.section>
+          </section>
         )}
-      </main>
-      <GalleryMotionPicker name={motionName} onChange={setMotionName} />
+
+        <p className="mt-16 text-sm text-ink-3">
+          Curious how this site works?{' '}
+          <Link to="/colophon" className="text-ink-2 underline decoration-line/25 underline-offset-4 transition-colors hover:text-ink">
+            How this site is built
+          </Link>
+        </p>
+      </Container>
     </div>
   );
 }
 
-function RepoCard({ repo, index, motionName, imageUrl }) {
+// The whole card opens the project page; the GitHub and demo buttons inside
+// it go straight out, so they sit above the card's link.
+function RepoCard({ repo, meta }) {
   const demoUrl = normalizeHomepage(repo.homepage);
-  const navigate = useNavigate();
-  const cardMotion = useGalleryMotion(motionName, index);
+  const title = meta?.title || prettyRepoName(repo.name);
+  const topics = Array.isArray(repo.topics) ? repo.topics.slice(0, 4) : [];
+  // Pointer over the card or keyboard focus inside it plays its preview video
+  const [engaged, setEngaged] = useState(false);
 
   return (
-    <motion.article
-      {...cardMotion}
-      onClick={() => navigate(`/${repo.name}`)}
-      data-liquid-glass="1.8"
-      className="liquid-glass solid-glow lens-cs group relative cursor-pointer overflow-hidden rounded-[1.5rem]"
+    <article
+      onPointerEnter={() => setEngaged(true)}
+      onPointerLeave={() => setEngaged(false)}
+      onFocus={() => setEngaged(true)}
+      onBlur={() => setEngaged(false)}
+      className="group relative flex flex-col overflow-hidden rounded-card border border-line/9 bg-surface/85 transition-colors hover:border-line/20"
     >
-      <span aria-hidden="true" className="liquid-glass-rim liquid-glass-over" />
+      {meta?.media && <MediaPreview media={meta.media} engaged={engaged} />}
 
-      {imageUrl && <MediaPreview url={imageUrl} />}
-
-      <div className="relative z-20 flex flex-col p-5">
-        <div className="mb-4 flex flex-wrap items-center gap-2">
-          {repo.language && (
-            <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs font-medium text-white/75">
-              {repo.language}
-            </span>
-          )}
-          <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs font-medium text-white/55">
-            Updated {formatDate(repo.pushed_at)}
-          </span>
-        </div>
-
-        <h2 className="text-xl font-semibold tracking-tight text-white">{repo.name}</h2>
-
-        <p className="mt-3 flex-1 text-sm leading-relaxed text-white/65">
-          {repo.description || 'No description provided yet.'}
+      <div className="flex flex-1 flex-col p-5">
+        <p className="flex flex-wrap gap-x-4 text-sm text-ink-3">
+          {repo.language && <span className="text-accent">{repo.language}</span>}
+          <span>Updated {formatDate(repo.pushed_at)}</span>
         </p>
 
-        {Array.isArray(repo.topics) && repo.topics.length > 0 && (
-          <div className="mt-4 flex flex-wrap gap-2">
-            {repo.topics.slice(0, 4).map((topic) => (
-              <span
-                key={topic}
-                className="rounded-full border border-white/12 bg-white/5 px-2.5 py-1 text-xs font-medium text-white/75"
-              >
-                {topic}
-              </span>
-            ))}
+        <h2 className="mt-2 text-xl font-semibold tracking-tight text-ink">
+          <Link to={`/${repo.name}`} className="after:absolute after:inset-0 after:content-['']">
+            {title}
+          </Link>
+        </h2>
+
+        {repo.description && (
+          <p className="mt-2 text-sm leading-relaxed text-ink-2">{repo.description}</p>
+        )}
+
+        {topics.length > 0 && (
+          <div className="mt-4 flex flex-wrap gap-1.5">
+            {topics.map((topic) => <Tag key={topic}>{topic}</Tag>)}
           </div>
         )}
 
-        {(repo.html_url || demoUrl) && (
-          <div className="mt-6 flex flex-wrap gap-2.5">
-            <a
-              href={repo.html_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              className="rounded-full border border-white/12 bg-white/5 px-4 py-2 text-sm font-semibold text-white/80"
-            >
-              GitHub
-            </a>
-            {demoUrl && (
-              <a
-                href={demoUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={(e) => e.stopPropagation()}
-                className="rounded-full bg-[#0a84ff] px-4 py-2 text-sm font-semibold text-white shadow-[0_8px_18px_rgba(10,132,255,0.25)]"
-              >
-                Live Demo
-              </a>
-            )}
-          </div>
-        )}
+        <div className="relative z-10 mt-auto flex flex-wrap gap-2 pt-5">
+          <Button size="sm" href={repo.html_url} target="_blank" rel="noopener noreferrer">
+            GitHub
+          </Button>
+          {demoUrl && (
+            <Button size="sm" href={demoUrl} target="_blank" rel="noopener noreferrer">
+              Live demo
+            </Button>
+          )}
+        </div>
       </div>
-    </motion.article>
+    </article>
   );
 }
 
-function MediaPreview({ url }) {
-  const type = getMediaType(url);
-  const fitClass = type === 'image' ? 'object-cover' : 'object-contain';
+// Previews are still until asked: a video plays while its card is hovered or
+// focused, or, on touch screens (which can't hover), while it is mostly on
+// screen. Reduced motion keeps them still. Until then it shows its first frame.
+function MediaPreview({ media, engaged }) {
+  const videoRef = useRef(null);
+  const [inView, setInView] = useState(false);
+  const isVideo = media.type === 'video';
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!isVideo || !video) return undefined;
+    // React only sets `muted` as a property; iOS needs the attribute too or it
+    // refuses inline playback and kicks the video fullscreen.
+    video.setAttribute('muted', '');
+
+    const touch = window.matchMedia?.('(hover: none)').matches;
+    const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (!touch || still) return undefined;
+
+    const observer = new IntersectionObserver(([entry]) => setInView(entry.isIntersecting), {
+      threshold: 0.6,
+    });
+    observer.observe(video);
+    return () => observer.disconnect();
+  }, [isVideo]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (engaged || inView) {
+      video.play().catch(() => {});
+    } else {
+      video.pause();
+    }
+  }, [engaged, inView]);
+
+  const fitClass = isVideo ? 'object-contain' : 'object-cover';
 
   return (
-    <div className="relative z-10 px-3 pt-3">
-      <div
-        className="relative w-full overflow-hidden rounded-xl border border-white/10 bg-[#0d0f14]/80"
-        style={{ height: '11rem' }}
-      >
-        {type === 'video' ? (
-          <video
-            src={url}
-            autoPlay
-            loop
-            muted
-            playsInline
-            webkit-playsinline="true"
-            ref={(el) => {
-              // React only sets `muted` as a property; iOS needs the attribute too
-              // or it refuses inline playback and kicks the video fullscreen.
-              if (el) el.setAttribute('muted', '');
-            }}
-            className={`h-full w-full ${fitClass}`}
-          />
-        ) : (
-          <img src={url} alt="" className={`h-full w-full ${fitClass}`} />
-        )}
-      </div>
+    <div className="relative aspect-[16/9] w-full overflow-hidden border-b border-line/9 bg-bg">
+      {isVideo ? (
+        <video
+          ref={videoRef}
+          // #t= makes the browser load and show a first frame instead of black
+          src={`${media.url}#t=0.1`}
+          preload="metadata"
+          // Recordings often open on a black frame before anything happens, so
+          // the still is taken a little way in
+          onLoadedMetadata={(event) => {
+            const video = event.currentTarget;
+            if (video.paused && Number.isFinite(video.duration)) {
+              video.currentTime = Math.min(video.duration * 0.2, 3);
+            }
+          }}
+          loop
+          muted
+          playsInline
+          webkit-playsinline="true"
+          className={`h-full w-full ${fitClass}`}
+        />
+      ) : (
+        <img src={media.url} alt="" loading="lazy" className={`h-full w-full ${fitClass}`} />
+      )}
     </div>
-  );
-}
-
-function MetricCard({ label, value }) {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 shadow-[0_8px_20px_rgba(0,0,0,0.25)]">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/42">
-        {label}
-      </p>
-      <p className="mt-2 text-sm font-medium tracking-tight text-white/92 sm:text-base">
-        {value}
-      </p>
-    </div>
-  );
-}
-
-function StateCard({ children, tone = 'neutral' }) {
-  const toneClasses = tone === 'error' ? 'text-red-300' : 'text-white/55';
-
-  return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className={`prism-card p-10 text-center text-sm ${toneClasses}`}
-    >
-      {children}
-    </motion.div>
   );
 }

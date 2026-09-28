@@ -1,110 +1,64 @@
-/* App.css */
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
+/* ── Long-form text ───────────────────────────────────────────────────────────
+   One style for everything written in Markdown: blog posts, CS READMEs and art
+   descriptions. .prose-reading is the blog's larger, slower setting. */
+.prose-doc { color: rgb(var(--ink-2)); line-height: 1.75; font-size: 0.9375rem; overflow-wrap: break-word; }
+.prose-reading { font-size: 1.0625rem; line-height: 1.8; }
+.prose-doc > :first-child { margin-top: 0; }
+.prose-doc > :last-child { margin-bottom: 0; }
 
-.animate-fadeIn {
-  animation: fadeIn 2s ease-out forwards;
-}
+.prose-doc h1,
+.prose-doc h2,
+.prose-doc h3,
+.prose-doc h4 { color: rgb(var(--ink)); font-weight: 650; letter-spacing: -0.015em; line-height: 1.3; margin: 2.2em 0 0.6em; }
+.prose-doc h1 { font-size: 1.75em; }
+.prose-doc h2 { font-size: 1.35em; }
+.prose-doc h3 { font-size: 1.12em; }
+.prose-doc h4 { font-size: 1em; }
 
+.prose-doc p { margin: 0 0 1.15em; }
+.prose-doc a { color: oklch(var(--accent)); text-decoration: underline; text-decoration-color: oklch(var(--accent) / 0.4); text-underline-offset: 3px; }
+.prose-doc a:hover { text-decoration-color: currentColor; }
+.prose-doc strong { color: rgb(var(--ink)); font-weight: 600; }
+.prose-doc em { font-style: italic; }
+.prose-doc del { opacity: 0.5; }
+.prose-doc hr { border: none; border-top: 1px solid rgb(var(--line) / 0.09); margin: 2.5em 0; }
 
-/* ── Houdini node canvas background ─────────────────────────────────────────── */
-.houdini-canvas {
-  background-color: #16181e;
-  background-image: radial-gradient(rgba(255,255,255,0.055) 1px, transparent 1px);
-  background-size: 22px 22px;
-}
+.prose-doc ul,
+.prose-doc ol { padding-left: 1.4em; margin: 0 0 1.15em; }
+.prose-doc ul { list-style: disc; }
+.prose-doc ol { list-style: decimal; }
+.prose-doc li { margin-bottom: 0.35em; }
+.prose-doc li::marker { color: rgb(var(--ink-3)); }
+.prose-doc li input[type="checkbox"] { margin-right: 0.5em; accent-color: oklch(var(--accent)); }
 
-/* ── Blog prose — Houdini theme ──────────────────────────────────────────────── */
-.blog-prose { color: #9099a8; line-height: 1.8; font-size: 0.9375rem; }
-.blog-prose h1,.blog-prose h2,.blog-prose h3,.blog-prose h4 { color: #d0d4dc; font-weight: 700; letter-spacing: -0.01em; margin-top: 2rem; margin-bottom: 0.6rem; }
-.blog-prose h1 { font-size: 1.75rem; }
-.blog-prose h2 { font-size: 1.3rem; border-bottom: 1px solid #2e3240; padding-bottom: 0.35rem; }
-.blog-prose h3 { font-size: 1.1rem; color: #b0b8c4; }
-.blog-prose p { margin-bottom: 1.15rem; }
-.blog-prose a { color: #e07b39; text-decoration: underline; text-underline-offset: 3px; }
-.blog-prose a:hover { color: #f59a5a; }
-.blog-prose strong { color: #c8ccd4; font-weight: 600; }
-.blog-prose em { font-style: italic; color: #a0a8b4; }
-.blog-prose del { opacity: 0.45; }
-.blog-prose hr { border: none; border-top: 1px solid #2e3240; margin: 2rem 0; }
-.blog-prose ul,.blog-prose ol { padding-left: 1.4rem; margin-bottom: 1.15rem; }
-.blog-prose ul { list-style: disc; }
-.blog-prose ol { list-style: decimal; }
-.blog-prose li { margin-bottom: 0.3rem; }
-.blog-prose li::marker { color: #e07b39; }
-.blog-prose li input[type="checkbox"] { margin-right: 0.5rem; accent-color: #e07b39; }
-.blog-prose blockquote { border-left: 2px solid #e07b39; padding-left: 1rem; color: #6b7280; margin: 1.15rem 0; background: rgba(224,123,57,0.04); padding: 0.75rem 1rem; border-radius: 0 0.375rem 0.375rem 0; }
-.blog-prose code { background: #252830; border: 1px solid #3a3d45; border-radius: 4px; padding: 0.12em 0.4em; font-size: 0.85em; color: #e07b39; font-family: 'Courier New', Courier, monospace; }
-.blog-prose pre { background: #1a1c22; border: 1px solid #2e3240; border-radius: 0.5rem; padding: 1.15rem; overflow-x: auto; margin-bottom: 1.15rem; }
-.blog-prose pre code { background: none !important; border: none; padding: 0; color: #c8ccd4; font-size: 0.85rem; }
-.blog-prose img,.blog-wiki-image { max-width: 100%; border-radius: 0.5rem; margin: 1.15rem 0; border: 1px solid #2e3240; }
-.blog-prose table { width: 100%; border-collapse: collapse; margin-bottom: 1.15rem; font-size: 0.875rem; }
-.blog-prose th { background: #252830; color: #c0c4cc; font-weight: 600; text-align: left; padding: 0.5rem 0.8rem; border: 1px solid #3a3d45; font-family: 'Courier New', Courier, monospace; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
-.blog-prose td { padding: 0.5rem 0.8rem; border: 1px solid #2e3240; color: #8090a0; }
-.blog-prose tr:hover td { background: rgba(255,255,255,0.02); }
-.blog-wiki-link { color: #e07b39; text-decoration: underline; text-underline-offset: 3px; }
-.blog-wiki-link:hover { color: #f59a5a; }
+.prose-doc blockquote { border-left: 2px solid rgb(var(--line) / 0.16); padding-left: 1.1em; margin: 1.4em 0; color: rgb(var(--ink-2)); font-style: italic; }
 
-/* Callouts — Houdini palette */
-.callout { border-radius: 0.375rem; margin: 1.15rem 0; overflow: hidden; }
-.callout-header { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.9rem; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; font-family: 'Courier New', Courier, monospace; }
-.callout-icon { font-size: 0.85rem; line-height: 1; }
-.callout-body { padding: 0.7rem 0.9rem 0.85rem; font-size: 0.875rem; }
-.callout-body > *:last-child { margin-bottom: 0; }
+.prose-doc code { font-family: var(--font-mono); font-size: 0.86em; background: rgb(var(--surface-2)); border: 1px solid rgb(var(--line) / 0.09); border-radius: var(--radius-sm); padding: 0.1em 0.4em; color: rgb(var(--ink)); }
+.prose-doc pre { background: rgb(var(--surface)); border: 1px solid rgb(var(--line) / 0.09); border-radius: var(--radius-md); padding: 1.1em 1.25em; overflow-x: auto; margin: 0 0 1.4em; line-height: 1.6; }
+.prose-doc pre code { background: none !important; border: none; padding: 0; font-size: 0.85em; }
 
-/* NOTE → teal */
-.callout-sky    { background: rgba(20,80,70,0.25); border: 1px solid rgba(45,180,160,0.3); }
-.callout-sky .callout-header    { background: rgba(20,80,70,0.4); color: #2dd4bf; }
-.callout-sky .callout-body      { color: #7ab8b0; }
+.prose-doc img,
+.blog-wiki-image { max-width: 100%; height: auto; border-radius: var(--radius-md); margin: 1.6em 0; }
 
-/* TIP → green */
-.callout-emerald{ background: rgba(20,70,35,0.25); border: 1px solid rgba(52,211,100,0.3); }
-.callout-emerald .callout-header{ background: rgba(20,70,35,0.4); color: #4ade80; }
-.callout-emerald .callout-body  { color: #6aab78; }
+.prose-doc table { width: 100%; border-collapse: collapse; margin: 0 0 1.4em; font-size: 0.9em; font-variant-numeric: tabular-nums; display: block; overflow-x: auto; }
+.prose-doc th { text-align: left; font-weight: 600; color: rgb(var(--ink)); padding: 0.55em 0.9em; border-bottom: 1px solid rgb(var(--line) / 0.16); }
+.prose-doc td { padding: 0.55em 0.9em; border-bottom: 1px solid rgb(var(--line) / 0.09); }
 
-/* WARNING → orange (Houdini brand) */
-.callout-amber  { background: rgba(80,40,10,0.3); border: 1px solid rgba(224,123,57,0.4); }
-.callout-amber .callout-header  { background: rgba(80,40,10,0.5); color: #e07b39; }
-.callout-amber .callout-body    { color: #a07050; }
+.blog-wiki-link { color: oklch(var(--accent)); text-decoration: underline; text-underline-offset: 3px; }
 
-/* DANGER → red */
-.callout-red    { background: rgba(80,15,15,0.25); border: 1px solid rgba(239,68,68,0.3); }
-.callout-red .callout-header    { background: rgba(80,15,15,0.45); color: #f87171; }
-.callout-red .callout-body      { color: #a05050; }
+/* KaTeX display maths scrolls instead of widening the page on phones */
+.prose-doc .katex-display { overflow-x: auto; overflow-y: hidden; padding: 0.25em 0; }
 
-/* ── CS project README prose ─────────────────────────────────────────────── */
-.cs-readme-prose { color: #9099a8; line-height: 1.85; font-size: 0.9375rem; }
-.cs-readme-prose h1,.cs-readme-prose h2,.cs-readme-prose h3,.cs-readme-prose h4 { color: #d8dce8; font-weight: 700; letter-spacing: -0.01em; margin-top: 2.25rem; margin-bottom: 0.65rem; }
-.cs-readme-prose h1 { font-size: 1.9rem; margin-top: 0; }
-.cs-readme-prose h2 { font-size: 1.35rem; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 0.4rem; }
-.cs-readme-prose h3 { font-size: 1.1rem; color: #b8c0d0; }
-.cs-readme-prose p { margin-bottom: 1.2rem; }
-.cs-readme-prose a { color: #4da3ff; text-decoration: none; }
-.cs-readme-prose a:hover { color: #74b9ff; text-decoration: underline; text-underline-offset: 3px; }
-.cs-readme-prose strong { color: #d0d8e8; font-weight: 600; }
-.cs-readme-prose em { font-style: italic; color: #a8b0c0; }
-.cs-readme-prose del { opacity: 0.4; }
-.cs-readme-prose hr { border: none; border-top: 1px solid rgba(255,255,255,0.08); margin: 2.25rem 0; }
-.cs-readme-prose ul,.cs-readme-prose ol { padding-left: 1.4rem; margin-bottom: 1.2rem; }
-.cs-readme-prose ul { list-style: disc; }
-.cs-readme-prose ol { list-style: decimal; }
-.cs-readme-prose li { margin-bottom: 0.35rem; }
-.cs-readme-prose li::marker { color: #0a84ff; }
-.cs-readme-prose li input[type="checkbox"] { margin-right: 0.5rem; accent-color: #0a84ff; }
-.cs-readme-prose blockquote { border-left: 2px solid #0a84ff; padding: 0.75rem 1rem; margin: 1.2rem 0; background: rgba(10,132,255,0.06); border-radius: 0 0.375rem 0.375rem 0; color: #6b7a90; }
-.cs-readme-prose code { background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; padding: 0.12em 0.42em; font-size: 0.85em; color: #7dd3fc; font-family: 'Courier New', Courier, monospace; }
-.cs-readme-prose pre { background: #0d0f14; border: 1px solid rgba(255,255,255,0.08); border-radius: 0.65rem; padding: 1.15rem 1.25rem; overflow-x: auto; margin-bottom: 1.2rem; box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
-.cs-readme-prose pre code { background: none !important; border: none; padding: 0; color: #c8d0e0; font-size: 0.85rem; }
-.cs-readme-prose img { max-width: 100%; border-radius: 0.65rem; margin: 1.5rem 0; border: 1px solid rgba(255,255,255,0.08); }
-.cs-readme-prose table { width: 100%; border-collapse: collapse; margin-bottom: 1.2rem; font-size: 0.875rem; }
-.cs-readme-prose th { background: rgba(255,255,255,0.05); color: #c0c8d8; font-weight: 600; text-align: left; padding: 0.5rem 0.85rem; border: 1px solid rgba(255,255,255,0.1); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
-.cs-readme-prose td { padding: 0.5rem 0.85rem; border: 1px solid rgba(255,255,255,0.07); color: #7a8898; }
-.cs-readme-prose tr:hover td { background: rgba(255,255,255,0.02); }
+/* ── Callouts ─────────────────────────────────────────────────────────────────
+   The colour says what kind of note it is, so it stays; everything else
+   matches the prose around it. */
+.callout { --tone: var(--ink-2); border-left: 2px solid rgb(var(--tone)); background: rgb(var(--tone) / 0.06); border-radius: 0 var(--radius-md) var(--radius-md) 0; margin: 1.6em 0; padding: 0.85em 1.1em; }
+.callout-header { display: flex; align-items: center; gap: 0.5em; font-weight: 600; font-size: 0.92em; color: rgb(var(--tone)); margin-bottom: 0.35em; }
+.callout-icon { font-size: 0.95em; line-height: 1; }
+.callout-body { font-size: 0.95em; }
+.callout-body > :last-child { margin-bottom: 0; }
+
+.callout-sky     { --tone: 94 200 230; }   /* note */
+.callout-emerald { --tone: 110 205 140; }  /* tip */
+.callout-amber   { --tone: 235 170 90; }   /* warning */
+.callout-red     { --tone: 240 120 120; }  /* danger */

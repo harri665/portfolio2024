@@ -1,9 +1,25 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import './theme/tokens.css';
 import './index.css';
 import App from './App';
 import ErrorBoundary from './Components/ErrorBoundary';
 import reportWebVitals from './reportWebVitals';
+import { detectSiteMode, getSiteHref, SITE_MODES } from './utils/siteMode';
+
+// Art projects used to live at harrison-martin.com/#/projects/<id>, and old
+// READMEs and posts still link there. Send those to the art site's page. The
+// hash goes along, since it can carry an asset to scroll to (ProjectDetails).
+const legacyProject = window.location.hash.match(/^#\/projects\/([^/#?]+)/);
+if (legacyProject) {
+  const target = new URL(getSiteHref(SITE_MODES.ART));
+  target.pathname = `/${legacyProject[1]}`;
+  target.hash = window.location.hash;
+  window.location.replace(target.toString());
+}
+
+// Picks the section's accent and effect level (theme/tokens.css)
+document.documentElement.dataset.section = detectSiteMode();
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(

@@ -8,21 +8,19 @@ import { SITE_MODES, getSiteHref } from '../../utils/siteMode';
 const destinationCards = [
   {
     mode: SITE_MODES.CS,
-    label: 'CS',
-    title: 'Computer Science',
+    title: 'Computer science',
     description: 'Projects, software, and technical work.',
   },
   {
     mode: SITE_MODES.ART,
-    label: 'ART',
-    title: '3D Art',
-    description: 'Projects, renders, and technical work.',
+    title: '3D art',
+    description: 'Modeling, animation, and simulation.',
   },
 ];
 
 export default function RootHomePage() {
   return (
-    <div className="relative min-h-screen overflow-hidden text-white">
+    <div className="relative min-h-screen overflow-hidden text-ink">
       <PrismBackdrop lens="hub" tone="hub" />
       <SubdomainNav currentMode={SITE_MODES.ROOT} />
 
@@ -49,21 +47,12 @@ export default function RootHomePage() {
                 <span aria-hidden="true" className="liquid-glass-rim" />
 
                 <div className="relative z-10 min-w-0 flex-1">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/55 sm:text-xs">
-                    {card.label}
-                  </p>
-                  <h2 className="mt-1.5 text-xl font-semibold tracking-tight sm:mt-3 sm:text-2xl">
+                  <h2 className="text-xl font-semibold tracking-tight text-ink sm:text-2xl">
                     {card.title}
                   </h2>
-                  <p className="mt-1 text-sm leading-relaxed text-white/68 sm:mt-2">
+                  <p className="mt-1 text-sm leading-relaxed text-ink-2 sm:mt-2">
                     {card.description}
                   </p>
-                  <div className="mt-5 hidden items-center gap-2 text-sm font-semibold text-white/85 sm:inline-flex">
-                    Enter
-                    <span aria-hidden="true" className="transition-transform group-hover:translate-x-1">
-                      &rarr;
-                    </span>
-                  </div>
                 </div>
 
                 <span
