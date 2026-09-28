@@ -332,7 +332,7 @@ export class RelightEngine {
     this.cam = { X: col(0), Y: col(1), Z: col(2), O: col(3), tx, ty: (tx * H) / W };
     [this.lo, this.hi] = scene.light_bbox;
     [this.rmin, this.rmax] = scene.radius_range;
-    this.timing = { byStride: {}, samples: 0, pending: null };
+    this.timing = { byStride: {}, samples: 0, pending: null, seeded: false };
     this.resources = { textures: [], framebuffers: [], programs: [], buffers: [] };
 
     const net = scene.network;
@@ -667,10 +667,27 @@ export class RelightEngine {
       return;
     }
     const full = ms / pending.share;
+    if (this.timing.seeded) {
+      this.timing.seeded = false;
+      this.timing.byStride = {};
+    }
     const t = this.timing.byStride;
     const s = pending.stride;
     // drops fast, rises slow, so one stall doesn't make a fast gpu look slow
     t[s] = !t[s] ? full : full < t[s] ? 0.5 * t[s] + 0.5 * full : 0.9 * t[s] + 0.1 * full;
+  }
+
+  seedTiming(byStride) {
+    const t = {};
+    Object.entries(byStride || {}).forEach(([s, ms]) => {
+      if (Number(s) >= 1 && Number.isFinite(ms) && ms > 0) {
+        t[s] = ms;
+      }
+    });
+    if (Object.keys(t).length) {
+      this.timing.byStride = t;
+      this.timing.seeded = true;
+    }
   }
 
   // each measured stride k predicts t[k] * (k / s)^2

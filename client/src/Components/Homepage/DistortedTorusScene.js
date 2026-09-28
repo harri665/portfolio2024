@@ -131,13 +131,15 @@ export default function DistortedTorusScene({
   }
   const [relightFailed, setRelightFailed] = useState(false);
   const relight = backdrop === 'relight' && !relightFailed;
+  // held here because Canvas re-applies its dpr prop every render
+  const [relightDpr, setRelightDpr] = useState(null);
 
   return (
     <div ref={layer} className={className}>
       <ErrorBoundary name="webgl">
         <Canvas
           camera={{ position: cameraPosition, fov: 60 }}
-          dpr={[1, maxDpr]}
+          dpr={relight && relightDpr ? relightDpr : [1, maxDpr]}
           gl={{ antialias: !glass }}
           resize={{ scroll: false }}
           frameloop="never"
@@ -169,7 +171,11 @@ export default function DistortedTorusScene({
 
           {drip && !relight && <DripDriver state={dripState.current} onProgress={onDrip} />}
           {relight ? (
-            <RelightBackdrop onProgress={onDrip} onFail={() => setRelightFailed(true)} />
+            <RelightBackdrop
+              onProgress={onDrip}
+              onFail={() => setRelightFailed(true)}
+              onDpr={setRelightDpr}
+            />
           ) : backdrop === 'caustics' ? (
             <Caustics lens={LENSES[lens]} />
           ) : backdrop === 'grid' ? (
