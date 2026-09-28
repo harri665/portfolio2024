@@ -444,6 +444,10 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
     if (age < 1.4 && !state.pointer && !state.card.uv) {
       aim = INTRO_FROM.map((v, i) => THREE.MathUtils.lerp(v, REST[i], easeInOutCubic(clamp01((age - 0.35) / 1.05))));
     }
+    // not held back at rest. tried that and it crept across the image behind
+    // deep cards and shook when held off a surface
+    aim = [...aim];
+    keepInRoom(engine, aim, key.radius);
 
     if (reduceMotion) {
       key.pos = [...aim];
@@ -739,7 +743,8 @@ function keepInRoom(engine, pos, radius) {
   if (p.z <= 0) {
     return;
   }
-  const r = radius / (p.z * 2 * tx);
+  // measured where it is. pulling it forward first made it flip between two edges
+  const r = radius / ((O[2] - engine.hi[2]) * 2 * tx);
   const surface = Math.min(
     engine.surfaceDistance(p.u, p.v),
     engine.surfaceDistance(p.u - r, p.v),

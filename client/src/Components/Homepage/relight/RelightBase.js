@@ -100,12 +100,29 @@ export class RelightBase {
     return [0, 1, 2].map((i) => O[i] + X[i] * xc + Y[i] * yc + Z[i] * zc);
   }
 
-  // Distance from the camera to the first surface through image uv, or
-  // Infinity where the ray leaves the scene
+  // interpolated, otherwise a light held off the floor stepped a whole row at a time
   surfaceDistance(u, v) {
-    const x = Math.min(this.W - 1, Math.max(0, Math.floor(u * this.W)));
-    const y = Math.min(this.H - 1, Math.max(0, Math.floor(v * this.H)));
-    const t = this.geom[(y * this.W + x) * 4 + 3];
-    return t > 0 ? t : Infinity;
+    const at = (x, y) => {
+      const t = this.geom[(clampInt(y, this.H) * this.W + clampInt(x, this.W)) * 4 + 3];
+      return t > 0 ? t : Infinity;
+    };
+    const fx = u * this.W - 0.5;
+    const fy = v * this.H - 0.5;
+    const x0 = Math.floor(fx);
+    const y0 = Math.floor(fy);
+    const a = at(x0, y0);
+    const b = at(x0 + 1, y0);
+    const c = at(x0, y0 + 1);
+    const d = at(x0 + 1, y0 + 1);
+    if (![a, b, c, d].every(Number.isFinite)) {
+      return at(Math.floor(u * this.W), Math.floor(v * this.H));
+    }
+    const sx = fx - x0;
+    const sy = fy - y0;
+    return (a * (1 - sx) + b * sx) * (1 - sy) + (c * (1 - sx) + d * sx) * sy;
   }
+}
+
+function clampInt(i, n) {
+  return Math.min(n - 1, Math.max(0, i));
 }
