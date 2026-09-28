@@ -191,7 +191,7 @@ export default function DistortedTorusScene({
           )}
           {drip && !relight && <LiquidDrip lens={LENSES[lens]} state={dripState.current} />}
 
-          {glass && <LiquidGlassPass {...glass} blurTaps={compact ? 6 : 12} />}
+          {glass && <LiquidGlassPass {...glass} glassOnly={relight} blurTaps={compact ? 6 : 12} />}
         </Canvas>
       </ErrorBoundary>
     </div>

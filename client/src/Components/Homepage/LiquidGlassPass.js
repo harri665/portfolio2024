@@ -23,6 +23,11 @@ import { apiUrl } from '../../utils/api';
 // With `shade` off (the gallery pages, which fade their own CSS vignette as
 // the liquid fills in) it only frosts and bends the scene.
 //
+// - `glassOnly` draws the panes alone, transparent elsewhere, for a backdrop
+//   shown on a layer of its own under this canvas (the CS home page's relit
+//   room, which stays fixed while this canvas follows the scroll). The scene
+//   still renders, for the glass to bend.
+//
 // - `imageSelector` matches <img>s inside panes (the art gallery thumbnails).
 //   Each is drawn into the scene where the DOM laid it out, clipped to its
 //   parent and its pane, so the glass bends, frosts and splits it like the
@@ -41,6 +46,7 @@ export default function LiquidGlassPass({
   imageSelector,
   sceneDim = [0.6, 0.7],
   shade = true,
+  glassOnly = false,
   frost = 5,
   blurTaps = 12,
 }) {
@@ -65,6 +71,7 @@ export default function LiquidGlassPass({
         viewport: { value: new THREE.Vector2(1, 1) },
         sceneDim: { value: 1 },
         shadeScene: { value: 1 },
+        glassOnly: { value: 0 },
         frost: { value: 5 },
         panes: { value: Array.from({ length: MAX_PANES }, () => new THREE.Vector4()) },
         paneRadii: { value: new Array(MAX_PANES).fill(0) },
@@ -181,7 +188,8 @@ export default function LiquidGlassPass({
     const { uniforms } = pass.material;
     uniforms.viewport.value.set(canvasRect.width, canvasRect.height);
     uniforms.sceneDim.value = canvasRect.width >= 640 ? sceneDim[1] : sceneDim[0];
-    uniforms.shadeScene.value = shade ? 1 : 0;
+    uniforms.shadeScene.value = shade && !glassOnly ? 1 : 0;
+    uniforms.glassOnly.value = glassOnly ? 1 : 0;
     uniforms.frost.value = frost;
 
     let count = 0;
@@ -517,6 +525,7 @@ const passFragmentShader = (blurTaps) => `
   uniform vec2 viewport;
   uniform float sceneDim;
   uniform float shadeScene;
+  uniform float glassOnly;
   uniform float frost;
   uniform vec4 panes[MAX_PANES];
   uniform float paneRadii[MAX_PANES];
@@ -593,7 +602,7 @@ const passFragmentShader = (blurTaps) => `
 
   void main() {
     vec2 px = vec2(vUv.x, 1.0 - vUv.y) * viewport;
-    vec4 color = texture2D(tScene, vUv);
+    vec4 color = glassOnly > 0.5 ? vec4(0.0) : texture2D(tScene, vUv);
 
     for (int i = 0; i < MAX_PANES; i++) {
       if (i >= paneCount) break;

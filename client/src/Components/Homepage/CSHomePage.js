@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 
+import RelightStatus from './RelightStatus';
 import SubdomainNav from './SubdomainNav';
 import { PrismBackdrop, PrismHero, trackPointer } from './Prism';
 import { SITE_MODES } from '../../utils/siteMode';
@@ -278,6 +279,8 @@ export default function CSHomePage() {
             How this site is built
           </Link>
         </p>
+
+        <RelightStatus />
       </Container>
     </div>
   );

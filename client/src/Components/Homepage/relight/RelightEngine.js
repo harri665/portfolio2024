@@ -1,10 +1,5 @@
-// Neural relighting of a Cornell box, for the CS home page's backdrop. A
-// trimmed port of the WebGL2 runtime from my relight project, a browser
-// implementation of Neural Render Proxies (Sancho et al., EGSR 2026). It keeps
-// only the forward pass, and it runs on three.js's own WebGL2 context, so its
-// image is an ordinary render target that the glass pass can bend. Where
-// WebGPU is available, RelightGPU runs the same network about four times
-// faster; this is the fallback.
+// webgl2 fallback for the relight network, trimmed port of my relight project's runtime
+// (Neural Render Proxies, Sancho et al. EGSR 2026). only used where there's no webgpu
 //
 // no compute shaders in webgl2 so the MLP is a chain of fragment passes over bands of rows,
 // ping-ponging activations between two texture arrays
@@ -156,7 +151,7 @@ vec3 netAt(int slot, int s, ivec2 pix) {
 vec3 tone(vec3 x) { vec3 y = max(x, 0.0) * exposure; return y / (1.0 + y); }
 vec3 srgb(vec3 c) { return mix(1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, 12.92 * c, lessThanEqual(c, vec3(0.0031308))); }
 void main() {
-  ivec2 pix = ivec2(int(gl_FragCoord.x), ${H - 1} - int(gl_FragCoord.y));
+  ivec2 pix = ivec2(gl_FragCoord.xy);
   vec3 I = vec3(0.0);
   for (int l = 0; l < ${SLOTS}; l++) {
     if (l >= nLights) break;
@@ -192,14 +187,29 @@ function packLayer(layer, nIn, kin, out, inCol) {
   });
 }
 
-// Builds everything on `gl` straight away, from a loaded scene
-// (loadRelightScene) and its encoded pixels (encodePixels). The caller must
-// hand over a clean GL state (three.js: renderer.resetState()) and reset
-// three.js's cache after every call into the engine, which leaves its own
-// bindings behind. bandBytes: the size of one activation texture array.
+// Builds everything straight away, on a context of its own, from a loaded
+// scene (loadRelightScene) and its encoded pixels (encodePixels). bandBytes:
+// the size of one activation texture array.
 export class RelightEngine extends RelightBase {
-  constructor(gl, { scene, layers, geom }, { X, XG, normal4 }, { bandBytes = BAND_BYTES } = {}) {
+  constructor({ scene, layers, geom }, { X, XG, normal4 }, { bandBytes = BAND_BYTES } = {}) {
     super(scene, geom);
+    // offscreen so we can hand over an ImageBitmap. without OffscreenCanvas the canvas has
+    // to be read the same frame it's drawn
+    this.canvas =
+      typeof OffscreenCanvas === 'undefined'
+        ? Object.assign(document.createElement('canvas'), { width: this.W, height: this.H })
+        : new OffscreenCanvas(this.W, this.H);
+    const gl = this.canvas.getContext('webgl2', {
+      alpha: false,
+      antialias: false,
+      depth: false,
+      stencil: false,
+      premultipliedAlpha: false,
+      powerPreference: 'high-performance',
+    });
+    if (!gl) {
+      throw new Error('WebGL2 is not available');
+    }
     this.gl = gl;
     this.backend = 'webgl';
     if (!gl.getExtension('EXT_color_buffer_float') && !gl.getExtension('EXT_color_buffer_half_float')) {
@@ -437,10 +447,7 @@ export class RelightEngine extends RelightBase {
     this.stopTiming();
   }
 
-  // Draws the lit image into `framebuffer` (W x H). lights:
-  // [{pos, radius, color, intensity, slot, stride, hidden}]; a hidden light
-  // lights the room without its own disc showing
-  composite(lights, framebuffer, exposure = 1) {
+  composite(lights, exposure = 1) {
     const gl = this.gl;
     const { u, p } = this.pComp;
     const { X, Y, Z, O, tx, ty } = this.cam;
@@ -469,7 +476,7 @@ export class RelightEngine extends RelightBase {
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, this.geomTex);
     gl.bindVertexArray(this.vao);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, framebuffer);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
     gl.viewport(0, 0, this.W, this.H);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
@@ -533,6 +540,10 @@ export class RelightEngine extends RelightBase {
     this.recordTiming(pending.stride, pending.share, ms);
   }
 
+  snapshot() {
+    return this.canvas.transferToImageBitmap ? this.canvas.transferToImageBitmap() : this.canvas;
+  }
+
   dispose() {
     const gl = this.gl;
     if (this.timing.pending?.query) {
@@ -546,5 +557,6 @@ export class RelightEngine extends RelightBase {
     this.resources.programs.forEach((p) => gl.deleteProgram(p));
     this.resources.buffers.forEach((b) => gl.deleteBuffer(b));
     gl.deleteVertexArray(this.vao);
+    gl.getExtension('WEBGL_lose_context')?.loseContext();
   }
 }

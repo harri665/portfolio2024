@@ -15,10 +15,12 @@ import {
   seedCosts,
   upgradeTier,
 } from './relight/adaptiveQuality';
-import { MIN_TIMED_ROWS } from './relight/RelightBase';
+import { MIN_BAND_ROWS } from './relight/RelightBase';
 import { RelightEngine } from './relight/RelightEngine';
 import { RelightGPUEngine, requestRelightDevice } from './relight/RelightGPU';
+import { ROOM_FRAGMENT, RoomLayer } from './relight/roomLayer';
 import { encodePixels, loadRelightScene } from './relight/scene';
+import { setRelightStatus } from './relight/status';
 import useCardLights, { CARD_SELECTOR } from './useCardLights';
 
 // ─── CS: a Cornell box lit by a neural network ─────────────────────────────
@@ -33,8 +35,11 @@ import useCardLights, { CARD_SELECTOR } from './useCardLights';
 // so each pane is lit from behind by the room's bounce light.
 //
 // The network runs on WebGPU where the browser has it (relight/RelightGPU),
-// about five times faster than on three.js's WebGL2 context, where it runs
-// otherwise (relight/RelightEngine); add ?relight=webgl to the URL to compare.
+// about five times faster than on WebGL2, where it runs otherwise
+// (relight/RelightEngine); add ?relight=webgl to the URL to compare. Either
+// hands each image over as an ImageBitmap. The room is drawn on a layer
+// fixed to the viewport (relight/roomLayer), which stays put while the page
+// scrolls; this canvas draws it too, but only for the glass to bend.
 // Only a light that moves is re-evaluated, on every 2nd to 16th pixel if a
 // full evaluation won't fit the frame budget. Once it rests, it's refined to
 // full resolution a band of rows per frame, into a second slot that swaps in
@@ -76,6 +81,7 @@ const FILL = { pos: [0.64, 0.72, -0.64], radius: 0.07, color: [0.55, 0.7, 1], in
 const START_BUDGET = { compact: 5, full: 7 };
 const MAX_DPR = { compact: 1.5, full: 2 };
 const SAVE_EVERY = 5;
+const PUBLISH_EVERY = 0.5;
 // 32MB is ~20% faster than 8MB but phones don't have the memory
 const BAND_BYTES = { compact: 16 << 20, full: 32 << 20 };
 // Frame-rate floor on touch screens. The canvas scrolls with the page and is
@@ -111,9 +117,11 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
     const device = window.devicePixelRatio || 1;
     st.current = {
       engine: null,
-      built: null, // the engine with its image and how to show it (buildEngine)
-      framebuffer: null,
-      device: null, // a promise of the WebGPU device, or of null
+      built: null,
+      layer: null,
+      device: null,
+      notGPU: null,
+      publishedAt: -Infinity,
       bandBytes: compact ? BAND_BYTES.compact : BAND_BYTES.full,
       readyAt: null,
       progress: 0,
@@ -130,6 +138,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
       gpu,
       fps,
       profile,
+      fromProfile: !!profile,
       savedAt: 0,
       tier: firstTier(profile, compact),
       upgrading: null, // the AbortController of a larger size on its way
@@ -179,11 +188,15 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
   const deviceFor = (state) => {
     if (!state.device) {
       state.device = requestRelightDevice()
-        .catch(() => null)
+        .catch((error) => {
+          state.notGPU = error.message;
+          return null;
+        })
         .then((device) => {
           device?.lost.then((info) => {
             if (info.reason !== 'destroyed') {
               console.warn('Relight backdrop lost its WebGPU device:', info.message);
+              state.notGPU = `its WebGPU device was lost (${info.message || info.reason})`;
               setWebgl(true);
             }
           });
@@ -198,26 +211,44 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
       const device = state.device;
       state.device = null;
       device?.then((d) => d?.destroy());
+      setRelightStatus({ phase: 'idle' });
     };
   }, []);
 
-  // Load the scene and build the network, on WebGPU or three.js's own context
+  useEffect(() => {
+    const state = st.current;
+    const host = renderer.domElement.closest('[data-backdrop-layer]');
+    if (!host) {
+      return undefined;
+    }
+    try {
+      state.layer = new RoomLayer(host);
+    } catch (error) {
+      console.warn('Relight backdrop has no fixed layer:', error);
+      return undefined;
+    }
+    return () => {
+      state.layer?.dispose();
+      state.layer = null;
+    };
+  }, [renderer]);
+
   useEffect(() => {
     const state = st.current;
     const controller = new AbortController();
     const { signal } = controller;
-    const ctx = renderer.getContext();
     const fail = (error) => {
       if (error?.name !== 'AbortError') {
         console.warn('Relight backdrop unavailable:', error);
+        setRelightStatus({ phase: 'failed', reason: error?.message || String(error) });
         onFail?.();
       }
     };
-
-    if (typeof WebGL2RenderingContext === 'undefined' || !(ctx instanceof WebGL2RenderingContext)) {
-      fail(new Error('WebGL2 is not available'));
-      return undefined;
+    setRelightStatus({ phase: 'loading' });
+    if (webgl && !state.notGPU) {
+      state.notGPU = 'the page was asked for WebGL (?relight=webgl)';
     }
+
     if (navigator.connection?.saveData) {
       fail(new Error('data saver is on'));
       return undefined;
@@ -236,13 +267,17 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
           return load(NATIVE);
         }),
       ]);
-      const built = await buildEngine(renderer, data, device, state.bandBytes, signal);
+      const built = await buildEngine(data, device, state.bandBytes, signal);
       if (signal.aborted) {
         built.dispose();
         return;
       }
+      if (built.notGPU) {
+        state.notGPU = built.notGPU;
+      }
       seedCosts(built.engine, state.profile);
       install(state, built, uniforms);
+      publish(state);
     };
     start().catch(fail);
 
@@ -270,7 +305,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
     // on the device the current one runs on
     const device = state.engine.backend === 'webgpu' ? state.device : null;
     Promise.all([device, loadRelightScene(SCENE_URL, signal, tierSuffix(tier))])
-      .then(([gpu, data]) => buildEngine(renderer, data, gpu, state.bandBytes, signal))
+      .then(([gpu, data]) => buildEngine(data, gpu, state.bandBytes, signal))
       .then((built) => {
         if (signal.aborted || !state.engine) {
           built.dispose();
@@ -366,6 +401,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
 
     if (!engine) {
       uniforms.ready.value = 0;
+      state.layer?.draw(uniforms, vw, vh, viewport.dpr);
       return;
     }
     engine.pollTiming();
@@ -441,26 +477,14 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
       quality.worked();
     }
     if (passes.length || dirty) {
-      // The WebGL engine drives three.js's context directly, so three.js's
-      // cache of it goes stale: hand over a clean state and take it back after
-      const shared = engine.backend === 'webgl';
-      if (shared) {
-        renderer.resetState();
-      }
       passes.forEach((light) => {
         if (step(engine, light, now, budget / passes.length, finest)) {
           dirty = true;
         }
       });
       if (dirty) {
-        engine.composite(
-          [shown(key, KEY.intensity * keyLevel), shown(fill, FILL.intensity * fillLevel)],
-          state.framebuffer
-        );
-        state.built.present();
-      }
-      if (shared) {
-        renderer.resetState();
+        engine.composite([shown(key, KEY.intensity * keyLevel), shown(fill, FILL.intensity * fillLevel)]);
+        state.built.present(state.layer);
       }
     }
 
@@ -473,6 +497,12 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
       uniforms.glowColor.value.set(KEY.color[0] * glow, KEY.color[1] * glow, KEY.color[2] * glow);
     }
     uniforms.ready.value = clamp01(age / 0.5);
+    state.layer?.draw(uniforms, vw, vh, viewport.dpr);
+
+    if (now - state.publishedAt > PUBLISH_EVERY) {
+      state.publishedAt = now;
+      publish(state);
+    }
   });
 
   return (
@@ -481,7 +511,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
       <shaderMaterial
         uniforms={uniforms}
         vertexShader={vertexShader}
-        fragmentShader={fragmentShader}
+        fragmentShader={ROOM_FRAGMENT}
         depthTest={false}
         depthWrite={false}
       />
@@ -501,6 +531,32 @@ function phoneHero(state, vw, vh) {
   return [Math.min(vw * 1.2, space), NAV_CLEAR + space / 2];
 }
 
+function publish(state) {
+  const { engine, quality } = state;
+  if (!engine) {
+    return;
+  }
+  const round = (x) => (x === null ? null : Number(x.toFixed(1)));
+  setRelightStatus({
+    phase: 'running',
+    backend: engine.backend,
+    notGPU: engine.backend === 'webgpu' ? null : state.notGPU,
+    half: !!engine.half,
+    size: engine.W,
+    gpu: state.gpu,
+    fps: state.fps,
+    dpr: quality.dpr,
+    budget: round(quality.budget),
+    cost: round(engine.evalCost(1)),
+    seeded: engine.timing.seeded,
+    moving: previewStride(engine, quality.budget),
+    resting: refineStride(engine, quality.budget),
+    fixedLayer: !!state.layer,
+    fromProfile: state.fromProfile,
+    upgrading: !!state.upgrading,
+  });
+}
+
 function saveState({ engine, gpu, fps, quality }) {
   const profile = profileFor(gpu, fps, engine, quality);
   if (profile) {
@@ -509,77 +565,57 @@ function saveState({ engine, gpu, fps, quality }) {
 }
 
 // The network for a loaded scene: on `device` (WebGPU) if there is one and
-// it can run it, else on three.js's context. Returns { engine, texture,
-// framebuffer, present, dispose }: the texture the backdrop samples, the
-// framebuffer to composite into (WebGL), present() to call after each
-// composite, and dispose() for all of it.
-async function buildEngine(renderer, data, device, bandBytes, signal) {
+// it can run it, else on WebGL. Returns { engine, texture, present, dispose,
+// notGPU }: the texture the backdrop samples, present(layer) to call after
+// each composite, which hands the image to the texture and the fixed layer,
+// dispose() for all of it, and why a device couldn't run it, if it couldn't.
+async function buildEngine(data, device, bandBytes, signal) {
+  let engine = null;
+  let notGPU = null;
   if (device) {
     try {
-      const engine = await RelightGPUEngine.create(device, data);
-      // Each composite comes over as an ImageBitmap, uploaded as the
-      // backdrop draws. Its rows are bottom first already.
-      const texture = new THREE.Texture();
-      texture.flipY = false;
-      texture.generateMipmaps = false;
-      texture.minFilter = THREE.LinearFilter;
-      texture.magFilter = THREE.LinearFilter;
-      return {
-        engine,
-        texture,
-        framebuffer: null,
-        present: () => {
-          const previous = texture.image;
-          texture.image = engine.snapshot();
-          texture.needsUpdate = true;
-          previous?.close?.();
-        },
-        dispose: () => {
-          texture.image?.close?.();
-          engine.dispose();
-          texture.dispose();
-        },
-      };
+      engine = await RelightGPUEngine.create(device, data);
     } catch (error) {
       if (signal.aborted) {
         throw error;
       }
       console.warn('Relight backdrop running on WebGL instead of WebGPU:', error);
+      notGPU = `WebGPU couldn't build the network (${error.message})`;
     }
   }
-
-  const pixels = await encodePixels(data, signal);
-  const ctx = renderer.getContext();
-  renderer.resetState();
-  ctx.pixelStorei(ctx.UNPACK_FLIP_Y_WEBGL, false);
-  ctx.pixelStorei(ctx.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
-  ctx.pixelStorei(ctx.UNPACK_ALIGNMENT, 4);
-  let engine;
-  try {
-    engine = new RelightEngine(ctx, data, pixels, { bandBytes });
-  } finally {
-    renderer.resetState();
+  if (!engine) {
+    engine = new RelightEngine(data, await encodePixels(data, signal), { bandBytes });
   }
 
-  const target = new THREE.WebGLRenderTarget(engine.W, engine.H, {
-    depthBuffer: false,
-    generateMipmaps: false,
-    minFilter: THREE.LinearFilter,
-    magFilter: THREE.LinearFilter,
-  });
-  // Let three.js create the target's framebuffer, then borrow it
-  const previous = renderer.getRenderTarget();
-  renderer.setRenderTarget(target);
-  const framebuffer = ctx.getParameter(ctx.FRAMEBUFFER_BINDING);
-  renderer.setRenderTarget(previous);
+  // images come bottom row first so don't flip
+  const texture = new THREE.Texture();
+  texture.flipY = false;
+  texture.generateMipmaps = false;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  const release = (image) => {
+    if (typeof ImageBitmap !== 'undefined' && image instanceof ImageBitmap) {
+      image.close();
+    }
+  };
   return {
     engine,
-    texture: target.texture,
-    framebuffer,
-    present: () => {},
+    notGPU,
+    texture,
+    present: (layer) => {
+      const previous = texture.image;
+      const image = engine.snapshot();
+      texture.image = image;
+      texture.needsUpdate = true;
+      layer?.setImage(image);
+      if (previous !== image) {
+        release(previous);
+      }
+    },
     dispose: () => {
+      release(texture.image);
       engine.dispose();
-      target.dispose();
+      texture.dispose();
     },
   };
 }
@@ -588,7 +624,6 @@ function install(state, built, uniforms) {
   state.built?.dispose();
   state.built = built;
   state.engine = built.engine;
-  state.framebuffer = built.framebuffer;
   uniforms.tRelight.value = built.texture;
   [state.key, state.fill].forEach((light) =>
     Object.assign(light, { evalPos: null, shown: 0, stride: 0, refineStride: 0, refineRow: 0 })
@@ -645,10 +680,8 @@ function step(engine, light, now, budget, finest) {
     const other = 1 - light.shown;
     const total = engine.rows(finest);
     const cost = engine.evalCost(finest);
-    // as many rows as fit the budget; on a slow GPU a few at a time, though
-    // never so few that the pass costs more than its rows (or can't be timed)
-    const rows = cost ? Math.floor((total * budget) / cost / 4) * 4 : MIN_TIMED_ROWS;
-    const r1 = Math.min(total, light.refineRow + THREE.MathUtils.clamp(rows, MIN_TIMED_ROWS, total));
+    const rows = cost ? Math.floor((total * budget) / cost / 4) * 4 : MIN_BAND_ROWS;
+    const r1 = Math.min(total, light.refineRow + THREE.MathUtils.clamp(rows, MIN_BAND_ROWS, total));
     engine.evaluate({ pos: light.evalPos, radius: light.radius }, light.slots[other], finest, light.refineRow, r1);
     light.refineRow = r1;
     if (r1 >= total) {
@@ -786,49 +819,3 @@ const vertexShader = `
   }
 `;
 
-// The relit image placed in the page: a window with soft rounded edges on the
-// hero that grows past the screen's edges, dimmed and a little desaturated
-// so glass and text read over it, plus a bloom around the light
-const fragmentShader = `
-  uniform sampler2D tRelight;
-  uniform float dpr;
-  uniform vec2 viewport;
-  uniform vec4 box;
-  uniform float ready;
-  uniform float dim;
-  uniform float saturation;
-  uniform float hotKeep;
-  uniform vec3 glowAt;
-  uniform vec3 glowColor;
-
-  float sdRoundBox(vec2 p, vec2 halfSize, float r) {
-    vec2 q = abs(p) - halfSize + r;
-    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
-  }
-
-  void main() {
-    vec2 px = vec2(gl_FragCoord.x, viewport.y * dpr - gl_FragCoord.y) / dpr;
-    vec3 base = vec3(0.031, 0.035, 0.047);
-    vec3 color = base;
-
-    if (ready > 0.0) {
-      vec2 uv = (px - box.xy) / box.z;
-      float d = sdRoundBox(uv - 0.5, vec2(0.5), 0.05);
-      float mask = 1.0 - smoothstep(-box.w, 0.0, d);
-      if (mask > 0.0) {
-        vec3 image = texture2D(tRelight, vec2(uv.x, 1.0 - uv.y)).rgb;
-        float luma = dot(image, vec3(0.2126, 0.7152, 0.0722));
-        float hot = smoothstep(0.82, 0.97, luma) * hotKeep;
-        image = mix(mix(vec3(luma), image, saturation) * dim, image, hot);
-        color = mix(base, max(image, base), mask * ready);
-      }
-
-      float r = length(px - glowAt.xy);
-      float reach = glowAt.z * 2.5 + 26.0;
-      color += glowColor * exp(-r / reach) * smoothstep(glowAt.z * 0.6, glowAt.z * 1.6, r) * ready;
-    }
-
-    color += (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
-    gl_FragColor = vec4(color, 1.0);
-  }
-`;

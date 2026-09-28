@@ -20,17 +20,18 @@ function workgroupBytes(threads, width, half) {
   return tile * width * (half ? 2 : 4) + tile * 32 + tile * 12;
 }
 
-// A device for the relight network, or null where WebGPU can't run it. It
-// asks for the adapter's own workgroup memory limit, as the default (16 KB)
-// only fits the smaller workgroup.
+// asks for the adapter's own workgroup memory limit, the 16KB default only fits the small kernel
 export async function requestRelightDevice() {
-  if (!navigator.gpu || typeof OffscreenCanvas === 'undefined') {
-    return null;
+  if (!navigator.gpu) {
+    throw new Error(window.isSecureContext ? 'this browser has no WebGPU' : 'WebGPU needs HTTPS');
+  }
+  if (typeof OffscreenCanvas === 'undefined') {
+    throw new Error('this browser has no OffscreenCanvas');
   }
   // default adapter like webgl uses, so on dual gpu laptops the image doesn't cross gpus every frame
   const adapter = await navigator.gpu.requestAdapter();
   if (!adapter) {
-    return null;
+    throw new Error('the browser offers no WebGPU adapter for this GPU');
   }
   const L = adapter.limits;
   const features = ['timestamp-query', 'shader-f16'].filter((f) => adapter.features.has(f));
@@ -608,11 +609,7 @@ export class RelightGPUEngine extends RelightBase {
     }
   }
 
-  // Draws the lit image, to take with snapshot() (the WebGL engine's
-  // `target` has no counterpart here). lights: [{pos, radius, color,
-  // intensity, slot, stride, hidden}]; a hidden light lights the room
-  // without its own disc showing.
-  composite(lights, target, exposure = 1) {
+  composite(lights, exposure = 1) {
     const dev = this.device;
     const frame = new ArrayBuffer(96 + SLOTS * 48);
     const F = new Float32Array(frame);

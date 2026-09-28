@@ -55,16 +55,12 @@ export function PrismBackdrop({ lens = 'hub', tone = 'page', accent, image }) {
     );
   }
 
-  // The scene scrolls with the page and is moved back over the viewport each
-  // frame, so its glass keeps up with the cards (see ScrollFollow). It spans
-  // the page's own box, clipped so it never lengthens the page; the page root
-  // must be positioned. The base colour and overlays stay fixed, filling in
-  // at the edges while it catches up.
   return (
     <>
       <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-0 bg-bg" />
       <div
         aria-hidden="true"
+        data-backdrop-layer
         className={`pointer-events-none absolute inset-0 z-0 overflow-hidden ${glass || flat || relight ? '' : toneStyle.scene}`}
       >
         <DistortedTorusScene
