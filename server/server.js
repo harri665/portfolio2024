@@ -13,6 +13,7 @@ import multer from 'multer';
 import { createOgHandler, isCrawler, detectSiteMode, siteOrigin } from './og.js';
 import { prettyRepoName, readmeMedia, readmeTitle } from './repoMeta.js';
 import { createProjectPages, isProjectPageName, projectPageMedia } from './projectPages.js';
+import { seedVolumes } from './seedVolumes.js';
 // --- NEW IMPORTS ---
 import { Client, GatewayIntentBits } from 'discord.js';
 import 'dotenv/config'; // Loads .env file contents into process.env
@@ -55,6 +56,14 @@ app.use(useragent.express()); // Enable express-useragent
 // Persistent data directory — mounted as a Docker volume so it survives container rebuilds
 const DATA_DIR = path.join(process.cwd(), 'data');
 fs.mkdirSync(DATA_DIR, { recursive: true });
+
+// Bring files added to the repo into the blog, projects and pages volumes
+seedVolumes({
+  seedDir: path.join(process.cwd(), 'seed'),
+  appDir: process.cwd(),
+  manifestFile: path.join(DATA_DIR, 'seeded.json'),
+  dirs: ['blog', 'projects', 'pages'],
+});
 
 // Portfolio write-ups for CS projects, shown in place of their READMEs
 // (projectPages.js). Also a Docker volume, since the admin page edits them.

@@ -27,6 +27,10 @@ RUN npm install
 # Copy the rest of your application files
 COPY . .
 
+# blog/, projects/ and pages/ are volumes that hide the image's copies once
+# mounted; keep those copies in seed/ so server.js can add new files to them
+RUN mkdir -p seed && cp -r blog projects pages seed/
+
 # Expose the port the server will run on
 EXPOSE 3001
 
