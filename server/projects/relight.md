@@ -11,7 +11,7 @@ stack:
   - WebGL2
   - React
 live: https://relight.harrison-martin.com
-blog: https://blog.harrison-martin.com/realtime-ray-tracing-on-any-hardware
+blog: https://blog.harrison-martin.com/real-time-fully-ray-traced-rendering-on-any-hardware
 cover: relight-hero.webp
 published: true
 ---
