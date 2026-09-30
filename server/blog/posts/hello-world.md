@@ -7,7 +7,7 @@ tags:
 description: >-
   The first post — a quick tour of everything this blog supports: wiki links,
   callouts, images, code, and more.
-published: true
+published: false
 ---
 
 Welcome to the blog. This post is a reference for every feature supported by the Obsidian-style markdown renderer.

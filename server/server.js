@@ -13,6 +13,7 @@ import multer from 'multer';
 import { createOgHandler, isCrawler, detectSiteMode, siteOrigin } from './og.js';
 import { prettyRepoName, readmeMedia, readmeTitle } from './repoMeta.js';
 import { createProjectPages, isProjectPageName, projectPageMedia } from './projectPages.js';
+import { seedVolumes } from './seedVolumes.js';
 import { Client, GatewayIntentBits } from 'discord.js';
 import 'dotenv/config';
 
@@ -48,6 +49,14 @@ app.use(useragent.express());
 // docker volume so it survives rebuilds
 const DATA_DIR = path.join(process.cwd(), 'data');
 fs.mkdirSync(DATA_DIR, { recursive: true });
+
+// copies new files from the repo into the volumes
+seedVolumes({
+  seedDir: path.join(process.cwd(), 'seed'),
+  appDir: process.cwd(),
+  manifestFile: path.join(DATA_DIR, 'seeded.json'),
+  dirs: ['blog', 'projects', 'pages'],
+});
 
 // admin page edits these so they're a volume too
 const PROJECTS_DIR = path.join(process.cwd(), 'projects');

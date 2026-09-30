@@ -24,6 +24,9 @@ RUN npm install
 
 COPY . .
 
+# volumes hide the image's copies once mounted, so keep them in seed/ (see seedVolumes.js)
+RUN mkdir -p seed && cp -r blog projects pages seed/
+
 EXPOSE 3001
 
 CMD ["node", "server.js"]
