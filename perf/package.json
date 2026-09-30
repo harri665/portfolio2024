@@ -1,0 +1,16 @@
+{
+  "name": "portfolio2024-perf",
+  "version": "1.0.0",
+  "description": "Repeatable performance test for every page of the portfolio sites",
+  "scripts": {
+    "perf": "node run.mjs",
+    "perf:3d": "node run.mjs --3d-only --profiles desktop,retina,low-end",
+    "perf:quick": "node run.mjs --runs 1 --duration 2 --max-pages 3",
+    "perf:devices": "node run.mjs --profiles all"
+  },
+  "type": "module",
+  "devDependencies": {
+    "playwright": "^1.63.0"
+  },
+  "private": true
+}
