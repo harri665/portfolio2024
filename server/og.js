@@ -298,7 +298,15 @@ async function resolveArtProject({ identifier, origin, getArtProject }) {
   };
 }
 
-async function resolveCsProject({ repoName, getCsRepoFullName, getCsRepo, getCsReadme }) {
+async function resolveCsProject({
+  repoName,
+  origin,
+  blogImagesDir,
+  getProjectPage,
+  getCsRepoFullName,
+  getCsRepo,
+  getCsReadme,
+}) {
   const fullName = getCsRepoFullName(repoName);
   if (!fullName) return null;
 
@@ -310,6 +318,25 @@ async function resolveCsProject({ repoName, getCsRepoFullName, getCsRepo, getCsR
   // Unknown repo — let the caller fall back to the generic site card rather
   // than advertising a page that doesn't exist.
   if (!repo?.name) return null;
+
+  // The project page, when there is one, is what the link opens to
+  const page = getProjectPage?.(repo.name);
+  if (page) {
+    const { meta, content } = page;
+    const cover = meta.cover
+      ? /^https?:\/\//i.test(meta.cover)
+        ? meta.cover
+        : blogImageUrl({ file: meta.cover, origin, blogImagesDir })
+      : null;
+    return {
+      title: meta.title || readme?.title || prettyRepoName(repo.name),
+      description: truncate(meta.tagline || repo.description) || SITES.cs.description,
+      image: cover || `https://opengraph.githubassets.com/1/${fullName}`,
+      type: 'article',
+      tags: meta.stack.slice(0, 8),
+      bodyText: stripMarkdown(content).slice(0, 4000),
+    };
+  }
 
   return {
     // The same title and picture the page itself shows (repoMeta.js)
@@ -512,6 +539,9 @@ export function createOgHandler(deps) {
           resolved = await withTimeout(
             resolveCsProject({
               repoName: slug,
+              origin,
+              blogImagesDir: deps.blogImagesDir,
+              getProjectPage: deps.getProjectPage,
               getCsRepo: deps.getCsRepo,
               getCsReadme: deps.getCsReadme,
               getCsRepoFullName: deps.getCsRepoFullName,

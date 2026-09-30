@@ -3,6 +3,7 @@ import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
 import {
   FaChartBar,
   FaComments,
+  FaFileAlt,
   FaFileCode,
   FaGithub,
   FaImages,
@@ -14,6 +15,8 @@ import BlogPanel from './panels/BlogPanel';
 import BlogEditorPanel from './panels/BlogEditorPanel';
 import ArtPanel from './panels/ArtPanel';
 import CSPanel from './panels/CSPanel';
+import ProjectPagesPanel from './panels/ProjectPagesPanel';
+import ProjectPageEditorPanel from './panels/ProjectPageEditorPanel';
 import PagesPanel from './panels/PagesPanel';
 import CommentsPanel from './panels/CommentsPanel';
 import LogsPanel from './panels/LogsPanel';
@@ -23,6 +26,7 @@ const SECTIONS = [
   { to: '/admin/comments', label: 'Comments', icon: FaComments },
   { to: '/admin/art', label: 'Art Slugs', icon: FaImages },
   { to: '/admin/cs', label: 'CS Projects', icon: FaGithub },
+  { to: '/admin/projects', label: 'Project Pages', icon: FaFileAlt },
   { to: '/admin/pages', label: 'Static Pages', icon: FaFileCode },
   { to: '/admin/logs', label: 'Visitor Logs', icon: FaChartBar },
 ];
@@ -172,6 +176,8 @@ export default function AdminApp() {
             <Route path="comments" element={<CommentsPanel {...panelProps} />} />
             <Route path="art" element={<ArtPanel {...panelProps} />} />
             <Route path="cs" element={<CSPanel {...panelProps} />} />
+            <Route path="projects" element={<ProjectPagesPanel {...panelProps} />} />
+            <Route path="projects/:repo" element={<ProjectPageEditorPanel {...panelProps} />} />
             <Route path="pages" element={<PagesPanel {...panelProps} />} />
             <Route path="logs" element={<LogsPanel {...panelProps} />} />
             <Route path="*" element={<Navigate to="/admin/blog" replace />} />
