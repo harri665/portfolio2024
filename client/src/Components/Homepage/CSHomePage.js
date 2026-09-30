@@ -6,6 +6,7 @@ import SubdomainNav from './SubdomainNav';
 import { PrismBackdrop, PrismHero, trackPointer } from './Prism';
 import { SITE_MODES } from '../../utils/siteMode';
 import { apiUrl } from '../../utils/api';
+import { mediaUrl } from '../../utils/mediaUrl';
 import { prettyRepoName } from '../../utils/repoTitle';
 import Button from '../ui/Button';
 import Container from '../ui/Container';
@@ -186,7 +187,7 @@ function mergeRepos(primaryRepos, additionalRepos) {
 
 export default function CSHomePage() {
   const [repos, setRepos] = useState([]);
-  // README-derived extras per repo: { title, media: { url, type } }
+  // { title, media: { url, type }, tagline, live }
   const [readmeMeta, setReadmeMeta] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -287,8 +288,9 @@ export default function CSHomePage() {
 }
 
 function RepoCard({ repo, meta }) {
-  const demoUrl = normalizeHomepage(repo.homepage);
+  const demoUrl = normalizeHomepage(meta?.live || repo.homepage);
   const title = meta?.title || prettyRepoName(repo.name);
+  const summary = meta?.tagline || repo.description;
   const topics = Array.isArray(repo.topics) ? repo.topics.slice(0, 4) : [];
   const [engaged, setEngaged] = useState(false);
 
@@ -304,7 +306,9 @@ function RepoCard({ repo, meta }) {
       className="liquid-glass prism-glow lens-cs group relative flex flex-col overflow-hidden rounded-card"
     >
       <span aria-hidden="true" className="liquid-glass-rim" />
-      {meta?.media && <MediaPreview media={meta.media} engaged={engaged} />}
+      {meta?.media && (
+        <MediaPreview media={{ ...meta.media, url: mediaUrl(meta.media.url) }} engaged={engaged} />
+      )}
 
       {/* z-index without position works on a flex item, keeps the title link stretched over the card */}
       <div className="z-[2] flex flex-1 flex-col p-5">
@@ -319,9 +323,7 @@ function RepoCard({ repo, meta }) {
           </Link>
         </h2>
 
-        {repo.description && (
-          <p className="mt-2 text-sm leading-relaxed text-ink-2">{repo.description}</p>
-        )}
+        {summary && <p className="mt-2 text-sm leading-relaxed text-ink-2">{summary}</p>}
 
         {topics.length > 0 && (
           <div className="mt-4 flex flex-wrap gap-1.5">

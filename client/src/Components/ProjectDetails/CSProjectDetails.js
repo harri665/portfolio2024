@@ -8,11 +8,14 @@ import rehypeKatex from 'rehype-katex';
 import rehypeRaw from 'rehype-raw';
 import rehypeSlug from 'rehype-slug';
 import 'katex/dist/katex.min.css';
-import { FaGithub, FaExternalLinkAlt } from 'react-icons/fa';
+import { FaBookOpen, FaGithub, FaExternalLinkAlt } from 'react-icons/fa';
 
 import { SITE_MODES } from '../../utils/siteMode';
-import { apiUrl } from '../../utils/api';
+import { apiUrl, getApiBaseUrl } from '../../utils/api';
+import { mediaUrl } from '../../utils/mediaUrl';
 import { withoutLeadingHeading } from '../../utils/repoTitle';
+import { remarkWikiLinks } from '../Blog/plugins/remarkWikiLinks';
+import { rehypeCallouts } from '../Blog/plugins/rehypeCallouts';
 import SubdomainNav from '../Homepage/SubdomainNav';
 import CommentSection from '../Comments/CommentSection';
 import Button from '../ui/Button';
@@ -153,9 +156,21 @@ export default function CSProjectDetails() {
 
   const { repo: repoData, title, languages } = project;
   const readme = project.readme?.content;
+  const page = project.page;
+  const pageMeta = page?.meta;
   const fullName = repoData.full_name;
-  const demoUrl = normalizeHomepage(repoData.homepage);
-  const topics = Array.isArray(repoData.topics) ? repoData.topics : [];
+  const demoUrl = normalizeHomepage(pageMeta?.live || repoData.homepage);
+  const blogUrl = pageMeta?.blog || '';
+  const summary = pageMeta?.tagline || repoData.description;
+  const topics = pageMeta?.stack.length
+    ? pageMeta.stack
+    : Array.isArray(repoData.topics)
+      ? repoData.topics
+      : [];
+  const facts = [
+    pageMeta?.role && ['Role', pageMeta.role],
+    pageMeta?.timeline && ['Timeline', pageMeta.timeline],
+  ].filter(Boolean);
   const updatedDate = formatDate(repoData.pushed_at);
 
   return (
@@ -173,10 +188,21 @@ export default function CSProjectDetails() {
               repoData.archived && 'Archived',
             ]}
           >
-            {repoData.description && (
-              <p className="mt-5 max-w-2xl text-lg leading-relaxed text-ink-2">
-                {repoData.description}
-              </p>
+            {summary && (
+              <p className="mt-5 max-w-2xl text-lg leading-relaxed text-ink-2">{summary}</p>
+            )}
+
+            {facts.length > 0 && (
+              <dl className="mt-6 flex flex-wrap gap-x-10 gap-y-3">
+                {facts.map(([label, value]) => (
+                  <div key={label}>
+                    <dt className="font-mono text-[11px] uppercase tracking-[0.16em] text-ink-3">
+                      {label}
+                    </dt>
+                    <dd className="mt-1 text-sm text-ink-2">{value}</dd>
+                  </div>
+                ))}
+              </dl>
             )}
 
             {topics.length > 0 && (
@@ -192,17 +218,50 @@ export default function CSProjectDetails() {
                   Live demo
                 </Button>
               )}
+              {blogUrl && (
+                <Button href={blogUrl} target="_blank" rel="noopener noreferrer">
+                  <FaBookOpen className="text-xs" />
+                  Read the story
+                </Button>
+              )}
               <Button href={repoData.html_url} target="_blank" rel="noopener noreferrer">
                 <FaGithub />
-                View on GitHub
+                {page ? 'Code & README' : 'View on GitHub'}
               </Button>
             </div>
 
             {languages && <LanguageStrip languages={languages} />}
           </PageHeader>
 
+          {page && (pageMeta.video || pageMeta.cover) && (
+            <figure className="mt-12 overflow-hidden rounded-card border border-line/9 bg-surface-2">
+              {pageMeta.video ? (
+                <video
+                  src={mediaUrl(pageMeta.video)}
+                  poster={pageMeta.cover ? mediaUrl(pageMeta.cover) : undefined}
+                  className="block w-full"
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                />
+              ) : (
+                <img src={mediaUrl(pageMeta.cover)} alt="" className="block w-full" />
+              )}
+            </figure>
+          )}
+
           <section className="mt-12 rounded-card border border-line/9 bg-surface/85 px-5 py-8 sm:px-10 sm:py-10">
-            {readme ? (
+            {page ? (
+              <div className="prose-doc prose-reading">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm, remarkMath, [remarkWikiLinks, { apiBase: getApiBaseUrl() }]]}
+                  rehypePlugins={[rehypeCallouts, rehypeSlug, rehypeKatex, rehypeHighlight, rehypeRaw]}
+                >
+                  {page.content}
+                </ReactMarkdown>
+              </div>
+            ) : readme ? (
               <div className="prose-doc">
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm, remarkMath]}

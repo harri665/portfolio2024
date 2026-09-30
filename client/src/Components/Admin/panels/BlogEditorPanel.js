@@ -1,14 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import rehypeHighlight from 'rehype-highlight';
-import rehypeSlug from 'rehype-slug';
-import rehypeRaw from 'rehype-raw';
 
-import { apiUrl, getApiBaseUrl } from '../../../utils/api';
-import { remarkWikiLinks } from '../../Blog/plugins/remarkWikiLinks';
-import { rehypeCallouts } from '../../Blog/plugins/rehypeCallouts';
+import { ImageLibrary, MarkdownEditor, uploadImage } from './markdownEditing';
 import {
   BTN_PRIMARY,
   BTN_SUBTLE,
@@ -32,15 +25,12 @@ export default function BlogEditorPanel({ adminFetch }) {
   const navigate = useNavigate();
   const isNew = !editSlug;
 
-  const contentRef = useRef(null);
+  const editorRef = useRef(null);
 
-  const [tab, setTab] = useState('write');
   const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState(null);
   const [uploadStatus, setUploadStatus] = useState('');
-  const [images, setImages] = useState([]);
-  const [imageUploading, setImageUploading] = useState(false);
 
   const [slug, setSlug] = useState('');
   const [slugLocked, setSlugLocked] = useState(false);
@@ -53,11 +43,6 @@ export default function BlogEditorPanel({ adminFetch }) {
   const [content, setContent] = useState('');
 
   useEffect(() => {
-    adminFetch('/admin/blog/images')
-      .then((r) => (r.ok ? r.json() : []))
-      .then(setImages)
-      .catch(() => {});
-
     if (isNew) return;
 
     adminFetch(`/admin/blog/posts/${editSlug}`)
@@ -80,48 +65,12 @@ export default function BlogEditorPanel({ adminFetch }) {
       .finally(() => setLoading(false));
   }, [editSlug, isNew, adminFetch]);
 
-  function insertAtCursor(text) {
-    const ta = contentRef.current;
-    if (!ta) return;
-    const start = ta.selectionStart;
-    const end = ta.selectionEnd;
-    setContent(content.slice(0, start) + text + content.slice(end));
-    requestAnimationFrame(() => {
-      ta.selectionStart = ta.selectionEnd = start + text.length;
-      ta.focus();
-    });
-  }
-
-  async function uploadImage(file) {
-    const fd = new FormData();
-    fd.append('image', file);
-    const r = await adminFetch('/admin/blog/images', { method: 'POST', body: fd });
-    if (!r.ok) throw new Error('Upload failed');
-    const { filename } = await r.json();
-    return filename;
-  }
-
-  async function handleLibraryUpload(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setImageUploading(true);
-    try {
-      const filename = await uploadImage(file);
-      setImages((prev) => [...new Set([...prev, filename])].sort());
-      e.target.value = '';
-    } catch (err) {
-      setStatus({ type: 'error', message: err.message });
-    } finally {
-      setImageUploading(false);
-    }
-  }
-
   async function handleCoverUpload(e) {
     const file = e.target.files?.[0];
     if (!file) return;
     setUploadStatus('uploading…');
     try {
-      const filename = await uploadImage(file);
+      const filename = await uploadImage(adminFetch, file);
       setCover(filename);
       setUploadStatus(`✓ ${filename}`);
     } catch (err) {
@@ -301,96 +250,18 @@ export default function BlogEditorPanel({ adminFetch }) {
         </div>
       </Card>
 
-      {/* Image library */}
-      <Card className="mb-4">
-        <div className="flex items-center justify-between gap-3 border-b border-white/8 px-5 py-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/40">Images</p>
-          <label
-            className={`inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-1 text-[10px] text-white/60 transition-colors hover:text-white ${
-              imageUploading ? 'pointer-events-none opacity-50' : ''
-            }`}
-          >
-            {imageUploading ? 'uploading…' : '+ Upload'}
-            <input type="file" accept="image/*" className="hidden" onChange={handleLibraryUpload} />
-          </label>
-        </div>
+      <ImageLibrary
+        adminFetch={adminFetch}
+        onInsert={(text) => editorRef.current?.insert(text)}
+        onError={(err) => setStatus({ type: 'error', message: err.message })}
+      />
 
-        {images.length === 0 ? (
-          <p className="px-5 py-4 text-[10px] text-white/30">No images uploaded yet.</p>
-        ) : (
-          <div className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-            {images.map((img) => (
-              <div
-                key={img}
-                className="overflow-hidden rounded-xl border border-white/10 bg-white/5"
-              >
-                <img
-                  src={apiUrl(`/blog/images/${encodeURIComponent(img)}`)}
-                  alt={img}
-                  className="h-20 w-full object-cover"
-                />
-                <div className="p-1.5">
-                  <p className="truncate font-mono text-[9px] text-white/40" title={img}>
-                    {img}
-                  </p>
-                  <button
-                    onClick={() => insertAtCursor(`![[${img}]]`)}
-                    className="mt-1 w-full rounded bg-[#0a84ff]/12 px-2 py-0.5 text-[9px] text-[#0a84ff] transition-colors hover:bg-[#0a84ff]/20"
-                  >
-                    Insert
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
-
-      {/* Content */}
-      <Card>
-        <div className="flex items-center justify-between gap-3 border-b border-white/8 px-5 py-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/40">Content</p>
-          <div className="flex gap-1">
-            {['write', 'preview'].map((t) => (
-              <button
-                key={t}
-                onClick={() => setTab(t)}
-                className={[
-                  'rounded-lg px-3 py-1 text-[10px] capitalize transition-colors',
-                  tab === t ? 'bg-[#0a84ff]/15 text-[#0a84ff]' : 'text-white/40 hover:text-white/70',
-                ].join(' ')}
-              >
-                {t}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {tab === 'write' ? (
-          <textarea
-            ref={contentRef}
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            className="w-full resize-none bg-[#0d0f14] px-5 py-4 font-mono text-sm text-[#c8ccd4] outline-none"
-            style={{ minHeight: '520px' }}
-            placeholder="Write your post in Markdown…"
-            spellCheck={false}
-          />
-        ) : (
-          <div className="prose-doc prose-reading px-5 py-6 sm:px-8" style={{ minHeight: '520px' }}>
-            {content ? (
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm, [remarkWikiLinks, { apiBase: getApiBaseUrl() }]]}
-                rehypePlugins={[rehypeCallouts, rehypeSlug, rehypeHighlight, rehypeRaw]}
-              >
-                {content}
-              </ReactMarkdown>
-            ) : (
-              <p className="text-xs text-white/30">Nothing to preview yet.</p>
-            )}
-          </div>
-        )}
-      </Card>
+      <MarkdownEditor
+        ref={editorRef}
+        value={content}
+        onChange={setContent}
+        placeholder="Write your post in Markdown…"
+      />
     </div>
   );
 }

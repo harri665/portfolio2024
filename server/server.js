@@ -12,6 +12,7 @@ import { fileURLToPath } from 'url';
 import multer from 'multer';
 import { createOgHandler, isCrawler, detectSiteMode, siteOrigin } from './og.js';
 import { prettyRepoName, readmeMedia, readmeTitle } from './repoMeta.js';
+import { createProjectPages, isProjectPageName, projectPageMedia } from './projectPages.js';
 import { Client, GatewayIntentBits } from 'discord.js';
 import 'dotenv/config';
 
@@ -47,6 +48,10 @@ app.use(useragent.express());
 // docker volume so it survives rebuilds
 const DATA_DIR = path.join(process.cwd(), 'data');
 fs.mkdirSync(DATA_DIR, { recursive: true });
+
+// admin page edits these so they're a volume too
+const PROJECTS_DIR = path.join(process.cwd(), 'projects');
+const projectPages = createProjectPages(PROJECTS_DIR);
 
 function ensureCacheFileExists(filePath) {
   if (!fs.existsSync(filePath)) {
@@ -607,8 +612,27 @@ app.get('/api/github/readme-meta', async (req, res) => {
 
   const entries = await Promise.all(
     fullNames.map(async (fullName) => {
+      const page = projectPages.read(fullName.split('/').pop())?.meta;
+      if (page?.title && projectPageMedia(page)) {
+        return [
+          fullName,
+          { title: page.title, media: projectPageMedia(page), tagline: page.tagline, live: page.live },
+        ];
+      }
+
       try {
         const { title, media } = describeReadme(await getGitHubReadme(fullName), fullName);
+        if (page) {
+          return [
+            fullName,
+            {
+              title: page.title || title,
+              media: projectPageMedia(page) || media,
+              tagline: page.tagline,
+              live: page.live,
+            },
+          ];
+        }
         return [fullName, { title, media }];
       } catch (error) {
         console.error(`README meta failed for ${fullName}:`, error.message || error);
@@ -655,10 +679,13 @@ app.get('/api/cs/project/:repoName', async (req, res) => {
       getGitHubLanguages(fullName).catch(() => null),
     ]);
 
+    const page = projectPages.read(repo.name);
+
     res.json({
       repo,
-      title: readmeTitle(readme.content) || prettyRepoName(repo.name),
+      title: page?.meta.title || readmeTitle(readme.content) || prettyRepoName(repo.name),
       readme: describeReadme(readme, fullName),
+      page,
       languages,
     });
   } catch (error) {
@@ -1082,6 +1109,39 @@ app.post('/api/admin/blog/images', requireAdmin, imageUpload.single('image'), (r
   res.json({ filename: req.file.originalname });
 });
 
+// one page per repo, so PUT creates or replaces
+
+app.get('/api/admin/projects', requireAdmin, (req, res) => {
+  try {
+    res.json(projectPages.listAll());
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to load project pages' });
+  }
+});
+
+app.get('/api/admin/projects/:repo', requireAdmin, (req, res) => {
+  if (!isProjectPageName(req.params.repo)) return res.status(400).json({ error: 'Invalid repository name' });
+  const page = projectPages.read(req.params.repo, { includeDrafts: true });
+  if (!page) return res.status(404).json({ error: 'No page for this project yet' });
+  res.json(page);
+});
+
+app.put('/api/admin/projects/:repo', requireAdmin, (req, res) => {
+  if (!isProjectPageName(req.params.repo)) return res.status(400).json({ error: 'Invalid repository name' });
+  try {
+    const { content, ...fields } = req.body || {};
+    res.json(projectPages.write(req.params.repo, fields, content));
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save project page' });
+  }
+});
+
+app.delete('/api/admin/projects/:repo', requireAdmin, (req, res) => {
+  if (!isProjectPageName(req.params.repo)) return res.status(400).json({ error: 'Invalid repository name' });
+  if (!projectPages.remove(req.params.repo)) return res.status(404).json({ error: 'No page for this project' });
+  res.json({ deleted: req.params.repo });
+});
+
 app.get('/api/admin/art/slugs', requireAdmin, (req, res) => {
   res.json(loadArtSlugConfig());
 });
@@ -1500,6 +1560,7 @@ const ogHandler = createOgHandler({
   getCsRepo: (fullName) => getGitHubRepoByFullName(fullName),
   getCsReadme: async (fullName) => describeReadme(await getGitHubReadme(fullName), fullName),
   getCsRepoFullName: resolveCsRepoFullName,
+  getProjectPage: (repoName) => projectPages.read(repoName),
   listBlogPosts: () => loadBlogPosts(),
   listArtProjects,
   listCsRepos,

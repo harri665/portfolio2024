@@ -281,7 +281,15 @@ async function resolveArtProject({ identifier, origin, getArtProject }) {
   };
 }
 
-async function resolveCsProject({ repoName, getCsRepoFullName, getCsRepo, getCsReadme }) {
+async function resolveCsProject({
+  repoName,
+  origin,
+  blogImagesDir,
+  getProjectPage,
+  getCsRepoFullName,
+  getCsRepo,
+  getCsReadme,
+}) {
   const fullName = getCsRepoFullName(repoName);
   if (!fullName) return null;
 
@@ -291,6 +299,24 @@ async function resolveCsProject({ repoName, getCsRepoFullName, getCsRepo, getCsR
   ]);
 
   if (!repo?.name) return null;
+
+  const page = getProjectPage?.(repo.name);
+  if (page) {
+    const { meta, content } = page;
+    const cover = meta.cover
+      ? /^https?:\/\//i.test(meta.cover)
+        ? meta.cover
+        : blogImageUrl({ file: meta.cover, origin, blogImagesDir })
+      : null;
+    return {
+      title: meta.title || readme?.title || prettyRepoName(repo.name),
+      description: truncate(meta.tagline || repo.description) || SITES.cs.description,
+      image: cover || `https://opengraph.githubassets.com/1/${fullName}`,
+      type: 'article',
+      tags: meta.stack.slice(0, 8),
+      bodyText: stripMarkdown(content).slice(0, 4000),
+    };
+  }
 
   return {
     title: readme?.title || prettyRepoName(repo.name),
@@ -480,6 +506,9 @@ export function createOgHandler(deps) {
           resolved = await withTimeout(
             resolveCsProject({
               repoName: slug,
+              origin,
+              blogImagesDir: deps.blogImagesDir,
+              getProjectPage: deps.getProjectPage,
               getCsRepo: deps.getCsRepo,
               getCsReadme: deps.getCsReadme,
               getCsRepoFullName: deps.getCsRepoFullName,
