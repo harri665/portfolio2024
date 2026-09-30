@@ -2,6 +2,7 @@
   "enabled": true,
   "preserveListedOrder": true,
   "repoNames": [
+    "relight",
     "MPM",
     "OpenGL-Star-Simulation",
     "MadixOutdoors3DWebsite",
