@@ -5,10 +5,11 @@ import * as THREE from 'three';
 
 import ErrorBoundary from '../ErrorBoundary';
 import Caustics from './Caustics';
+import PaintedPage from '../Glass/PaintedPage';
 import { CoverBackdrop, DraftingGrid } from './ProjectBackdrops';
 import LiquidGlassPass from './LiquidGlassPass';
 import RelightBackdrop from './RelightBackdrop';
-import useCardLights from './useCardLights';
+import useCardLights, { CARD_SELECTOR } from './useCardLights';
 
 // type: 'torusKnot',
 // args: [1, 0.4, 512, 64, 2, 3],
@@ -113,15 +114,21 @@ export default function DistortedTorusScene({
   onDrip,
   // 'knot' shows the preset's shape; the CS home page swaps it for 'relight'
   // (falling back to the knot and its drip if that can't run), the project
-  // pages for 'grid' (with an `accent` colour), 'cover' (with an `image` URL)
-  // or 'caustics'
+  // pages for 'grid', 'cover' (with an `image` URL)
+  // or 'caustics', and the glass showcase for 'page' (the page's own
+  // content; see PaintedPage)
   backdrop = 'knot',
-  accent,
   image,
   glass,
   // Scroll with the page and move back over the viewport each frame (see
   // ScrollFollow); the container must sit at the top of a scrolling box
   followScroll = false,
+  // Called once the first frame is on screen, so a poster standing in for the
+  // scene can fade out (Prism.js)
+  onFirstFrame,
+  // Where the clock starts (seconds). A scene taking over from a poster
+  // starts where the poster was captured, past the knot's intro.
+  startAt = 0,
 }) {
   const layer = useRef(null);
   const preset = SCENE_PRESETS[variant] || SCENE_PRESETS.art;
@@ -131,7 +138,13 @@ export default function DistortedTorusScene({
     () => window.matchMedia?.('(max-width: 768px), (pointer: coarse)').matches ?? false,
     []
   );
-  const maxDpr = compact && !glass?.textSelector ? 1 : 1.5;
+  // `glass.maxDpr` and `glass.blurTaps` let a page trade sharpness for speed
+  // `glass.glassOnly` draws only the panes, transparent elsewhere
+  const { maxDpr: glassDpr, blurTaps: glassTaps, glassOnly: onlyGlass, ...passProps } = glass || {};
+  const maxDpr = glassDpr ?? (compact && !glass?.textSelector ? 1 : 1.5);
+  // Nothing in the drafting grid moves on its own, so it draws only while
+  // something changes (Settle)
+  const settles = backdrop === 'grid';
   // Shared between the drip driver, the knot, and the liquid each frame
   const dripState = useRef(null);
   if (!dripState.current) {
@@ -160,10 +173,13 @@ export default function DistortedTorusScene({
           frameloop="never"
           onCreated={({ clock }) => {
             clock.autoStart = false;
+            clock.elapsedTime = startAt;
           }}
-          style={{ width: '100%', height: '100%' }}
+          // never in the way of the page, which it can sit over (the glass
+          // showcase); nothing in it takes the pointer
+          style={{ width: '100%', height: '100%', pointerEvents: 'none' }}
         >
-          <AfterMotion />
+          <AfterMotion settle={settles} onFirstFrame={onFirstFrame} startAt={startAt} />
           {/* First, so every frame callback sees the canvas over the viewport */}
           {followScroll && <ScrollFollow layer={layer} />}
           <ambientLight intensity={preset.ambientLightIntensity} color="#ffffff" />
@@ -192,10 +208,12 @@ export default function DistortedTorusScene({
               onFail={() => setRelightFailed(true)}
               onDpr={setRelightDpr}
             />
+          ) : backdrop === 'page' ? (
+            <PaintedPage />
           ) : backdrop === 'caustics' ? (
             <Caustics lens={LENSES[lens]} />
           ) : backdrop === 'grid' ? (
-            <DraftingGrid lens={LENSES[lens]} accent={accent} />
+            <DraftingGrid />
           ) : backdrop === 'cover' ? (
             <CoverBackdrop image={image} />
           ) : (
@@ -208,7 +226,14 @@ export default function DistortedTorusScene({
           {drip && !relight && <LiquidDrip lens={LENSES[lens]} state={dripState.current} />}
 
           {/* the relit room shows on a fixed layer of its own, under the glass */}
-          {glass && <LiquidGlassPass {...glass} glassOnly={relight} blurTaps={compact ? 6 : 12} />}
+          {glass && (
+            <LiquidGlassPass
+              {...passProps}
+              glassOnly={relight || Boolean(onlyGlass)}
+              // phones keep to a few samples whatever the page asks for
+              blurTaps={compact ? Math.min(glassTaps ?? 6, 8) : glassTaps ?? 12}
+            />
+          )}
         </Canvas>
       </ErrorBoundary>
     </div>
@@ -218,18 +243,58 @@ export default function DistortedTorusScene({
 // Renders each frame after framer-motion has moved the page's cards. The
 // glass reads where the cards are, so on R3F's own loop (which can run first)
 // it drew them where they were a frame ago, trailing any card in motion.
-// The clock counts seconds from mount, as R3F's would.
-function AfterMotion() {
+// The clock counts seconds from mount, as R3F's would, plus `startAt`. While
+// a poster is captured (perf/posters.mjs sets window.__sceneStill) it stays
+// at `startAt`, so the still is the frame a live scene starts on.
+// With `settle`, for a backdrop that never moves on its own, a frame is drawn
+// only while something it depends on is changing (scroll, the viewport, the
+// glass panes' boxes, which pane is hovered) and for a moment after, so the
+// pane lights finish fading; otherwise the GPU is left alone.
+const SETTLE_MS = 900;
+
+function AfterMotion({ settle = false, onFirstFrame, startAt = 0 }) {
   const advance = useThree((state) => state.advance);
+  const firstFrame = useRef(onFirstFrame);
+  firstFrame.current = onFirstFrame;
+  const drawn = useRef(false);
 
   useEffect(() => {
     const start = performance.now();
-    const tick = ({ timestamp }) => advance(Math.max(0, (timestamp - start) / 1000));
+    let last = '';
+    let busyUntil = start + SETTLE_MS;
+    const tick = ({ timestamp }) => {
+      if (settle) {
+        const now = sceneState();
+        if (now !== last) {
+          last = now;
+          busyUntil = timestamp + SETTLE_MS;
+        }
+        if (timestamp > busyUntil) {
+          return;
+        }
+      }
+      const elapsed = window.__sceneStill ? 0 : Math.max(0, (timestamp - start) / 1000);
+      advance(startAt + elapsed);
+      if (!drawn.current) {
+        drawn.current = true;
+        firstFrame.current?.();
+      }
+    };
     frame.postRender(tick, true);
     return () => cancelFrame(tick);
-  }, [advance]);
+  }, [advance, settle, startAt]);
 
   return null;
+}
+
+// Everything a settled backdrop's frame depends on, as one comparable string
+function sceneState() {
+  let state = `${window.scrollY}|${window.innerWidth}x${window.innerHeight}`;
+  document.querySelectorAll(CARD_SELECTOR).forEach((el) => {
+    const r = el.getBoundingClientRect();
+    state += `|${r.left},${r.top},${r.width},${r.height}${el.matches(':hover') ? 'h' : ''}`;
+  });
+  return state;
 }
 
 // A fixed canvas lags the page on phones (iOS most of all): the browser

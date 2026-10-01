@@ -1,7 +1,7 @@
 # Performance test
 
 Measures every page of the four sites (hub, CS, Art, Blog). It finds pages by
-following the links on each home page, plus `/contact` and `/colophon`.
+following the links on each home page, plus `/contact`, `/colophon` and `/glass`.
 
 - **Load, on every page:** TTFB, FCP, LCP, CLS, TBT, bytes transferred (all and
   JS only), request count, JS heap and main-thread time.
@@ -51,3 +51,13 @@ The GPU can't be throttled, only replaced. The `low-end` and `mobile-weak`
 profiles render WebGL on the CPU (SwiftShader) to stand in for a weak GPU.
 Results are saved to `results/` (not committed). Baselines are specific to
 the machine they were measured on.
+
+## Posters
+
+The home pages paint a still of their 3D scene first and start the live scene
+once the page has loaded and the visitor moves, scrolls or types (or 3.5 s
+after load). `posters.mjs` captures those stills into `client/public/posters`
+from the dev server, so re-run it whenever a home page's scene changes:
+
+    node posters.mjs                # every poster
+    node posters.mjs --sites cs     # one site's

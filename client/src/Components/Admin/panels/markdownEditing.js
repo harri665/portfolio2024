@@ -7,6 +7,7 @@ import rehypeKatex from 'rehype-katex';
 import rehypeSlug from 'rehype-slug';
 import rehypeRaw from 'rehype-raw';
 import 'katex/dist/katex.min.css';
+import 'highlight.js/styles/atom-one-dark.css';
 
 import { apiUrl, getApiBaseUrl } from '../../../utils/api';
 import { remarkWikiLinks } from '../../Blog/plugins/remarkWikiLinks';

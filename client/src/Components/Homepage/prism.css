@@ -61,6 +61,24 @@
   backdrop-filter: blur(10px) saturate(140%);
 }
 
+/* The CS project page's sidebar and document. By default they're two cards,
+   filled rather than blurred: a backdrop blur over a page-length panel and a
+   live canvas is redrawn on every frame of a scroll. Where the WebGL pass
+   runs (<html data-glass-pass>), it draws them as one merged piece of glass
+   (data-glass-merge), frost, tint and rim included, so CSS keeps only the
+   shadow underneath. The page behind is dark, so no text shadow either. */
+.liquid-glass.glass-panel {
+  background-color: rgb(var(--surface) / 0.85);
+  text-shadow: none;
+}
+[data-glass-pass] .liquid-glass.glass-panel[data-glass-merge] {
+  background: none;
+  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.3);
+}
+[data-glass-pass] .glass-panel[data-glass-merge] > .liquid-glass-rim {
+  display: none;
+}
+
 /* Specular rim: light catching the top-left and bottom-right edges */
 .liquid-glass-rim {
   position: absolute;
@@ -105,6 +123,33 @@
 .liquid-glass-sheen.liquid-glass-over,
 .liquid-glass-rim.liquid-glass-over {
   z-index: 4;
+}
+
+/* The hero's headline, subtitle and buttons rise into place (PrismHero).
+   It's a CSS animation, so the compositor runs it: it plays on time even
+   while the main thread is busy starting the page, where framer-motion's
+   would stall half-faded. It starts barely visible rather than invisible, as
+   Chrome doesn't count a fully transparent element as painted, so the
+   headline counts as the page's largest paint from its first frame. */
+@keyframes hero-rise {
+  from {
+    opacity: 0.01;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.hero-rise {
+  animation: hero-rise 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-rise {
+    animation: none;
+  }
 }
 
 /* Glass headline: LiquidGlassPass draws the glyphs as glass in the canvas
