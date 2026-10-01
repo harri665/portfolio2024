@@ -5,10 +5,11 @@ import * as THREE from 'three';
 
 import ErrorBoundary from '../ErrorBoundary';
 import Caustics from './Caustics';
+import PaintedPage from '../Glass/PaintedPage';
 import { CoverBackdrop, DraftingGrid } from './ProjectBackdrops';
 import LiquidGlassPass from './LiquidGlassPass';
 import RelightBackdrop from './RelightBackdrop';
-import useCardLights from './useCardLights';
+import useCardLights, { CARD_SELECTOR } from './useCardLights';
 
 // type: 'torusKnot',
 // args: [1, 0.4, 512, 64, 2, 3],
@@ -107,15 +108,12 @@ export default function DistortedTorusScene({
   lens = null,
   drip = false,
   onDrip,
-  // 'knot' shows the preset's shape; the CS home page swaps it for 'relight'
-  // (falling back to the knot and its drip if that can't run), the project
-  // pages for 'grid' (with an `accent` colour), 'cover' (with an `image` URL)
-  // or 'caustics'
   backdrop = 'knot',
-  accent,
   image,
   glass,
   followScroll = false,
+  onFirstFrame,
+  startAt = 0,
 }) {
   const layer = useRef(null);
   const preset = SCENE_PRESETS[variant] || SCENE_PRESETS.art;
@@ -124,7 +122,9 @@ export default function DistortedTorusScene({
     () => window.matchMedia?.('(max-width: 768px), (pointer: coarse)').matches ?? false,
     []
   );
-  const maxDpr = compact && !glass?.textSelector ? 1 : 1.5;
+  const { maxDpr: glassDpr, blurTaps: glassTaps, glassOnly: onlyGlass, ...passProps } = glass || {};
+  const maxDpr = glassDpr ?? (compact && !glass?.textSelector ? 1 : 1.5);
+  const settles = backdrop === 'grid';
   const dripState = useRef(null);
   if (!dripState.current) {
     dripState.current = { progress: 0, rect: null };
@@ -145,10 +145,11 @@ export default function DistortedTorusScene({
           frameloop="never"
           onCreated={({ clock }) => {
             clock.autoStart = false;
+            clock.elapsedTime = startAt;
           }}
-          style={{ width: '100%', height: '100%' }}
+          style={{ width: '100%', height: '100%', pointerEvents: 'none' }}
         >
-          <AfterMotion />
+          <AfterMotion settle={settles} onFirstFrame={onFirstFrame} startAt={startAt} />
           // has to be first so every frame callback sees the canvas over the viewport
           {followScroll && <ScrollFollow layer={layer} />}
           <ambientLight intensity={preset.ambientLightIntensity} color="#ffffff" />
@@ -176,10 +177,12 @@ export default function DistortedTorusScene({
               onFail={() => setRelightFailed(true)}
               onDpr={setRelightDpr}
             />
+          ) : backdrop === 'page' ? (
+            <PaintedPage />
           ) : backdrop === 'caustics' ? (
             <Caustics lens={LENSES[lens]} />
           ) : backdrop === 'grid' ? (
-            <DraftingGrid lens={LENSES[lens]} accent={accent} />
+            <DraftingGrid />
           ) : backdrop === 'cover' ? (
             <CoverBackdrop image={image} />
           ) : (
@@ -191,28 +194,65 @@ export default function DistortedTorusScene({
           )}
           {drip && !relight && <LiquidDrip lens={LENSES[lens]} state={dripState.current} />}
 
-          {glass && <LiquidGlassPass {...glass} glassOnly={relight} blurTaps={compact ? 6 : 12} />}
+          {glass && (
+            <LiquidGlassPass
+              {...passProps}
+              glassOnly={relight || Boolean(onlyGlass)}
+              blurTaps={compact ? Math.min(glassTaps ?? 6, 8) : glassTaps ?? 12}
+            />
+          )}
         </Canvas>
       </ErrorBoundary>
     </div>
   );
 }
 
-// Renders each frame after framer-motion has moved the page's cards. The
-// glass reads where the cards are, so on R3F's own loop (which can run first)
-// it drew them where they were a frame ago, trailing any card in motion.
-// The clock counts seconds from mount, as R3F's would.
-function AfterMotion() {
+// drives frames after framer-motion moves the cards. on r3f's own loop the glass
+// drew the cards where they were a frame ago
+const SETTLE_MS = 900;
+
+function AfterMotion({ settle = false, onFirstFrame, startAt = 0 }) {
   const advance = useThree((state) => state.advance);
+  const firstFrame = useRef(onFirstFrame);
+  firstFrame.current = onFirstFrame;
+  const drawn = useRef(false);
 
   useEffect(() => {
     const start = performance.now();
-    const tick = ({ timestamp }) => advance(Math.max(0, (timestamp - start) / 1000));
+    let last = '';
+    let busyUntil = start + SETTLE_MS;
+    const tick = ({ timestamp }) => {
+      if (settle) {
+        const now = sceneState();
+        if (now !== last) {
+          last = now;
+          busyUntil = timestamp + SETTLE_MS;
+        }
+        if (timestamp > busyUntil) {
+          return;
+        }
+      }
+      const elapsed = window.__sceneStill ? 0 : Math.max(0, (timestamp - start) / 1000);
+      advance(startAt + elapsed);
+      if (!drawn.current) {
+        drawn.current = true;
+        firstFrame.current?.();
+      }
+    };
     frame.postRender(tick, true);
     return () => cancelFrame(tick);
-  }, [advance]);
+  }, [advance, settle, startAt]);
 
   return null;
+}
+
+function sceneState() {
+  let state = `${window.scrollY}|${window.innerWidth}x${window.innerHeight}`;
+  document.querySelectorAll(CARD_SELECTOR).forEach((el) => {
+    const r = el.getBoundingClientRect();
+    state += `|${r.left},${r.top},${r.width},${r.height}${el.matches(':hover') ? 'h' : ''}`;
+  });
+  return state;
 }
 
 // a fixed canvas lags the page on phones (iOS especially) because the browser scrolls

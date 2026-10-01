@@ -1,8 +1,21 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 
-import DistortedTorusScene from './DistortedTorusScene';
+import ErrorBoundary from '../ErrorBoundary';
+import { useRelightStatus } from './relight/status';
+import useSceneStart, { afterLoad } from './sceneStart';
 import './prism.css';
+
+// load the scene chunk right after page load at high priority. tried webpackPrefetch but
+// that's idle priority (last on slow connections) and the import fetched it a second time
+let sceneModule = null;
+const loadScene = () => {
+  sceneModule =
+    sceneModule ||
+    import(/* webpackChunkName: "scene", webpackFetchPriority: "high" */ './DistortedTorusScene');
+  return sceneModule;
+};
+const DistortedTorusScene = lazy(loadScene);
 
 const TONES = {
   hub: { scene: 'opacity-60 sm:opacity-70', veil: '' },
@@ -11,13 +24,10 @@ const TONES = {
   detail: { scene: 'opacity-60 sm:opacity-70', veil: 'bg-bg/20' },
 };
 
-// What sits behind each site's project pages, under the glass panels:
-//   'grid'     - a still drafting dot grid, tinted by the repo's language (CS)
-//   'cover'    - the project's own cover image, blurred and dimmed (Art),
-//                drawn in CSS rather than WebGL (CoverFill)
-//   'caustics' - slow light patterns
-//   'torus'    - the site's knot, as on the home pages
 const DETAIL_BACKDROPS = { cs: 'grid', art: 'cover' };
+
+// phones/tablets keep the css frost, the pass is too heavy there
+export const PANE_GLASS_QUERY = '(min-width: 1024px) and (pointer: fine)';
 
 const SCENES = {
   hub: { variant: 'hub', camera: [0, 0, 4.1] },
@@ -25,7 +35,11 @@ const SCENES = {
   art: { variant: 'art', camera: [0, 0, 5] },
 };
 
-export function PrismBackdrop({ lens = 'hub', tone = 'page', accent, image }) {
+// posters come from perf/posters.mjs, captured POSTER_TIME in so the live scene starts on the same frame
+const POSTERS = { hub: 'hub', cs: 'cs', art: 'art' };
+const POSTER_TIME = 2;
+
+export function PrismBackdrop({ lens = 'hub', tone = 'page', image }) {
   const toneStyle = TONES[tone] || TONES.page;
   const scene = SCENES[lens] || SCENES.hub;
   const glass = lens === 'hub';
@@ -38,6 +52,10 @@ export function PrismBackdrop({ lens = 'hub', tone = 'page', accent, image }) {
   const relight = pageBackdrop === 'relight';
   const detailBackdrop = tone === 'detail' ? DETAIL_BACKDROPS[lens] || 'torus' : 'torus';
   const flat = detailBackdrop !== 'torus';
+  const paneGlass = useMemo(
+    () => detailBackdrop === 'grid' && (window.matchMedia?.(PANE_GLASS_QUERY).matches ?? false),
+    [detailBackdrop]
+  );
   const overlaysRef = useRef(null);
   const handleDrip = useCallback((progress) => {
     if (overlaysRef.current) {
@@ -63,29 +81,37 @@ export function PrismBackdrop({ lens = 'hub', tone = 'page', accent, image }) {
         data-backdrop-layer
         className={`pointer-events-none absolute inset-0 z-0 overflow-hidden ${glass || flat || relight ? '' : toneStyle.scene}`}
       >
-        <DistortedTorusScene
+        <Scene
+          poster={tone === 'hub' || tone === 'page' ? POSTERS[lens] : null}
           followScroll
           variant={scene.variant}
           lens={lens === 'hub' ? null : lens}
           drip={drip}
           onDrip={drip ? handleDrip : undefined}
           backdrop={flat ? detailBackdrop : pageBackdrop}
-          accent={accent}
           image={image}
           glass={
             glass
               ? { selector: '[data-liquid-glass]', textSelector: '[data-liquid-glass-text]' }
               : drip
-                ? { selector: '[data-liquid-glass]', imageSelector: '[data-glass-image]', shade: false }
-                : // project pages: CSS glass only; the WebGL bevel bent the
-                  // edges of their images and videos and was heavy on phones
-                  undefined
+                ? {
+                    selector: '[data-liquid-glass]',
+                    imageSelector: '[data-glass-image]',
+                    shade: false,
+                    ...(lens === 'cs' ? CS_GLASS : null),
+                  }
+                : paneGlass
+                  ? { ...PANE_GLASS, selector: '[data-liquid-glass]:not([data-glass-side])' }
+                  : // no webgl glass on other project pages, the bevel bent their images and videos
+                    undefined
           }
           // 100vh is the large viewport on phones so this doesn't resize when the toolbar collapses
           className="absolute inset-x-0 top-0 h-screen"
           cameraPosition={scene.camera}
         />
       </div>
+
+      {paneGlass && <GlassStrip />}
 
       <div
         ref={overlaysRef}
@@ -99,6 +125,141 @@ export function PrismBackdrop({ lens = 'hub', tone = 'page', accent, image }) {
         {toneStyle.veil && <div className={`absolute inset-0 ${toneStyle.veil}`} />}
       </div>
     </>
+  );
+}
+
+// The 3D scene, once it may start (useSceneStart), over a still of it
+// (`poster`, a name in public/posters). The still sits under the canvas, so
+// glass the scene draws (the hub's and CS's headlines) shows from its first
+// frame. A knot's first frame is its still, so the still goes as soon as it's
+// drawn: faded, it would show through the canvas behind the moving knot. The
+// relit room fades in over its still once its network is running. A scene
+// without a poster fades in.
+function Scene({ poster, className, ...props }) {
+  const started = useSceneStart();
+  const [drawn, setDrawn] = useState(false);
+  const [posterGone, setPosterGone] = useState(false);
+  const handleFirstFrame = useCallback(() => setDrawn(true), []);
+  const relight = useRelightStatus();
+  const room = props.backdrop === 'relight';
+  const shown = room ? relight.phase === 'running' || relight.phase === 'failed' : drawn;
+
+  useEffect(
+    () =>
+      afterLoad(() => {
+        loadScene().catch(() => {});
+      }),
+    []
+  );
+
+  return (
+    <>
+      {poster && !posterGone && (room || !drawn) && (
+        <picture>
+          <source media="(max-width: 768px)" srcSet={posterUrl(poster, 'tall')} />
+          <img
+            src={posterUrl(poster, 'wide')}
+            alt=""
+            fetchpriority="high"
+            decoding="async"
+            className={`${className} h-screen w-full object-cover transition-opacity duration-700`}
+            style={{ opacity: shown ? 0 : 1 }}
+            onTransitionEnd={() => setPosterGone(true)}
+          />
+        </picture>
+      )}
+      {started && (
+        <div
+          className="absolute inset-0 transition-opacity duration-700"
+          style={{ opacity: poster || shown ? 1 : 0 }}
+        >
+          <ErrorBoundary name="scene">
+            <Suspense fallback={null}>
+              <DistortedTorusScene
+                {...props}
+                className={className}
+                onFirstFrame={handleFirstFrame}
+                startAt={poster && !room ? POSTER_TIME : 0}
+              />
+            </Suspense>
+          </ErrorBoundary>
+        </div>
+      )}
+    </>
+  );
+}
+
+const posterUrl = (name, shape) => `${process.env.PUBLIC_URL}/posters/${name}-${shape}.webp`;
+
+const CS_GLASS = {
+  textSelector: '[data-liquid-glass-text]',
+  frost: 24,
+  blurTaps: 24,
+  haze: 0.06,
+  textFrost: 5,
+  textLens: 0.2,
+  textTint: [0.82, 0.9, 1],
+  hover: { frost: 2, split: 3, dim: 0.18 },
+};
+
+// 1x with a lighter blur, it covers most of the screen and you can't tell under that much frost
+const PANE_GLASS = { shade: false, frost: 9, maxDpr: 1, blurTaps: 6 };
+
+const STRIP_REACH = 40;
+
+// the sticky sidebar card trailed the scroll on the main canvas, so it gets its own
+// fixed strip canvas. browser keeps fixed + sticky in step
+function GlassStrip() {
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const strip = ref.current;
+    let frame = 0;
+
+    const place = () => {
+      frame = 0;
+      const card = document.querySelector('[data-glass-side]');
+      const sheet = document.querySelector('[data-glass-merge]:not([data-glass-side])');
+      if (!card || !sheet) {
+        strip.style.display = 'none';
+        return;
+      }
+      const left = card.getBoundingClientRect().left - 8;
+      const right = sheet.getBoundingClientRect().left + STRIP_REACH;
+      strip.style.display = '';
+      strip.style.left = `${left}px`;
+      strip.style.width = `${right - left}px`;
+    };
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(place);
+    };
+
+    const mutations = new MutationObserver(schedule);
+    mutations.observe(document.body, { childList: true, subtree: true });
+    window.addEventListener('resize', schedule);
+    place();
+    return () => {
+      mutations.disconnect();
+      window.removeEventListener('resize', schedule);
+      cancelAnimationFrame(frame);
+    };
+  }, []);
+
+  return (
+    <div
+      ref={ref}
+      aria-hidden="true"
+      className="pointer-events-none fixed inset-y-0 z-0 overflow-hidden"
+      style={{ display: 'none' }}
+    >
+      <Scene
+        variant="cs"
+        lens="cs"
+        backdrop="grid"
+        glass={{ ...PANE_GLASS, selector: '[data-glass-merge]' }}
+        className="absolute -inset-8"
+      />
+    </div>
   );
 }
 
@@ -166,40 +327,30 @@ export function PrismHero({
             : 'min-h-[64vh] pb-12 pt-32',
         ].join(' ')}
       >
-        <motion.h1
+        <h1
           data-liquid-glass-text={glassTitle || undefined}
-          initial={{ opacity: 0, y: 14 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6 }}
           className={[
-            'max-w-4xl leading-none tracking-tight text-ink',
+            'hero-rise max-w-4xl leading-none tracking-tight text-ink',
             left ? 'text-6xl sm:text-8xl lg:text-9xl' : 'text-4xl sm:text-6xl lg:text-7xl',
             glassTitle ? 'prism-text font-bold' : 'font-semibold',
           ].join(' ')}
         >
           {title}
-        </motion.h1>
+        </h1>
 
         {subtitle && (
-          <motion.p
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.08, duration: 0.6 }}
-            className="mt-5 max-w-2xl text-base leading-relaxed text-ink-2 sm:text-lg"
+          <p
+            className="hero-rise mt-5 max-w-2xl text-base leading-relaxed text-ink-2 sm:text-lg"
+            style={{ animationDelay: '80ms' }}
           >
             {subtitle}
-          </motion.p>
+          </p>
         )}
 
         {children && (
-          <motion.div
-            initial={{ opacity: 0, y: 18 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.18, duration: 0.6 }}
-            className="w-full"
-          >
+          <div className="hero-rise w-full" style={{ animationDelay: '180ms' }}>
             {children}
-          </motion.div>
+          </div>
         )}
       </header>
     </div>

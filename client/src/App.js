@@ -1,20 +1,28 @@
-import React, { useEffect } from 'react';
+import React, { Suspense, lazy, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom';
 import './App.css';
-import 'highlight.js/styles/atom-one-dark.css';
 
+// home pages ship with the app (splitting them adds a request before first paint), everything
+// else is lazy so a home page doesn't pull in the markdown renderer, katex, video player, admin
 import ArtHomePage from './Components/Homepage/ArtHomePage';
 import RootHomePage from './Components/Homepage/RootHomePage';
 import CSHomePage from './Components/Homepage/CSHomePage';
-import ProjectDetails from './Components/ProjectDetails/ProjectDetails';
-import CSProjectDetails from './Components/ProjectDetails/CSProjectDetails';
-import AdminApp from './Components/Admin/AdminApp';
-import ContactPage from './Components/Contact/ContactPage';
-import ColophonPage from './Components/Colophon/ColophonPage';
 import BlogIndex from './Components/Blog/BlogIndex';
-import BlogPost from './Components/Blog/BlogPost';
 import { apiUrl } from './utils/api';
 import { detectSiteMode, SITE_MODES } from './utils/siteMode';
+
+const ProjectDetails = lazy(() => import('./Components/ProjectDetails/ProjectDetails'));
+const CSProjectDetails = lazy(() => import('./Components/ProjectDetails/CSProjectDetails'));
+const AdminApp = lazy(() => import('./Components/Admin/AdminApp'));
+const ContactPage = lazy(() => import('./Components/Contact/ContactPage'));
+const ColophonPage = lazy(() => import('./Components/Colophon/ColophonPage'));
+const GlassPage = lazy(() => import('./Components/Glass/GlassPage'));
+const BlogPost = lazy(() => import('./Components/Blog/BlogPost'));
+
+// screen tall so the footer doesn't flash up
+function PageFallback() {
+  return <div className="min-h-screen bg-bg" />;
+}
 
 // old admin urls
 const LEGACY_ADMIN_REDIRECTS = [
@@ -66,24 +74,27 @@ function MainRoutes({ siteMode }) {
   };
 
   return (
-    <Routes>
-      <Route
-        path="/"
-        element={homePageByMode[siteMode] || <RootHomePage />}
-      />
+    <Suspense fallback={<PageFallback />}>
+      <Routes>
+        <Route
+          path="/"
+          element={homePageByMode[siteMode] || <RootHomePage />}
+        />
 
-      <Route path="/admin/*" element={<AdminApp />} />
-      {LEGACY_ADMIN_REDIRECTS.map(([from, to]) => (
-        <Route key={from} path={from} element={<Navigate to={to} replace />} />
-      ))}
-      <Route path="/blog-admin/edit/:slug" element={<LegacyBlogEditRedirect />} />
+        <Route path="/admin/*" element={<AdminApp />} />
+        {LEGACY_ADMIN_REDIRECTS.map(([from, to]) => (
+          <Route key={from} path={from} element={<Navigate to={to} replace />} />
+        ))}
+        <Route path="/blog-admin/edit/:slug" element={<LegacyBlogEditRedirect />} />
 
-      {siteMode === SITE_MODES.ART && <Route path="/:identifier" element={<ProjectDetails />} />}
-      {siteMode === SITE_MODES.CS && <Route path="/:repoName" element={<CSProjectDetails />} />}
-      {siteMode === SITE_MODES.BLOG && <Route path="/:slug" element={<BlogPost />} />}
-      <Route path="/contact" element={<ContactPage />} />
-      <Route path="/colophon" element={<ColophonPage />} />
-    </Routes>
+        {siteMode === SITE_MODES.ART && <Route path="/:identifier" element={<ProjectDetails />} />}
+        {siteMode === SITE_MODES.CS && <Route path="/:repoName" element={<CSProjectDetails />} />}
+        {siteMode === SITE_MODES.BLOG && <Route path="/:slug" element={<BlogPost />} />}
+        <Route path="/contact" element={<ContactPage />} />
+        <Route path="/colophon" element={<ColophonPage />} />
+        <Route path="/glass" element={<GlassPage />} />
+      </Routes>
+    </Suspense>
   );
 }
 

@@ -48,6 +48,20 @@
   backdrop-filter: blur(10px) saturate(140%);
 }
 
+/* filled not blurred: backdrop blur over a page-length panel + live canvas repaints
+every scroll frame. with data-glass-pass the webgl pass draws it instead */
+.liquid-glass.glass-panel {
+  background-color: rgb(var(--surface) / 0.85);
+  text-shadow: none;
+}
+[data-glass-pass] .liquid-glass.glass-panel[data-glass-merge] {
+  background: none;
+  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.3);
+}
+[data-glass-pass] .glass-panel[data-glass-merge] > .liquid-glass-rim {
+  display: none;
+}
+
 .liquid-glass-rim {
   position: absolute;
   inset: 0;
@@ -88,6 +102,29 @@
 .liquid-glass-sheen.liquid-glass-over,
 .liquid-glass-rim.liquid-glass-over {
   z-index: 4;
+}
+
+/* css animation not framer-motion so it runs on the compositor while the main thread is busy.
+starts at barely visible because chrome doesn't count opacity 0 as painted (LCP) */
+@keyframes hero-rise {
+  from {
+    opacity: 0.01;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.hero-rise {
+  animation: hero-rise 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-rise {
+    animation: none;
+  }
 }
 
 .prism-text[data-glass-ready] {
