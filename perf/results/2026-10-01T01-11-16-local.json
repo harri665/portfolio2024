@@ -1,0 +1,283 @@
+{
+  "meta": {
+    "date": "2026-10-01T01:11:16.212Z",
+    "commit": "ae74bde+changes",
+    "branch": "master",
+    "target": "local",
+    "origins": {
+      "root": "http://localhost:3000",
+      "cs": "http://cs.localhost:3000",
+      "art": "http://art.localhost:3000",
+      "blog": "http://blog.localhost:3000"
+    },
+    "profiles": {
+      "desktop": {
+        "description": "1440x900 at 1x, this machine at full speed",
+        "context": {
+          "viewport": {
+            "width": 1440,
+            "height": 900
+          },
+          "deviceScaleFactor": 1
+        },
+        "gpuName": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3080 (0x00002206) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+      }
+    },
+    "runs": 3,
+    "duration": 5,
+    "headed": true,
+    "chrome": "154.0.8037.58"
+  },
+  "pages": [
+    {
+      "profile": "desktop",
+      "site": "cs",
+      "path": "/relight",
+      "url": "http://cs.localhost:3000/relight",
+      "load": {
+        "ttfb": 10,
+        "fcp": 564,
+        "lcp": 944,
+        "dcl": 508.5,
+        "loaded": 510.8,
+        "cls": 0.324,
+        "tbt": 169,
+        "longTasks": 3,
+        "requests": 15,
+        "kb": 2942,
+        "jsKb": 2194,
+        "relightKb": 1,
+        "cpuMs": 841,
+        "scriptMs": 637,
+        "heapMb": 20.2
+      },
+      "frames": {
+        "pointer": {
+          "frames": 1199,
+          "fps": 239.8,
+          "p50": 4.2,
+          "p95": 4.3,
+          "p99": 4.3,
+          "max": 8.3,
+          "latePct": 0,
+          "longTaskMs": 0,
+          "busyPct": 10.7
+        },
+        "idle": {
+          "frames": 1200,
+          "fps": 240,
+          "p50": 4.2,
+          "p95": 4.3,
+          "p99": 4.3,
+          "max": 4.8,
+          "latePct": 0,
+          "longTaskMs": 0,
+          "busyPct": 3.2
+        },
+        "scroll": {
+          "frames": 1185,
+          "fps": 237,
+          "p50": 4.2,
+          "p95": 4.3,
+          "p99": 4.3,
+          "max": 58.5,
+          "latePct": 0.1,
+          "longTaskMs": 0,
+          "busyPct": 15
+        }
+      },
+      "three": {
+        "canvases": 1,
+        "size": "1425x900",
+        "dpr": 1,
+        "relight": null
+      },
+      "errors": [],
+      "runs": [
+        {
+          "load": {
+            "ttfb": 10.1,
+            "fcp": 564,
+            "lcp": 1096,
+            "dcl": 522.4,
+            "loaded": 524.4,
+            "cls": 0.324,
+            "tbt": 264,
+            "longTasks": 3,
+            "requests": 15,
+            "kb": 2942,
+            "jsKb": 2194,
+            "relightKb": 1,
+            "cpuMs": 886,
+            "scriptMs": 757,
+            "heapMb": 20.2
+          },
+          "errors": [],
+          "frames": {
+            "pointer": {
+              "frames": 1199,
+              "fps": 239.8,
+              "p50": 4.2,
+              "p95": 4.3,
+              "p99": 4.3,
+              "max": 8.3,
+              "latePct": 0,
+              "longTaskMs": 0,
+              "busyPct": 10.7
+            },
+            "idle": {
+              "frames": 1200,
+              "fps": 240,
+              "p50": 4.2,
+              "p95": 4.3,
+              "p99": 4.3,
+              "max": 4.8,
+              "latePct": 0,
+              "longTaskMs": 0,
+              "busyPct": 2.6
+            },
+            "scroll": {
+              "frames": 1185,
+              "fps": 237,
+              "p50": 4.2,
+              "p95": 4.3,
+              "p99": 4.3,
+              "max": 62.4,
+              "latePct": 0.1,
+              "longTaskMs": 0,
+              "busyPct": 15
+            }
+          },
+          "three": {
+            "canvases": 1,
+            "size": "1425x900",
+            "dpr": 1,
+            "relight": null
+          }
+        },
+        {
+          "load": {
+            "ttfb": 10,
+            "fcp": 524,
+            "lcp": 772,
+            "dcl": 482.7,
+            "loaded": 484.6,
+            "cls": 0.324,
+            "tbt": 20,
+            "longTasks": 3,
+            "requests": 15,
+            "kb": 2932,
+            "jsKb": 2194,
+            "relightKb": 1,
+            "cpuMs": 614,
+            "scriptMs": 467,
+            "heapMb": 20.2
+          },
+          "errors": [],
+          "frames": {
+            "pointer": {
+              "frames": 1200,
+              "fps": 240,
+              "p50": 4.2,
+              "p95": 4.3,
+              "p99": 4.3,
+              "max": 4.4,
+              "latePct": 0,
+              "longTaskMs": 0,
+              "busyPct": 8.6
+            },
+            "idle": {
+              "frames": 1200,
+              "fps": 240,
+              "p50": 4.2,
+              "p95": 4.3,
+              "p99": 4.3,
+              "max": 4.4,
+              "latePct": 0,
+              "longTaskMs": 0,
+              "busyPct": 3.2
+            },
+            "scroll": {
+              "frames": 278,
+              "fps": 55.6,
+              "p50": 4.2,
+              "p95": 58.3,
+              "p99": 58.4,
+              "max": 58.5,
+              "latePct": 26.3,
+              "longTaskMs": 0,
+              "busyPct": 6.8
+            }
+          },
+          "three": {
+            "canvases": 1,
+            "size": "1425x900",
+            "dpr": 1,
+            "relight": null
+          }
+        },
+        {
+          "load": {
+            "ttfb": 8.5,
+            "fcp": 564,
+            "lcp": 944,
+            "dcl": 508.5,
+            "loaded": 510.8,
+            "cls": 0.324,
+            "tbt": 169,
+            "longTasks": 3,
+            "requests": 15,
+            "kb": 2942,
+            "jsKb": 2194,
+            "relightKb": 1,
+            "cpuMs": 841,
+            "scriptMs": 637,
+            "heapMb": 17.3
+          },
+          "errors": [],
+          "frames": {
+            "pointer": {
+              "frames": 1197,
+              "fps": 239.4,
+              "p50": 4.2,
+              "p95": 4.3,
+              "p99": 4.3,
+              "max": 16.7,
+              "latePct": 0,
+              "longTaskMs": 0,
+              "busyPct": 13.8
+            },
+            "idle": {
+              "frames": 1110,
+              "fps": 221.8,
+              "p50": 4.2,
+              "p95": 8.2,
+              "p99": 8.3,
+              "max": 8.4,
+              "latePct": 0,
+              "longTaskMs": 0,
+              "busyPct": 3.3
+            },
+            "scroll": {
+              "frames": 1199,
+              "fps": 239.8,
+              "p50": 4.2,
+              "p95": 4.3,
+              "p99": 4.3,
+              "max": 8.3,
+              "latePct": 0,
+              "longTaskMs": 0,
+              "busyPct": 19.2
+            }
+          },
+          "three": {
+            "canvases": 1,
+            "size": "1425x900",
+            "dpr": 1,
+            "relight": null
+          }
+        }
+      ]
+    }
+  ]
+}

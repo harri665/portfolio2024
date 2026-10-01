@@ -9,7 +9,7 @@ import zlib from 'node:zlib';
 export const SITES = ['root', 'cs', 'art', 'blog'];
 
 // Pages every site has that its home page may not link to
-const FIXED_PAGES = ['/', '/contact', '/colophon'];
+const FIXED_PAGES = ['/', '/contact', '/colophon', '/glass'];
 
 // Never measured: the admin app, and anything that isn't a page
 const SKIP = /^\/(admin|api|p)(\/|$)|^\/(cs|art|blog|pages|comments)-admin|\.[a-z0-9]+$/i;

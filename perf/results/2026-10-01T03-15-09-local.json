@@ -1,0 +1,270 @@
+{
+  "meta": {
+    "date": "2026-10-01T03:15:09.128Z",
+    "commit": "ae74bde+changes",
+    "branch": "master",
+    "target": "local",
+    "origins": {
+      "root": "http://localhost:3000",
+      "cs": "http://cs.localhost:3000",
+      "art": "http://art.localhost:3000",
+      "blog": "http://blog.localhost:3000"
+    },
+    "profiles": {
+      "desktop": {
+        "description": "1440x900 at 1x, this machine at full speed",
+        "context": {
+          "viewport": {
+            "width": 1440,
+            "height": 900
+          },
+          "deviceScaleFactor": 1
+        },
+        "gpuName": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3080 (0x00002206) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+      }
+    },
+    "runs": 2,
+    "duration": 5,
+    "headed": true,
+    "chrome": "154.0.8037.58"
+  },
+  "pages": [
+    {
+      "profile": "desktop",
+      "site": "cs",
+      "path": "/",
+      "url": "http://cs.localhost:3000/",
+      "load": {
+        "ttfb": 5.45,
+        "fcp": 580,
+        "lcp": 838,
+        "dcl": 520.9,
+        "loaded": 523,
+        "cls": 0.017,
+        "tbt": 78,
+        "longTasks": 3,
+        "requests": 24,
+        "kb": 50230.5,
+        "jsKb": 2197,
+        "relightKb": 35922,
+        "cpuMs": 1519.5,
+        "scriptMs": 899,
+        "heapMb": 14.35
+      },
+      "frames": {
+        "pointer": {
+          "frames": 260,
+          "fps": 52,
+          "p50": 20.75,
+          "p95": 25,
+          "p99": 27.1,
+          "max": 29.25,
+          "latePct": 0,
+          "longTaskMs": 0,
+          "busyPct": 9
+        },
+        "idle": {
+          "frames": 1077,
+          "fps": 215.4,
+          "p50": 4.2,
+          "p95": 4.3,
+          "p99": 20.9,
+          "max": 25.1,
+          "latePct": 0,
+          "longTaskMs": 0,
+          "busyPct": 10.55
+        },
+        "scroll": {
+          "frames": 849,
+          "fps": 169.8,
+          "p50": 4.2,
+          "p95": 16.65,
+          "p99": 18.85,
+          "max": 31.25,
+          "latePct": 0.05,
+          "longTaskMs": 0,
+          "busyPct": 17.8
+        },
+        "pointerReturn": {
+          "frames": 403.5,
+          "fps": 80.6,
+          "p50": 12.55,
+          "p95": 16.75,
+          "p99": 18.85,
+          "max": 25.05,
+          "latePct": 0,
+          "longTaskMs": 0,
+          "busyPct": 11.3
+        }
+      },
+      "three": {
+        "canvases": 2,
+        "size": "1425x900 1425x900",
+        "dpr": 1,
+        "relight": {
+          "budget": 23.33,
+          "dpr": 1,
+          "failedDpr": null,
+          "gpu": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3080 (0x00002206) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+        }
+      },
+      "errors": [],
+      "runs": [
+        {
+          "load": {
+            "ttfb": 4.9,
+            "fcp": 572,
+            "lcp": 824,
+            "dcl": 515.9,
+            "loaded": 518,
+            "cls": 0.017,
+            "tbt": 66,
+            "longTasks": 3,
+            "requests": 24,
+            "kb": 50231,
+            "jsKb": 2197,
+            "relightKb": 35922,
+            "cpuMs": 1540,
+            "scriptMs": 900,
+            "heapMb": 14.2
+          },
+          "errors": [],
+          "frames": {
+            "pointer": {
+              "frames": 250,
+              "fps": 50,
+              "p50": 20.8,
+              "p95": 25,
+              "p99": 29.1,
+              "max": 29.2,
+              "latePct": 0,
+              "longTaskMs": 0,
+              "busyPct": 9.3
+            },
+            "idle": {
+              "frames": 1078,
+              "fps": 215.6,
+              "p50": 4.2,
+              "p95": 4.3,
+              "p99": 20.9,
+              "max": 25.1,
+              "latePct": 0,
+              "longTaskMs": 0,
+              "busyPct": 12.1
+            },
+            "scroll": {
+              "frames": 716,
+              "fps": 143.2,
+              "p50": 4.2,
+              "p95": 20.9,
+              "p99": 25.1,
+              "max": 41.6,
+              "latePct": 0.1,
+              "longTaskMs": 0,
+              "busyPct": 16.8
+            },
+            "pointerReturn": {
+              "frames": 294,
+              "fps": 58.7,
+              "p50": 16.7,
+              "p95": 20.9,
+              "p99": 21,
+              "max": 25,
+              "latePct": 0,
+              "longTaskMs": 0,
+              "busyPct": 9.8
+            }
+          },
+          "three": {
+            "canvases": 2,
+            "size": "1425x900 1425x900",
+            "dpr": 1,
+            "relight": {
+              "budget": 23.33,
+              "dpr": 1,
+              "failedDpr": null,
+              "gpu": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3080 (0x00002206) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+            }
+          }
+        },
+        {
+          "load": {
+            "ttfb": 6,
+            "fcp": 588,
+            "lcp": 852,
+            "dcl": 525.9,
+            "loaded": 528,
+            "cls": 0.017,
+            "tbt": 90,
+            "longTasks": 3,
+            "requests": 24,
+            "kb": 50230,
+            "jsKb": 2197,
+            "relightKb": 35922,
+            "cpuMs": 1499,
+            "scriptMs": 898,
+            "heapMb": 14.5
+          },
+          "errors": [],
+          "frames": {
+            "pointer": {
+              "frames": 270,
+              "fps": 54,
+              "p50": 20.7,
+              "p95": 25,
+              "p99": 25.1,
+              "max": 29.3,
+              "latePct": 0,
+              "longTaskMs": 0,
+              "busyPct": 8.7
+            },
+            "idle": {
+              "frames": 1076,
+              "fps": 215.2,
+              "p50": 4.2,
+              "p95": 4.3,
+              "p99": 20.9,
+              "max": 25.1,
+              "latePct": 0,
+              "longTaskMs": 0,
+              "busyPct": 9
+            },
+            "scroll": {
+              "frames": 982,
+              "fps": 196.4,
+              "p50": 4.2,
+              "p95": 12.4,
+              "p99": 12.6,
+              "max": 20.9,
+              "latePct": 0,
+              "longTaskMs": 0,
+              "busyPct": 18.8
+            },
+            "pointerReturn": {
+              "frames": 513,
+              "fps": 102.5,
+              "p50": 8.4,
+              "p95": 12.6,
+              "p99": 16.7,
+              "max": 25.1,
+              "latePct": 0,
+              "longTaskMs": 0,
+              "busyPct": 12.8
+            }
+          },
+          "three": {
+            "canvases": 2,
+            "size": "1425x900 1425x900",
+            "dpr": 1,
+            "relight": {
+              "budget": 23.33,
+              "dpr": 1,
+              "failedDpr": null,
+              "gpu": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3080 (0x00002206) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

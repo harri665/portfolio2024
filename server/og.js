@@ -467,6 +467,7 @@ function buildJsonLd({ mode, url, title, description, image, resolved, isHome, l
 const RESERVED_PATHS = new Set([
   'contact',
   'colophon',
+  'glass',
   'admin',
   'cs-admin',
   'art-admin',

@@ -10,14 +10,6 @@ import useCardLights from './useCardLights';
 // a decoration competing with the text.
 
 // '#f1e05a' -> [r, g, b] in 0..1, left in sRGB like the rest of these shaders
-function hexToRgb(hex) {
-  const value = parseInt(String(hex || '').replace('#', ''), 16);
-  if (Number.isNaN(value)) {
-    return null;
-  }
-  return [((value >> 16) & 255) / 255, ((value >> 8) & 255) / 255, (value & 255) / 255];
-}
-
 function FullScreenPlane({ uniforms, fragmentShader }) {
   return (
     <mesh frustumCulled={false}>
@@ -35,35 +27,35 @@ function FullScreenPlane({ uniforms, fragmentShader }) {
 
 // ─── CS: drafting grid ─────────────────────────────────────────────────────
 // A fine, still dot grid like engineering paper, with every fifth dot a little
-// heavier. The repo's main language colour sits in a faint glow at the top of
-// the page and scrolls away with it; without one, the CS lens colour is used.
+// heavier and the whole grid thinning out toward the screen's edges.
 // Under the hovered glass pane a faint white band runs along its edge, as in
 // the CS gallery's liquid, which the pane's glass bends and splits into colour.
-export function DraftingGrid({ lens, accent }) {
+// It's laid out in screen coordinates, not the canvas's, so two canvases
+// drawing it (the CS project page's, and its sidebar's strip) line up.
+export function DraftingGrid() {
   const uniforms = useMemo(
     () => ({
       dpr: { value: 1 },
       viewport: { value: new THREE.Vector2(1, 1) },
-      scroll: { value: 0 },
-      accent: { value: new THREE.Vector3(...(lens?.a || [0.6, 0.7, 1])) },
+      // where the canvas's top left is on screen, and the screen's size (CSS px)
+      origin: { value: new THREE.Vector2(0, 0) },
+      screen: { value: new THREE.Vector2(1, 1) },
       // two pane lights (left, top, right, bottom in px) and how lit each is
       focusA: { value: new THREE.Vector4(0, 0, 0, 0) },
       focusAAmount: { value: 0 },
       focusB: { value: new THREE.Vector4(0, 0, 0, 0) },
       focusBAmount: { value: 0 },
     }),
-    [lens]
+    []
   );
   const updateLights = useCardLights();
 
-  useFrame(({ size, viewport }, delta) => {
+  useFrame(({ gl, size, viewport }, delta) => {
     uniforms.dpr.value = viewport.dpr;
     uniforms.viewport.value.set(size.width, size.height);
-    uniforms.scroll.value = window.scrollY;
-    const rgb = hexToRgb(accent) || lens?.a;
-    if (rgb) {
-      uniforms.accent.value.set(...rgb);
-    }
+    const rect = gl.domElement.getBoundingClientRect();
+    uniforms.origin.value.set(rect.left, rect.top);
+    uniforms.screen.value.set(window.innerWidth, window.innerHeight);
 
     const [lightA, lightB] = updateLights(document, size, delta);
     uniforms.focusAAmount.value = lightA ? lightA[4] : 0;
@@ -158,8 +150,8 @@ const gridFragmentShader = `
 
   uniform float dpr;
   uniform vec2 viewport;
-  uniform float scroll;
-  uniform vec3 accent;
+  uniform vec2 origin;
+  uniform vec2 screen;
   uniform vec4 focusA;
   uniform float focusAAmount;
   uniform vec4 focusB;
@@ -185,9 +177,10 @@ const gridFragmentShader = `
   }
 
   void main() {
-    // CSS pixels, y down, with the grid centred on the page's middle column
-    vec2 px = vec2(gl_FragCoord.x, viewport.y * dpr - gl_FragCoord.y) / dpr;
-    vec2 g = px - vec2(viewport.x * 0.5, 0.0);
+    // Screen CSS pixels, y down, with the grid centred on the screen's
+    // middle column
+    vec2 px = vec2(gl_FragCoord.x, viewport.y * dpr - gl_FragCoord.y) / dpr + origin;
+    vec2 g = px - vec2(screen.x * 0.5, 0.0);
 
     vec2 index = floor(g / SPACING + 0.5);
     vec2 cell = g - index * SPACING;
@@ -198,23 +191,17 @@ const gridFragmentShader = `
     float d = length(cell) - radius;
     float dotMask = 1.0 - smoothstep(-0.6, 0.6, d);
 
-    // the language glow belongs to the top of the page, so it scrolls away
-    vec2 glowAt = vec2(viewport.x * 0.5, 140.0 - scroll);
-    vec2 offset = (px - glowAt) / vec2(640.0, 420.0);
-    float glow = exp(-dot(offset, offset));
-
-    vec3 base = vec3(0.031, 0.035, 0.047) + accent * 0.06 * glow;
-    vec3 ink = mix(vec3(1.0), accent, 0.55 * glow);
-    float strength = (major ? 0.26 : 0.13) * (0.75 + 0.5 * glow);
+    vec3 base = vec3(0.031, 0.035, 0.047);
+    float strength = major ? 0.2 : 0.1;
 
     // the grid thins out toward the screen's edges
-    vec2 uv = gl_FragCoord.xy / (viewport * dpr);
+    vec2 uv = px / screen;
     float falloff = smoothstep(1.0, 0.35, length((uv - 0.5) * vec2(1.1, 1.3)));
 
-    vec3 color = base + ink * dotMask * strength * mix(0.45, 1.0, falloff);
+    vec3 color = base + dotMask * strength * mix(0.45, 1.0, falloff);
     if (focusAAmount > 0.001) color += paneLight(px, focusA, focusAAmount);
     if (focusBAmount > 0.001) color += paneLight(px, focusB, focusBAmount);
-    color += (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
+    color += (fract(sin(dot(floor(px * dpr), vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
     gl_FragColor = vec4(color, 1.0);
   }
 `;

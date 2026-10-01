@@ -80,11 +80,3 @@ pre {
   background-size: 22px 22px;
   background-attachment: fixed;
 }
-
-/* A faint drafting grid: the CS section's one quiet flourish */
-.drafting-grid {
-  background-color: rgb(var(--bg));
-  background-image: radial-gradient(oklch(var(--accent) / 0.13) 1px, transparent 1px);
-  background-size: 24px 24px;
-  background-attachment: fixed;
-}
