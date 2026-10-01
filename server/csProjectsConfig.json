@@ -3,12 +3,11 @@
   "preserveListedOrder": true,
   "repoNames": [
     "relight",
-    "MPM",
-    "OpenGL-Star-Simulation",
-    "MadixOutdoors3DWebsite",
-    "Harwood-Team-A/HarwoodWebsite",
-    "MurderMysteryCH/MurderMysteryV2",
     "BlackHole",
-    "AITraffic"
+    "MPM",
+    "MadixOutdoors3DWebsite",
+    "AITraffic",
+    "Harwood-Team-A/HarwoodWebsite",
+    "OpenGL-Star-Simulation"
   ]
 }
