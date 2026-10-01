@@ -237,6 +237,25 @@ async function getGitHubRepoByFullName(fullName, { forceRefresh = false } = {}) 
   return repo;
 }
 
+// private repos would 404 on github (maybe even with the token) so the project page stands in
+async function getCsRepo(fullName, options) {
+  const page = projectPages.read(String(fullName).split('/').pop())?.meta;
+  if (!page?.privateRepo) return getGitHubRepoByFullName(fullName, options);
+
+  return {
+    id: fullName,
+    name: page.repo,
+    full_name: fullName,
+    html_url: '',
+    homepage: page.live,
+    description: page.tagline,
+    language: page.stack[0] || null,
+    topics: [],
+    fork: false,
+    archived: false,
+  };
+}
+
 async function getDirectVideoLink(embedUrl) {
   const browser = await puppeteer.launch({
     headless: true,
@@ -522,7 +541,7 @@ app.get('/api/github/repo', async (req, res) => {
   }
 
   try {
-    const repo = await getGitHubRepoByFullName(fullName, { forceRefresh });
+    const repo = await getCsRepo(fullName, { forceRefresh });
     res.json(repo);
   } catch (error) {
     const status = error.response?.status || 500;
@@ -683,7 +702,7 @@ app.get('/api/cs/project/:repoName', async (req, res) => {
 
   try {
     const [repo, readme] = await Promise.all([
-      getGitHubRepoByFullName(fullName),
+      getCsRepo(fullName),
       getGitHubReadme(fullName).catch(() => ({ content: null })),
     ]);
 
@@ -1544,7 +1563,7 @@ async function listCsRepos() {
       listed.map(async (entry) => {
         const fullName = entry.includes('/') ? entry : `${GITHUB_DEFAULT_OWNER}/${entry}`;
         try {
-          const repo = await getGitHubRepoByFullName(fullName);
+          const repo = await getCsRepo(fullName);
           return repo?.name ? { name: repo.name, description: repo.description || '' } : null;
         } catch {
           return null;
@@ -1564,7 +1583,7 @@ const ogHandler = createOgHandler({
   blogPostsDir: BLOG_POSTS_DIR,
   blogImagesDir: BLOG_IMAGES_DIR,
   getArtProject: getArtProjectByIdentifier,
-  getCsRepo: (fullName) => getGitHubRepoByFullName(fullName),
+  getCsRepo,
   getCsReadme: async (fullName) => describeReadme(await getGitHubReadme(fullName), fullName),
   getCsRepoFullName: resolveCsRepoFullName,
   getProjectPage: (repoName) => projectPages.read(repoName),

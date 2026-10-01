@@ -37,6 +37,7 @@ const EMPTY = {
   cover: '',
   video: '',
   published: true,
+  privateRepo: false,
 };
 
 export default function ProjectPageEditorPanel({ adminFetch }) {
@@ -237,6 +238,15 @@ export default function ProjectPageEditorPanel({ adminFetch }) {
                 className="accent-[#0a84ff]"
               />
               <span className="text-xs text-white/70">Published (unchecked shows the README)</span>
+            </label>
+            <label className="mt-2 flex cursor-pointer items-center gap-2">
+              <input
+                type="checkbox"
+                checked={fields.privateRepo}
+                onChange={set('privateRepo')}
+                className="accent-[#0a84ff]"
+              />
+              <span className="text-xs text-white/70">Private repo (no GitHub link; listed from this page)</span>
             </label>
           </Field>
         </div>
