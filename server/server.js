@@ -682,10 +682,9 @@ app.get('/api/cs/project/:repoName', async (req, res) => {
   }
 
   try {
-    const [repo, readme, languages] = await Promise.all([
+    const [repo, readme] = await Promise.all([
       getGitHubRepoByFullName(fullName),
       getGitHubReadme(fullName).catch(() => ({ content: null })),
-      getGitHubLanguages(fullName).catch(() => null),
     ]);
 
     const page = projectPages.read(repo.name);
@@ -695,7 +694,6 @@ app.get('/api/cs/project/:repoName', async (req, res) => {
       title: page?.meta.title || readmeTitle(readme.content) || prettyRepoName(repo.name),
       readme: describeReadme(readme, fullName),
       page,
-      languages,
     });
   } catch (error) {
     const status = error.response?.status || 500;

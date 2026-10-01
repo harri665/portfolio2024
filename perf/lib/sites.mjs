@@ -6,7 +6,7 @@ import zlib from 'node:zlib';
 
 export const SITES = ['root', 'cs', 'art', 'blog'];
 
-const FIXED_PAGES = ['/', '/contact', '/colophon'];
+const FIXED_PAGES = ['/', '/contact', '/colophon', '/glass'];
 
 const SKIP = /^\/(admin|api|p)(\/|$)|^\/(cs|art|blog|pages|comments)-admin|\.[a-z0-9]+$/i;
 

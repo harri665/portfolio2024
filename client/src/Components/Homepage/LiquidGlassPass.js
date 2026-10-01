@@ -4,41 +4,33 @@ import * as THREE from 'three';
 
 import { apiUrl } from '../../utils/api';
 
-// Refracts the scene through DOM elements, like Apple's clear glass. The
-// scene renders to a texture, then a full-screen pass copies it back, bending
-// it inward along each glass edge as a thick pane would. Red, green and blue
-// sit slightly apart, so light through the glass splits like a prism.
-//
-// - `selector` matches panes (the hub cards): rounded rects whose highlights
-//   are drawn in CSS on top.
-// - `textSelector` matches one text element whose glyphs become glass. Its
-//   words are rasterised into a mask plus a softened height field, whose
-//   slope gives each glyph a bevelled edge to refract and catch the light.
-//   Once the glass is drawing, the element gets `data-glass-ready` so CSS
-//   can hide the DOM text (it stays for layout, selection and screen readers).
-//
-// The frosted fill and highlights of glass text have to sit above the page's
-// dimming, so this pass also applies the dim (`sceneDim`, phone / sm and up)
-// and the backdrop vignette itself, instead of CSS layers over the canvas.
-// With `shade` off (the gallery pages, which fade their own CSS vignette as
-// the liquid fills in) it only frosts and bends the scene.
-//
-// - `glassOnly` draws the panes alone, transparent elsewhere, for a backdrop
-//   shown on a layer of its own under this canvas (the CS home page's relit
-//   room, which stays fixed while this canvas follows the scroll). The scene
-//   still renders, for the glass to bend.
-//
-// - `imageSelector` matches <img>s inside panes (the art gallery thumbnails).
-//   Each is drawn into the scene where the DOM laid it out, clipped to its
-//   parent and its pane, so the glass bends, frosts and splits it like the
-//   backdrop. Once drawn, the <img> gets `data-glass-ready` so CSS can fade
-//   its edges and let the glass version show through along the rim.
-//
-// `frost` is the blur radius (px) through the glass. The project pages turn it
-// down so their backdrop's lines stay sharp enough to see bend at the rim.
-// `blurTaps` is how many samples spread across that blur; phones use fewer.
-// Enough for every gallery card on screen at once; off-screen ones are skipped
+// apple style liquid glass. the scene renders to a texture, then a fullscreen
+// pass bends it through the DOM panes and glyphs, with r/g/b split a bit for the prism look
+
+// enough for every gallery card on screen at once
 const MAX_PANES = 16;
+
+let mountedPasses = 0;
+
+// shared per frame so the project page's two canvases ripple in sync
+const WAVE_FULL_SPEED = 2500; // px/s for the full ripple
+const wave = { key: null, y: 0, t: 0, amount: 0 };
+
+function scrollWave() {
+  const key = document.timeline?.currentTime ?? performance.now();
+  if (key === wave.key) return wave;
+  const now = performance.now() / 1000;
+  const y = window.scrollY;
+  const dt = wave.key === null ? 0 : Math.min(Math.max(now - wave.t, 1 / 240), 0.1);
+  const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const target = still || !dt ? 0 : Math.min(Math.abs(y - wave.y) / dt / WAVE_FULL_SPEED, 1);
+  const rate = target > wave.amount ? 12 : 4;
+  wave.amount += (target - wave.amount) * (1 - Math.exp(-rate * dt));
+  wave.key = key;
+  wave.y = y;
+  wave.t = now;
+  return wave;
+}
 
 export default function LiquidGlassPass({
   selector,
@@ -48,15 +40,32 @@ export default function LiquidGlassPass({
   shade = true,
   glassOnly = false,
   frost = 5,
+  textFrost = frost,
+  textLens = 0,
+  textTint = [1, 1, 1],
+  haze = 0,
+  hover = null,
   blurTaps = 12,
+  rimCap = 0,
+  adapt = 0,
 }) {
   const gl = useThree((state) => state.gl);
   const size = useThree((state) => state.size);
   const dpr = useThree((state) => state.viewport.dpr);
 
-  const target = useMemo(() => new THREE.WebGLRenderTarget(1, 1), []);
+  const mipmaps = Boolean(hover);
+  const target = useMemo(
+    () =>
+      new THREE.WebGLRenderTarget(
+        1,
+        1,
+        mipmaps ? { generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter } : undefined
+      ),
+    [mipmaps]
+  );
   const radii = useRef(new WeakMap());
   const strengths = useRef(new WeakMap());
+  const hovers = useRef(new WeakMap());
   const text = useRef({ el: null, observer: null, texture: null, pad: 0, ready: false });
   const images = useRef(new Map());
   const fits = useRef(new WeakMap());
@@ -73,16 +82,37 @@ export default function LiquidGlassPass({
         shadeScene: { value: 1 },
         glassOnly: { value: 0 },
         frost: { value: 5 },
+        textFrost: { value: 5 },
+        textLens: { value: 0 },
+        textTint: { value: new THREE.Vector3(1, 1, 1) },
+        haze: { value: 0 },
+        hoverFrost: { value: 0 },
+        hoverSplit: { value: 0 },
+        hoverDim: { value: 0 },
+        rimCap: { value: 0 },
+        adapt: { value: 0 },
+        paneHover: { value: new Array(MAX_PANES).fill(0) },
         panes: { value: Array.from({ length: MAX_PANES }, () => new THREE.Vector4()) },
         paneRadii: { value: new Array(MAX_PANES).fill(0) },
         paneOpacity: { value: new Array(MAX_PANES).fill(1) },
         paneStrength: { value: new Array(MAX_PANES).fill(1) },
         paneGlass: { value: Array.from({ length: MAX_PANES }, () => new THREE.Vector2(1, 1)) },
+        paneMerge: { value: new Array(MAX_PANES).fill(0) },
+        origin: { value: new THREE.Vector2() },
+        waveAmount: { value: 0 },
+        waveTime: { value: 0 },
+        waveScroll: { value: 0 },
+        paneTint: { value: new Array(MAX_PANES).fill(0) },
+        paneBevel: { value: new Array(MAX_PANES).fill(0) },
+        // -1 = use the pass's own frost/haze
+        paneFrost: { value: new Array(MAX_PANES).fill(-1) },
+        paneHaze: { value: new Array(MAX_PANES).fill(-1) },
         paneCount: { value: 0 },
         tText: { value: emptyText },
         textRect: { value: new THREE.Vector4() },
         textTexel: { value: new THREE.Vector2(1, 1) },
         textSigma: { value: 1 },
+        textDomeSigma: { value: 1 },
         textDepth: { value: 0 },
         textOpacity: { value: 0 },
       },
@@ -119,8 +149,23 @@ export default function LiquidGlassPass({
     return { material, scene, camera, emptyText, imageMaterial, imageScene };
   }, [target, blurTaps]);
 
+  // counted, a page can run two of these
+  useEffect(() => {
+    const root = document.documentElement;
+    mountedPasses += 1;
+    root.setAttribute('data-glass-pass', '');
+    return () => {
+      mountedPasses -= 1;
+      if (mountedPasses === 0) root.removeAttribute('data-glass-pass');
+    };
+  }, []);
+
+  // a mipmapped texture that's never had its mips built reads as black
+  const mipsMissing = useRef(true);
+
   useEffect(() => {
     target.setSize(Math.round(size.width * dpr), Math.round(size.height * dpr));
+    mipsMissing.current = true;
   }, [target, size.width, size.height, dpr]);
 
   useEffect(() => {
@@ -174,6 +219,8 @@ export default function LiquidGlassPass({
       uniforms.tText.value = glyphs.texture;
       uniforms.textTexel.value.set(1 / glyphs.width, 1 / glyphs.height);
       uniforms.textSigma.value = glyphs.sigma;
+      uniforms.textDomeSigma.value = glyphs.domeSigma;
+      textState.fontSize = glyphs.fontSize;
       uniforms.textDepth.value = glyphs.depth;
     };
 
@@ -187,12 +234,27 @@ export default function LiquidGlassPass({
     const canvasRect = gl.domElement.getBoundingClientRect();
     const { uniforms } = pass.material;
     uniforms.viewport.value.set(canvasRect.width, canvasRect.height);
+    uniforms.origin.value.set(canvasRect.left, canvasRect.top);
+    const ripple = scrollWave();
+    uniforms.waveAmount.value = ripple.amount;
+    uniforms.waveTime.value = ripple.t;
+    uniforms.waveScroll.value = ripple.y;
     uniforms.sceneDim.value = canvasRect.width >= 640 ? sceneDim[1] : sceneDim[0];
     uniforms.shadeScene.value = shade && !glassOnly ? 1 : 0;
     uniforms.glassOnly.value = glassOnly ? 1 : 0;
     uniforms.frost.value = frost;
+    uniforms.textFrost.value = textFrost;
+    uniforms.textLens.value = textLens * (text.current.fontSize || 0);
+    uniforms.textTint.value.set(textTint[0], textTint[1], textTint[2]);
+    uniforms.haze.value = haze;
+    uniforms.hoverFrost.value = hover?.frost ?? 0;
+    uniforms.hoverSplit.value = hover?.split ?? 0;
+    uniforms.hoverDim.value = hover?.dim ?? 0;
+    uniforms.rimCap.value = rimCap;
+    uniforms.adapt.value = adapt;
 
     let count = 0;
+    let anyHover = false;
     const placed = new Map();
     if (selector) {
       document.querySelectorAll(selector).forEach((el) => {
@@ -218,22 +280,39 @@ export default function LiquidGlassPass({
         const opacity = parseFloat(el.style.opacity);
         uniforms.paneOpacity.value[count] = Number.isNaN(opacity) ? 1 : opacity;
         placed.set(el, count);
-        // data-liquid-glass="1.8" thickens a pane's glass; a bare attribute is 1
-        // A thick pane only thickens while it's hovered (or, on touch
-        // screens, in focus), easing in and out; otherwise it's standard glass
+        // data-liquid-glass="1.8" is thicker glass, but only while hovered unless data-glass-lens
         const thick = parseFloat(el.dataset.liquidGlass);
         const active = el.matches(':hover') || el.hasAttribute('data-focus');
-        const target = !Number.isNaN(thick) && active ? thick : 1;
+        const lens = active || el.hasAttribute('data-glass-lens');
+        const target = !Number.isNaN(thick) && lens ? thick : 1;
         const current = strengths.current.get(el) ?? 1;
         const strength = current + (target - current) * (1 - Math.exp(-delta * 10));
         strengths.current.set(el, strength);
         uniforms.paneStrength.value[count] = strength;
+        if (hover && el.hasAttribute('data-glass-hover')) {
+          const was = hovers.current.get(el) ?? 0;
+          const now = was + ((active ? 1 : 0) - was) * (1 - Math.exp(-delta * 8));
+          hovers.current.set(el, now);
+          uniforms.paneHover.value[count] = now;
+          anyHover = anyHover || now > 0.001;
+        } else {
+          uniforms.paneHover.value[count] = 0;
+        }
         const split = parseFloat(el.dataset.glassSplit);
         const bezel = parseFloat(el.dataset.glassBezel);
         uniforms.paneGlass.value[count].set(
           Number.isNaN(split) ? 1 : split,
           Number.isNaN(bezel) ? 1 : bezel
         );
+        const merge = parseFloat(el.dataset.glassMerge);
+        const tint = parseFloat(el.dataset.glassTint);
+        uniforms.paneMerge.value[count] = Number.isNaN(merge) ? 0 : merge;
+        uniforms.paneTint.value[count] = Number.isNaN(tint) ? 0 : tint;
+        uniforms.paneBevel.value[count] = el.hasAttribute('data-glass-bevel') ? 1 : 0;
+        const paneFrost = parseFloat(el.dataset.glassFrost);
+        const paneHaze = parseFloat(el.dataset.glassHaze);
+        uniforms.paneFrost.value[count] = Number.isNaN(paneFrost) ? -1 : paneFrost;
+        uniforms.paneHaze.value[count] = Number.isNaN(paneHaze) ? -1 : paneHaze;
         count += 1;
       });
     }
@@ -261,6 +340,10 @@ export default function LiquidGlassPass({
       uniforms.textOpacity.value = 0;
     }
 
+    // only rebuild mips while something's hovered (or they're missing)
+    const buildMips = mipmaps && (anyHover || mipsMissing.current);
+    target.texture.generateMipmaps = buildMips;
+    if (buildMips) mipsMissing.current = false;
     gl.setRenderTarget(target);
     gl.render(scene, camera);
     if (imageSelector && selector) {
@@ -419,10 +502,18 @@ function rasterizeText(el) {
   }
   const sigma = Math.sqrt(((2 * radius + 1) ** 2 - 1) / 4);
 
+  const domeRadius = Math.max(2, Math.round(fontSize * 0.05 * scale));
+  let dome = coverage;
+  for (let i = 0; i < 3; i += 1) {
+    dome = boxBlur(dome, width, height, domeRadius);
+  }
+  const domeSigma = Math.sqrt(((2 * domeRadius + 1) ** 2 - 1) / 4);
+
   const data = new Uint8Array(width * height * 4);
   for (let i = 0; i < coverage.length; i += 1) {
     data[i * 4] = Math.round(coverage[i] * 255);
     data[i * 4 + 1] = Math.round(bevel[i] * 255);
+    data[i * 4 + 2] = Math.round(dome[i] * 255);
     data[i * 4 + 3] = 255;
   }
   // rows top to bottom, shader is y-down
@@ -431,7 +522,7 @@ function rasterizeText(el) {
   texture.magFilter = THREE.LinearFilter;
   texture.needsUpdate = true;
 
-  return { texture, width, height, pad, sigma, depth: fontSize * 0.12 };
+  return { texture, width, height, pad, sigma, domeSigma, fontSize, depth: fontSize * 0.12 };
 }
 
 function boxBlur(source, width, height, radius) {
@@ -527,17 +618,37 @@ const passFragmentShader = (blurTaps) => `
   uniform float shadeScene;
   uniform float glassOnly;
   uniform float frost;
+  uniform float textFrost;
+  uniform float textLens;
+  uniform vec3 textTint;
+  uniform float haze;
+  uniform float hoverFrost;
+  uniform float hoverSplit;
+  uniform float hoverDim;
+  uniform float rimCap;
+  uniform float adapt;
+  uniform float paneHover[MAX_PANES];
   uniform vec4 panes[MAX_PANES];
   uniform float paneRadii[MAX_PANES];
   uniform float paneOpacity[MAX_PANES];
   uniform float paneStrength[MAX_PANES];
   uniform vec2 paneGlass[MAX_PANES];
+  uniform float paneMerge[MAX_PANES];
+  uniform vec2 origin;
+  uniform float waveAmount;
+  uniform float waveTime;
+  uniform float waveScroll;
+  uniform float paneTint[MAX_PANES];
+  uniform float paneBevel[MAX_PANES];
+  uniform float paneFrost[MAX_PANES];
+  uniform float paneHaze[MAX_PANES];
   uniform int paneCount;
 
   uniform sampler2D tText;
   uniform vec4 textRect;
   uniform vec2 textTexel;
   uniform float textSigma;
+  uniform float textDomeSigma;
   uniform float textDepth;
   uniform float textOpacity;
 
@@ -548,22 +659,100 @@ const passFragmentShader = (blurTaps) => `
     return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
   }
 
-  vec4 sampleAt(vec2 px) {
-    vec2 uv = vec2(px.x / viewport.x, 1.0 - px.y / viewport.y);
-    return texture2D(tScene, clamp(uv, 0.0, 1.0));
+  // bridges the gap between merged panes + rounds the inside corners
+  #define MERGE 44.0
+  float smoothUnion(float a, float b) {
+    float h = max(MERGE - abs(a - b), 0.0) / MERGE;
+    return min(a, b) - h * h * MERGE * 0.25;
   }
 
-  // A soft disc blur: taps on a golden-angle spiral, weighted toward the
-  // centre so it reads as frosting rather than a smear
-  vec4 blurredAt(vec2 px) {
-    vec4 sum = sampleAt(px);
+  bool inGroup(int j, int lead, float group) {
+    return j == lead || (group > 0.5 && abs(paneMerge[j] - group) < 0.5);
+  }
+
+  #define BEVEL_EDGE 11.0
+  #define BEVEL_REACH 40.0
+
+  float bottomCorners(vec2 p, vec2 halfSize, float r) {
+    vec2 inner = halfSize - r;
+    return smoothstep(inner.x - BEVEL_REACH, inner.x, abs(p.x))
+      * smoothstep(inner.y - BEVEL_REACH, inner.y, p.y);
+  }
+
+  #define WAVE_PX 4.0
+  #define JOIN 66.0
+
+  float joinWeight(float a, float b) {
+    return smoothstep(0.0, 1.0, clamp((JOIN - abs(a - b)) / JOIN, 0.0, 1.0));
+  }
+
+  // page + screen coords so separate canvases agree
+  float ripple(vec2 px) {
+    vec2 s = px + origin;
+    float y = s.y + waveScroll;
+    float r = 0.65 * sin(y * 0.045 + s.x * 0.03 - waveTime * 4.0)
+      + 0.35 * sin(y * 0.02 - s.x * 0.05 + waveTime * 2.6);
+    return r * waveAmount * WAVE_PX;
+  }
+
+  float joinAt(vec2 px, int lead, float group) {
+    if (group < 0.5) return 0.0;
+    float a = 1e5;
+    float b = 1e5;
+    for (int j = 0; j < MAX_PANES; j++) {
+      if (j >= paneCount) break;
+      if (!inGroup(j, lead, group)) continue;
+      float dj = sdRoundRect(px - panes[j].xy, panes[j].zw, paneRadii[j]);
+      if (dj < a) {
+        b = a;
+        a = dj;
+      } else if (dj < b) {
+        b = dj;
+      }
+    }
+    return joinWeight(a, b);
+  }
+
+  float paneDistance(vec2 px, int lead, float group) {
+    float d = 1e5;
+    if (group < 0.5) {
+      d = sdRoundRect(px - panes[lead].xy, panes[lead].zw, paneRadii[lead]);
+    } else {
+      float a = 1e5;
+      float b = 1e5;
+      for (int j = 0; j < MAX_PANES; j++) {
+        if (j >= paneCount) break;
+        if (!inGroup(j, lead, group)) continue;
+        float dj = sdRoundRect(px - panes[j].xy, panes[j].zw, paneRadii[j]);
+        d = smoothUnion(d, dj);
+        if (dj < a) {
+          b = a;
+          a = dj;
+        } else if (dj < b) {
+          b = dj;
+        }
+      }
+      if (waveAmount > 0.001) d += ripple(px) * joinWeight(a, b);
+    }
+    return d;
+  }
+
+  // lod 0 has to be the full scene, not a mip left over from a hover
+  vec4 sampleAt(vec2 px, float lod) {
+    vec2 uv = vec2(px.x / viewport.x, 1.0 - px.y / viewport.y);
+    return textureLod(tScene, clamp(uv, 0.0, 1.0), lod);
+  }
+
+  // golden angle spiral, weighted to the centre so it looks frosted not smeared
+  vec4 blurredAt(vec2 px, float radius, float lod) {
+    vec4 sum = sampleAt(px, lod);
     float total = 1.0;
     for (int k = 1; k <= BLUR_TAPS; k++) {
       float f = float(k) / float(BLUR_TAPS);
       float angle = float(k) * 2.39996;
-      vec2 tap = vec2(cos(angle), sin(angle)) * sqrt(f) * frost;
+      vec2 tap = vec2(cos(angle), sin(angle)) * sqrt(f) * radius;
       float weight = 1.0 - 0.6 * f;
-      sum += sampleAt(px + tap) * weight;
+      sum += sampleAt(px + tap, lod) * weight;
       total += weight;
     }
     return sum / total;
@@ -573,12 +762,12 @@ const passFragmentShader = (blurTaps) => `
     return clamp((strength - 1.0) / 0.4, 0.0, 1.0);
   }
 
-  vec4 throughGlass(vec2 px, vec2 offset, float strength, float splitScale) {
+  vec4 throughGlass(vec2 px, vec2 offset, float strength, float splitScale, float radius, float lod) {
     vec2 split = normalize(vec2(1.0, -0.4)) * SPLIT * splitScale * (1.0 - lensAmount(strength));
     float dispersion = min(EDGE_DISPERSION * splitScale, 0.95);
-    vec4 red = blurredAt(px + offset * (1.0 + dispersion) + split);
-    vec4 green = blurredAt(px + offset);
-    vec4 blue = blurredAt(px + offset * (1.0 - dispersion) - split);
+    vec4 red = blurredAt(px + offset * (1.0 + dispersion) + split, radius, lod);
+    vec4 green = blurredAt(px + offset, radius, lod);
+    vec4 blue = blurredAt(px + offset * (1.0 - dispersion) - split, radius, lod);
     vec4 glass = vec4(red.r, green.g, blue.b, max(red.a, max(green.a, blue.a)));
     glass.rgb *= 1.06;
     return glass;
@@ -607,29 +796,78 @@ const passFragmentShader = (blurTaps) => `
     for (int i = 0; i < MAX_PANES; i++) {
       if (i >= paneCount) break;
 
-      vec2 p = px - panes[i].xy;
-      vec2 halfSize = panes[i].zw;
+      // merged group is drawn once, by its first pane
+      float group = paneMerge[i];
+      bool drawn = false;
+      if (group > 0.5) {
+        for (int j = 0; j < MAX_PANES; j++) {
+          if (j >= i) break;
+          if (abs(paneMerge[j] - group) < 0.5) drawn = true;
+        }
+      }
+      if (drawn) continue;
+
       float r = paneRadii[i];
-      float d = sdRoundRect(p, halfSize, r);
+      float d = paneDistance(px, i, group);
       if (d > 1.0) continue;
 
       vec2 e = vec2(0.5, 0.0);
       vec2 normal = normalize(vec2(
-        sdRoundRect(p + e.xy, halfSize, r) - sdRoundRect(p - e.xy, halfSize, r),
-        sdRoundRect(p + e.yx, halfSize, r) - sdRoundRect(p - e.yx, halfSize, r)
+        paneDistance(px + e.xy, i, group) - paneDistance(px - e.xy, i, group),
+        paneDistance(px + e.yx, i, group) - paneDistance(px - e.yx, i, group)
       ) + 1e-5);
 
       // flat middle, steep rim. thick panes act like a lens and pull in from past the edge instead
       float strength = paneStrength[i];
       float lens = lensAmount(strength);
-      float bezel = clamp(r * 1.15, 14.0, 34.0) * strength * paneGlass[i].y;
-      float t = clamp(-d / bezel, 0.0, 1.0);
+      float swell = waveAmount > 0.001 ? 1.0 + waveAmount * 0.6 * joinAt(px, i, group) : 1.0;
+      float corner = paneBevel[i] > 0.5 ? bottomCorners(px - panes[i].xy, panes[i].zw, r) : 0.0;
+      swell *= 1.0 + corner * 1.2;
+      float bezel = clamp(r * 1.15, 14.0, 34.0) * strength * paneGlass[i].y * swell;
+      float rim = rimCap > 0.0 ? min(bezel, min(panes[i].z, panes[i].w) * rimCap) : bezel;
+      float t = clamp(-d / rim, 0.0, 1.0);
       float bend = pow(1.0 - t, 2.4);
       float reach = mix(-0.7, 0.24, lens);
       vec2 offset = normal * reach * bend * bezel;
 
+      float hovered = paneHover[i];
+      float widen = 1.0 + hoverFrost * hovered;
+      float paneBlur = paneFrost[i] >= 0.0 ? paneFrost[i] : frost;
+      vec4 glass = throughGlass(
+        px, offset, strength, paneGlass[i].x * (1.0 + hoverSplit * hovered), paneBlur * widen, log2(widen) * 1.4
+      );
+      glass.rgb *= 1.0 - hoverDim * hovered;
+      glass.rgb = mix(glass.rgb, vec3(8.0, 9.0, 12.0) / 255.0, paneTint[i]);
+      if (adapt > 0.0) {
+        vec3 around = (
+          sampleAt(px, 0.0) +
+          sampleAt(px + vec2(20.0, 0.0), 0.0) + sampleAt(px - vec2(20.0, 0.0), 0.0) +
+          sampleAt(px + vec2(0.0, 20.0), 0.0) + sampleAt(px - vec2(0.0, 20.0), 0.0)
+        ).rgb / 5.0;
+        float light = dot(around, vec3(0.2126, 0.7152, 0.0722));
+        glass.rgb *= 1.0 - adapt * smoothstep(0.3, 0.85, light);
+      }
+      glass.rgb = mix(glass.rgb, vec3(glass.a), paneHaze[i] >= 0.0 ? paneHaze[i] : haze);
+
+      if (corner > 0.001) {
+        float across = clamp(-d / BEVEL_EDGE, 0.0, 1.0);
+        float below = max(dot(normal, vec2(0.0, 1.0)), 0.0);
+        float light = (0.35 + 0.65 * below) * pow(1.0 - across, 1.6);
+        float crease = exp(-abs(-d - BEVEL_EDGE) / 1.6);
+        glass.rgb += vec3(light * 0.42 - crease * 0.07) * corner * glass.a;
+      }
+
+      // css borders can't follow a merged outline so draw the rim here
+      if (group > 0.5) {
+        float facing = dot(normal, normalize(vec2(-1.0, -1.0)));
+        float light = 0.18 + 0.75 * max(facing, 0.0) + 0.4 * max(-facing, 0.0);
+        float rim = exp(-abs(d + 1.0) / 1.0) * light;
+        float glow = exp(d / 22.0) * 0.07;
+        glass.rgb += vec3(rim + glow);
+      }
+
       float coverage = (1.0 - smoothstep(-1.0, 1.0, d)) * paneOpacity[i];
-      color = mix(color, throughGlass(px, offset, strength, paneGlass[i].x), coverage);
+      color = mix(color, glass, coverage);
     }
 
     color = shade(color, px);
@@ -637,7 +875,8 @@ const passFragmentShader = (blurTaps) => `
     if (textOpacity > 0.0) {
       vec2 tuv = (px - textRect.xy) / textRect.zw;
       if (all(greaterThanEqual(tuv, vec2(0.0))) && all(lessThanEqual(tuv, vec2(1.0)))) {
-        float coverage = texture2D(tText, tuv).r;
+        vec4 mask = texture2D(tText, tuv);
+        float coverage = mask.r;
 
         if (coverage > 0.004) {
           vec2 grad = vec2(
@@ -649,7 +888,18 @@ const passFragmentShader = (blurTaps) => `
           float slope = clamp(length(grad) * textSigma / 0.8, 0.0, 1.0);
           vec2 inward = grad / (length(grad) + 1e-5);
 
-          vec4 glyph = shade(throughGlass(px, inward * slope * textDepth, 1.0, 1.0), px);
+          vec2 offset = inward * slope * textDepth;
+          if (textLens > 0.0) {
+            vec2 rise = vec2(
+              texture2D(tText, tuv + vec2(2.0 * textTexel.x, 0.0)).b -
+                texture2D(tText, tuv - vec2(2.0 * textTexel.x, 0.0)).b,
+              texture2D(tText, tuv + vec2(0.0, 2.0 * textTexel.y)).b -
+                texture2D(tText, tuv - vec2(0.0, 2.0 * textTexel.y)).b
+            ) * textDomeSigma / 1.6;
+            offset -= rise * textLens;
+          }
+          vec4 glyph = shade(throughGlass(px, offset, 1.0, 1.0, textFrost, 0.0), px);
+          glyph.rgb *= mix(vec3(1.0), textTint, smoothstep(0.4, 0.75, mask.b));
           glyph = over(vec4(TEXT_FROST), glyph);
 
           // lit from the top left

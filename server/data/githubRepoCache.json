@@ -1,7 +1,7 @@
 {
   "repoLists": {
     "harri665|100|owner|updated": {
-      "fetchedAt": "2026-09-30T22:57:23.289Z",
+      "fetchedAt": "2026-10-01T20:25:25.133Z",
       "data": [
         {
           "id": 871766645,
@@ -2274,7 +2274,7 @@
   },
   "repos": {
     "murdermysterych/murdermysteryv2": {
-      "fetchedAt": "2026-09-30T22:57:23.511Z",
+      "fetchedAt": "2026-10-01T20:25:25.328Z",
       "data": {
         "id": 1115917375,
         "node_id": "R_kgDOQoOMPw",
@@ -2509,7 +2509,7 @@
       }
     },
     "harri665/mpm": {
-      "fetchedAt": "2026-09-30T21:46:59.913Z",
+      "fetchedAt": "2026-10-01T05:39:38.137Z",
       "data": {
         "id": 1193954926,
         "node_id": "R_kgDORypObg",
@@ -2578,14 +2578,14 @@
         "releases_url": "https://api.github.com/repos/harri665/MPM/releases{/id}",
         "deployments_url": "https://api.github.com/repos/harri665/MPM/deployments",
         "created_at": "2026-03-27T18:59:51Z",
-        "updated_at": "2026-05-10T06:22:57Z",
-        "pushed_at": "2026-05-10T06:22:52Z",
+        "updated_at": "2026-09-30T21:54:01Z",
+        "pushed_at": "2026-09-30T21:53:56Z",
         "git_url": "git://github.com/harri665/MPM.git",
         "ssh_url": "git@github.com:harri665/MPM.git",
         "clone_url": "https://github.com/harri665/MPM.git",
         "svn_url": "https://github.com/harri665/MPM",
         "homepage": null,
-        "size": 287685,
+        "size": 287688,
         "stargazers_count": 0,
         "watchers_count": 0,
         "language": "C",
@@ -2727,7 +2727,7 @@
       }
     },
     "harri665/relight": {
-      "fetchedAt": "2026-09-30T22:57:27.829Z",
+      "fetchedAt": "2026-10-01T20:22:37.797Z",
       "data": {
         "id": 1393836471,
         "node_id": "R_kgDOUxRBtw",
@@ -2940,7 +2940,7 @@
       }
     },
     "harri665/aitraffic": {
-      "fetchedAt": "2026-09-30T21:40:37.257Z",
+      "fetchedAt": "2026-10-01T03:03:26.631Z",
       "data": {
         "id": 1222836278,
         "node_id": "R_kgDOSOMANg",
@@ -3009,14 +3009,14 @@
         "releases_url": "https://api.github.com/repos/harri665/AITraffic/releases{/id}",
         "deployments_url": "https://api.github.com/repos/harri665/AITraffic/deployments",
         "created_at": "2026-04-27T18:55:11Z",
-        "updated_at": "2026-04-28T01:14:06Z",
-        "pushed_at": "2026-04-28T01:14:03Z",
+        "updated_at": "2026-09-30T21:54:02Z",
+        "pushed_at": "2026-09-30T21:53:58Z",
         "git_url": "git://github.com/harri665/AITraffic.git",
         "ssh_url": "git@github.com:harri665/AITraffic.git",
         "clone_url": "https://github.com/harri665/AITraffic.git",
         "svn_url": "https://github.com/harri665/AITraffic",
         "homepage": null,
-        "size": 155,
+        "size": 665,
         "stargazers_count": 0,
         "watchers_count": 0,
         "language": "C",
@@ -3049,7 +3049,7 @@
       }
     },
     "harri665/madixoutdoors3dwebsite": {
-      "fetchedAt": "2026-09-30T21:46:25.858Z",
+      "fetchedAt": "2026-10-01T20:07:42.971Z",
       "data": {
         "id": 1044428993,
         "node_id": "R_kgDOPkC4wQ",
@@ -3118,14 +3118,14 @@
         "releases_url": "https://api.github.com/repos/harri665/MadixOutdoors3DWebsite/releases{/id}",
         "deployments_url": "https://api.github.com/repos/harri665/MadixOutdoors3DWebsite/deployments",
         "created_at": "2025-08-25T17:07:32Z",
-        "updated_at": "2026-04-28T01:42:38Z",
-        "pushed_at": "2026-04-28T01:42:35Z",
+        "updated_at": "2026-09-30T21:54:04Z",
+        "pushed_at": "2026-09-30T21:54:00Z",
         "git_url": "git://github.com/harri665/MadixOutdoors3DWebsite.git",
         "ssh_url": "git@github.com:harri665/MadixOutdoors3DWebsite.git",
         "clone_url": "https://github.com/harri665/MadixOutdoors3DWebsite.git",
         "svn_url": "https://github.com/harri665/MadixOutdoors3DWebsite",
         "homepage": "",
-        "size": 217319,
+        "size": 217718,
         "stargazers_count": 0,
         "watchers_count": 0,
         "language": "JavaScript",
@@ -3158,7 +3158,7 @@
       }
     },
     "harri665/opengl-star-simulation": {
-      "fetchedAt": "2026-09-30T21:46:46.957Z",
+      "fetchedAt": "2026-10-01T05:37:09.287Z",
       "data": {
         "id": 1111355737,
         "node_id": "R_kgDOQj3xWQ",
@@ -3227,14 +3227,14 @@
         "releases_url": "https://api.github.com/repos/harri665/OpenGL-Star-Simulation/releases{/id}",
         "deployments_url": "https://api.github.com/repos/harri665/OpenGL-Star-Simulation/deployments",
         "created_at": "2025-12-06T19:17:26Z",
-        "updated_at": "2026-04-28T01:39:10Z",
-        "pushed_at": "2026-04-28T01:39:06Z",
+        "updated_at": "2026-09-30T21:54:07Z",
+        "pushed_at": "2026-09-30T21:54:03Z",
         "git_url": "git://github.com/harri665/OpenGL-Star-Simulation.git",
         "ssh_url": "git@github.com:harri665/OpenGL-Star-Simulation.git",
         "clone_url": "https://github.com/harri665/OpenGL-Star-Simulation.git",
         "svn_url": "https://github.com/harri665/OpenGL-Star-Simulation",
         "homepage": "",
-        "size": 5058,
+        "size": 5200,
         "stargazers_count": 0,
         "watchers_count": 0,
         "language": "C",
@@ -3269,16 +3269,16 @@
   },
   "readmes": {
     "harri665/MadixOutdoors3DWebsite": {
-      "fetchedAt": "2026-09-30T21:46:25.983Z",
+      "fetchedAt": "2026-10-01T20:07:43.111Z",
       "data": {
-        "content": "# Madix Outdoors — Interactive 3D Product Website\n\n**Live site:** https://madixoutdoors.harrison-martin.com/\n\nA scroll-driven, interactive 3D website built to showcase an outdoor product in a polished, web-friendly “product reveal” style experience. The site combines a full-screen 3D viewer with section-based storytelling, camera choreography, and on-model annotations.\n\n## Features\n\n- **Scroll-to-animate presentation** with section-based transitions\n- **3D product viewer** rendered in the browser (WebGL)\n- **Camera rig system** with predefined camera poses and smooth interpolation\n- **Annotation system + 2D overlays** to highlight product details\n- Loading screen optimized for large 3D assets (model-first UX)\n\n## Tech Stack\n\n- **Frontend:** React (Create React App via `react-app-rewired`)\n- **3D:** Three.js + React Three Fiber (`@react-three/fiber`) + Drei (`@react-three/drei`)\n- **Extra 3D tooling:** Babylon.js packages included (for loaders/material workflows)\n- **Styling:** Tailwind CSS\n- **Deployment:** Docker multi-stage build + **nginx** (static hosting)\n\n## Local Development\n\n### Prerequisites\n- Node.js + npm\n\n### Run locally\n```bash\nnpm install\nnpm start\n```\n\n### Production build\n```bash\nnpm run build\n```\n\n## Docker (Production-style)\n\nBuild and run with Docker Compose:\n\n```bash\ndocker compose up --build\n```\n\nBy default the compose file exposes the nginx container on:\n- http://localhost:9042\n\n## Project Notes / Architecture\n\nAt a high level:\n- The main app mounts a full-screen `<Canvas />` and uses a **camera rig** to control viewpoint.\n- Scrolling triggers **section-based camera poses** (position + target) for guided flythroughs.\n- An **annotation system** provides interactive callouts tied to the 3D scene, rendered as DOM overlays.\n\nKey entry points:\n- `src/App.js` — app shell, 3D canvas, loading overlay, and scroll-driven layout\n- `docker-compose.yml`, `Dockerfile`, `nginx.conf` — production container + static hosting\n\n---\n\n**Author:** Harrison (`harri665`)\n",
+        "content": "# Madix Outdoors 3D Website\n\nA scroll-driven 3D product page for the Madix Outdoors truck-bed camper. Scrolling plays the camper's animations (canopy, tent, doors, hatches) on a live Three.js model, with camera moves and feature callouts pinned to parts of the model.\n\n**Live site:** https://madixoutdoors.harrison-martin.com\n\n![Scrolling unfolds the camper](docs/madix-scroll.webp)\n\n## Features\n\n- Config-driven scroll sections: each section declares which animation clips it scrubs or snaps and where the camera goes\n- Fixed camera poses with eased transitions, and timed flythroughs\n- Callouts anchored to named objects in the model, drawn as HTML overlays with leader lines, with separate top and bottom placement on phones\n- Draco-compressed, gzipped GLB, decompressed in the browser\n- Docker multi-stage build served by nginx\n\n![Callouts on a phone](docs/madix-mobile-strip.webp)\n\n## Quick start\n\nRequires Node.js 18+.\n\n```bash\nnpm install\nnpm start          # http://localhost:3000\nnpm run build      # production build in build/\n```\n\n### Docker\n\n```bash\ndocker compose up --build      # http://localhost:9042\n```\n\n## Editing the page\n\n**Sections** are defined in `buildSectionDefs()` in `src/components/ScrollSections.js`:\n\n```js\n{\n  id: 4,\n  label: \"Door Open\",\n  actions: [\n    { mode: \"scrub\", clip: door, map: (s) => s },          // clip time follows scroll progress\n  ],\n  camera: {\n    mode: \"fixed\",                                          // or \"timeline\" with a list of poses\n    getPose: () => ({ position: new THREE.Vector3(1.7, 1.15, -0.8), target: new THREE.Vector3(-0.7, 0.9, -0.8) }),\n    baseDuration: (_, fast) => (fast ? 1.0 : 3.0),\n  },\n}\n```\n\n- `scrub` maps the section's scroll progress (0–1) through `map` to the clip's time.\n- `snap` sets a clip to a fixed time `t`, optionally only `when` a condition holds.\n- Each section needs a matching tall element in the `ScrollSections` layout.\n\n**Callouts** live in `annotationTargets` in `src/components/AnnotationSystem.js`, keyed by section. `objectName` must match a node name in the GLB; `description` supports `*` bullet lines; `position` (`\"top\"` or `\"bottom\"`) applies only below 768 px.\n\n**The model** is `public/Tent3.glb`. After replacing it, regenerate the compressed copy the site actually loads:\n\n```bash\nnpm run compress-glb      # writes public/Tent3.glb.gz (PowerShell)\n```\n\nAnimation clip names used by the sections: `TentOPENCLOSE`, `Door`, `Side`, `BackWindow`, `matress`, `animation0`.\n\n## Project structure\n\n```\nsrc/App.js                          layout, canvas, loading overlay\nsrc/components/SceneContent.js      loads the GLB, applies scrubbed clip times\nsrc/components/ScrollSections.js    section config, scroll progress, camera driver\nsrc/components/CameraRig.js         eased camera transitions\nsrc/components/AnnotationSystem.js  callout targets, 3D → screen projection\nsrc/components/AnnotationOverlays.js  callout cards and leader lines\nsrc/hooks/useGzipGLTF.js            gzip + Draco GLB loading\nnginx.conf, Dockerfile, docker-compose.yml   production container\n```\n\n## Performance note\n\nAbout 10.5 MB of the 12.3 MB model is one mesh's 31 morph targets, which Draco doesn't compress. Re-encoding with meshopt (`npx @gltf-transform/cli meshopt Tent3.glb out.glb`) brings the file to about 4.8 MB (3.5 MB gzipped). This hasn't been visually verified yet, and the loader would need `MeshoptDecoder` instead of the gzip step.\n\n## Contributing\n\nIssues and pull requests are welcome. The meshopt switch above is the highest-value change.\n",
         "name": "README.md"
       }
     },
     "harri665/MPM": {
-      "fetchedAt": "2026-09-30T21:47:00.075Z",
+      "fetchedAt": "2026-10-01T05:39:38.154Z",
       "data": {
-        "content": "# MPM (Material Point Method) — GPU Simulation\n\nA real-time 3D **Material Point Method (MPM)** simulator that runs the full physics pipeline on the GPU using **OpenGL 4.3+ compute shaders**. The project supports multiple material behaviors (gran[...]\n\n<table>\n  <tr>\n    <td><img src=\"https://cloud.harrison-martin.com/public.php/dav/files/enykwkka9TsR8Hn/\" width=\"100%\"/></td>\n\n  </tr>\n</table>\n\n## Overview\n\nMPM is a hybrid particle–grid technique commonly used in film VFX and research: particles carry material state, transfer momentum/stress to a background grid, the grid is updated, and then update[...]\n\nThis implementation executes the classic **P2G → GridUpdate → G2P** pipeline entirely on the GPU, and visualizes the result in real time.\n\n## Related versions\n\nThis repo also includes alternative implementations of the same core MPM ideas:\n\n- **WebGPU version (browser)**  \n  Live demo: https://mpm.harrison-martin.com  \n  Source: `webgpu` branch\n\n- **CUDA version**  \n  Source: `cuda` branch\n\n## Demo videos\n\nVideos are stored in `obsidian/video/`.\n\n> Note: GitHub does not reliably embed/play `.mp4` files inline in README markdown.\n> To show the videos *in the README*, the usual approach is to embed **animated GIFs** (or images) that link to the full-resolution MP4.\n\n### Default scene (res 1)\n\n![Default scene (res 1)](obsidian/video/-res%201.mp4)\n\n### Default scene (res 2)\n\n![Default scene (res 2)](obsidian/video/-res%202.mp4)\n\n### Castle collapse (res 1)\n\n![Castle collapse (res 1)](obsidian/video/-castle%20-res%201.mp4)\n\n### Castle collapse (res 2)\n\n![Castle collapse (res 2)](obsidian/video/-castle%20-res2.mp4)\n\n### Liquid (res 2)\n\n![Liquid (res 2)](obsidian/video/-liquid%20-res%202.mp4)\n\n### Mix + ball (res 2)\n\n![Mix + ball (res 2)](obsidian/video/-mix%20-res%202%20-ball.mp4)\n\n## Technical highlights\n\n- **GPU compute pipeline** — ClearGrid → P2G → GridUpdate → G2P implemented in GLSL compute shaders, no CPU physics per frame\n- **Instanced particle rendering** — particles drawn with a single instanced draw call; shaders read positions from SSBOs\n- **Drucker-Prager plasticity** — sand and granular materials use return-mapping in log-strain space to enforce a friction cone\n- **Per-particle materials** — per-particle elastic parameters enable multi-material scenes in one simulation\n- **Neo-Hookean elasticity** — elastic stress model for soft/stiff materials\n- **APIC transfer** — affine velocity field preserved per particle to reduce numerical dissipation vs PIC\n\n## Scenes\n\nRun different preset scenes using command-line flags:\n\n| Flag | Scene |\n|---|---|\n| *(default)* | Block dropped under gravity |\n| `-castle` | Castle structure collapse |\n| `-sand` | Sand castle with Drucker-Prager plasticity |\n| `-pour` | Material piling over a flat bed |\n| `-column` | Tall column buckling |\n| `-liquidsolid` | Dense solid base + light liquid on top |\n| `-solidliquid` | Liquid pool with heavy block dropped in |\n| `-crater` | Flat bed hit by a collision ball |\n| `-mix` | Two blobs fired at each other |\n| `-jello` | Soft elastic block |\n| `-rubber` | Stiff elastic cube — bounces and stretches |\n\n## Controls\n\n| Key | Action |\n|---|---|\n| `r` | Reset simulation |\n| `p` | Toggle Drucker-Prager plasticity |\n| `s` | Toggle instanced spheres / point cloud |\n| `v` | Toggle velocity colour mode |\n| `+` / `-` | Increase / decrease substeps per frame |\n| `a` | Toggle axes |\n| Arrow keys | Orbit camera |\n| PgUp / PgDn | Zoom |\n| `0` | Reset camera |\n| ESC | Exit |\n\n## Build & Run\n\n### Dependencies\n- OpenGL **4.3+** (compute shaders)\n- GLFW3\n- (Windows/macOS) GLEW (depending on setup)\n\n### Build\n```bash\nmake\n```\n\n### Run\n```bash\n# default scene\n./ex22\n\n# run a specific scene\n./ex22 -castle\n\n# higher resolution (CAREFUL scales as N^3)\n./ex22 -castle -res 2\n```\n\n## References\n\n\"A Moving Least Squares Material Point Method with Displacement Discontinuity and Two-Way Rigid Body Coupling\"_ (Hu et al., SIGGRAPH 2018).\n\n_\"The Affine Particle-In-Cell Method\"_ (Jiang et al., SIGGRAPH 2015).\n\n_\"A Material Point Method for Snow Simulation\"_ (Stomakhin et al., SIGGRAPH 2013).\n\n_\"Drucker-Prager Elastoplasticity for Sand Animation\"_ (Klár et al., SIGGRAPH 2016).\n\n---\n\n**Author:** Harrison (`harri665`)\n",
+        "content": "# MPM\n\nA real-time 3D Material Point Method (MPM) simulator that runs entirely on the GPU in OpenGL 4.3 compute shaders. One solver simulates sand, liquid, jelly, rubber and mixtures of them, with CUDA and WebGPU versions on separate branches.\n\n**Live demo (WebGPU):** https://mpm.harrison-martin.com/?castle&res=1\n\n<img src=\"https://cloud.harrison-martin.com/public.php/dav/files/enykwkka9TsR8Hn/\" width=\"100%\" alt=\"Sand castle collapsing under a ball impact\"/>\n\n## Features\n\n- Full MPM pipeline on the GPU: clear grid → particle-to-grid (P2G) → grid update → grid-to-particle (G2P), with no CPU physics per frame\n- **APIC** transfers (affine particle-in-cell) to preserve angular momentum\n- **Neo-Hookean** elasticity for soft and stiff solids\n- **Drucker–Prager** plasticity with return mapping in log-strain space, for sand that yields and stays deformed\n- **Per-particle material parameters**, so several materials share one simulation\n- Instanced sphere or point-cloud rendering from the particle buffer, with optional velocity colouring\n\n## Versions\n\n| branch | backend | notes |\n|---|---|---|\n| `main` | OpenGL 4.3 compute shaders | the reference implementation |\n| `webgpu` | WebGPU (`webgpu/`) | runs in the browser; live at the link above |\n| `cuda` | CUDA simulation, OpenGL rendering | Windows, CUDA 12.4, `sm_86` by default |\n| `optimization` | OpenGL | adds per-pass GPU timing (`-debug`), native float atomics where supported, and `.bgeo` export for Houdini (`-bgeo`) |\n\n## Build and run (OpenGL, `main`)\n\nRequires an OpenGL 4.3+ GPU and GLFW. On Windows, build from an MSYS2 MinGW shell with GLFW and GLEW installed (`pacman -S mingw-w64-x86_64-glfw mingw-w64-x86_64-glew`).\n\n```bash\nmake\n./ex22                     # default scene\n./ex22 -castle -ball       # castle hit by a ball\n./ex22 -castle -res 2      # 8× the particles (see below)\n```\n\n`-res N` scales the grid by N and the particle count by N³: `-res 1` is a 64³ grid with 16,384 particles, `-res 2` is 128³ with 131,072. Memory and compute grow as N³.\n\n### Run the WebGPU version locally\n\n```bash\ngit checkout webgpu\ndocker compose up --build        # http://localhost:8980\n```\n\nOr serve the `webgpu/` folder with any static file server over `localhost` or HTTPS, and open it in a browser with WebGPU.\n\n## Scenes\n\n| flag | scene |\n|---|---|\n| *(none)* | block dropped under gravity |\n| `-castle` | castle collapse (add `-ball` for an impact) |\n| `-sand` | sand castle with Drucker–Prager plasticity |\n| `-pour` | material piling onto a flat bed |\n| `-column` | tall column collapsing under its own weight |\n| `-liquidsolid` | dense solid base with light liquid on top |\n| `-solidliquid` | heavy block dropped into a liquid pool |\n| `-crater` | flat bed hit by a ball |\n| `-mix` | two blobs fired at each other |\n| `-jello` | soft elastic block |\n| `-rubber` | stiff elastic cube that bounces and stretches |\n| `-liquid` | liquid flow |\n| `-concrete`, `-lava` | additional material presets |\n\nIn the WebGPU version, the same names work as URL flags: `?sand&ball&res=2`.\n\n## Controls\n\n| key | action |\n|---|---|\n| `r` | reset the simulation |\n| `p` | toggle Drucker–Prager plasticity |\n| `s` | toggle instanced spheres / point cloud |\n| `v` | toggle velocity colouring |\n| `+` / `-` | more / fewer substeps per frame |\n| `a` | toggle axes |\n| arrow keys | orbit the camera |\n| PgUp / PgDn | zoom |\n| `0` | reset the camera |\n| Esc | quit |\n\n## Project layout\n\n```\nex22.c               setup, scenes, main loop, input\nparticle.cs          particle struct shared by the shaders\nmpm_clear.cs         clear grid\nmpm_p2g.cs           particle to grid: stress, APIC, scatter\nmpm_grid_update.cs   momentum to velocity, gravity, boundaries\nmpm_g2p.cs           grid to particle: gather, advect, update F, plasticity\nmpm_sphere.vert/.frag  instanced particle rendering\nobsidian/            design notes, paper notes, demo videos\n```\n\nEach particle is a `std430` struct holding position, velocity, the deformation gradient `F`, the APIC matrix `C`, mass, volume and its Lamé parameters. The 3×3 matrices are stored as `float[12]` because `std430` pads each column of a `mat3` to 16 bytes.\n\n## Contributing\n\nIssues and pull requests are welcome. Useful directions: merging the `optimization` branch's timing and native atomics into `main`, sparse grids for larger domains, and rigid-body coupling.\n\n## References\n\n- Hu et al., *A Moving Least Squares Material Point Method with Displacement Discontinuity and Two-Way Rigid Body Coupling*, SIGGRAPH 2018\n- Jiang et al., *The Affine Particle-In-Cell Method*, SIGGRAPH 2015\n- Stomakhin et al., *A Material Point Method for Snow Simulation*, SIGGRAPH 2013\n- Klár et al., *Drucker-Prager Elastoplasticity for Sand Animation*, SIGGRAPH 2016\n\nA step-by-step walkthrough of the math: [MPM in CUDA, Compute Shaders, and WebGPU](https://blog.harrison-martin.com/mpm).\n",
         "name": "README.md"
       }
     },
@@ -3290,28 +3290,28 @@
       }
     },
     "MurderMysteryCH/MurderMysteryV2": {
-      "fetchedAt": "2026-09-30T22:57:23.701Z",
+      "fetchedAt": "2026-10-01T20:25:25.522Z",
       "data": {
         "content": "# Harrison Default Web Template\n\nA full-stack web application template with React frontend and Express backend.\n\n## Project Structure\n\n```\nHarrisonDefaultWeb/\n├── client/          # React frontend (Vite + React 19)\n├── server/          # Express backend\n└── package.json     # Root package with concurrent scripts\n```\n\n## Tech Stack\n\n### Frontend (Client)\n- **React 19** - UI library\n- **React Router DOM** - Client-side routing\n- **Vite** - Build tool and dev server\n- **Tailwind CSS 4** - Utility-first CSS framework\n- **ESLint** - Code linting\n\n### Backend (Server)\n- **Express 5** - Web framework\n- **CORS** - Cross-origin resource sharing\n- **Nodemon** - Development auto-restart\n\n## Getting Started\n\n### Prerequisites\n- Node.js (v16 or higher recommended)\n- npm\n\n### Installation\n\n1. Clone the repository:\n```bash\ngit clone https://github.com/harri665/HarrisonWebDefault.git\ncd HarrisonDefaultWeb\n```\n\n2. Install dependencies for all packages:\n```bash\nnpm install\nnpm run install:all\n```\n\n### Development\n\nStart both client and server concurrently:\n```bash\nnpm run dev\n```\n\nOr run them individually:\n```bash\nnpm run client    # Start frontend only\nnpm run server    # Start backend only\n```\n\nThe client will typically run on `http://localhost:5173` and the server on `http://localhost:3001` (or ports configured in your setup).\n\nTo change port for client or servercreate a .env in the respective folder with: \n```env\nPORT: #port number here \n```\n\n\n## Available Scripts\n\n### Root Level\n- `npm run dev` - Run both client and server concurrently\n- `npm run client` - Run client development server only\n- `npm run server` - Run server development server only\n- `npm run install:all` - Install dependencies in both client and server\n\n### Client (`cd client`)\n- `npm run dev` - Start Vite dev server\n- `npm run build` - Build for production\n- `npm run preview` - Preview production build\n- `npm run lint` - Run ESLint\n\n### Server (`cd server`)\n- `npm run dev` - Start server with nodemon (auto-restart)\n- `npm start` - Start server in production mode\n\n\n\n\n### Building to Native: \n1. `cd client`\n2. `npm run build`\n3. `npx cap sync` ",
         "name": "README.md"
       }
     },
     "harri665/OpenGL-Star-Simulation": {
-      "fetchedAt": "2026-09-30T21:46:46.971Z",
+      "fetchedAt": "2026-10-01T05:37:09.451Z",
       "data": {
-        "content": "# OpenGL Star Simulation\n\nA GPU-accelerated particle simulation of a star, driven by **real velocity-field data** (exported from a VDB workflow). Particles are advected through the vector field and rendered in real time with interactive camera controls, trails, and tuning parameters.\n\n![OpenGL Star Simulation screenshot](15be0b55fa4e7580-Screenshot_2026-04-27_193558.png)\n\n## Overview\n\nThis project visualizes a star-like flow using a precomputed **vector field** (originating from VDB data). Instead of integrating OpenVDB directly (out of scope for this project), the vector field is converted into a lightweight binary format and sampled at runtime to drive particle motion.\n\nRelated project inspiration/demo (Houdini workflow):  \nhttps://harrison-martin.com/#/projects/8Bvxdn\n\n## Visual encoding\n\n- Color is mapped along a **blackbody-style gradient** from red → blue\n- Color represents **particle speed**:\n  - **Blue** = faster\n  - **Red** = slower\n\n## Run\n\n### Option A (Windows)\nRun:\n- `final.exe`\n\n### Option B (Build from source)\n```bash\nmake\n./final.exe\n```\n\n> Tip: For a denser / more impressive result, increase the maximum particle count as high as your machine can handle.\n\n## Controls\n\n- **Mouse**: orbit / pan / zoom camera\n- **Space**: pause / resume simulation\n- **,** / **.**: decrease / increase field strength\n- **1** / **2**: decrease / increase max particles (acts like higher emission because emission is high by default)\n- **3** / **4**: decrease / increase emission rate (use carefully)\n- **5** / **6**: adjust trail length (mostly for testing)\n- **7** / **8**: decrease / increase star radius (for experimentation; not physically accurate)\n- **9** / **0**: resize the vector velocity field (testing)\n- **U**: toggle velocity vector display (shows the underlying field direction)\n- **T**: toggle particle trails\n- **B**: show full particle path since spawn (when trails are enabled)\n- **R**: reset particles\n- **ESC** / **Q**: quit immediately (useful if you push settings too far)\n\n## Notes\n\n- Some controls/features are marked deprecated in the original project notes and may not have an effect depending on build/version.\n\n---\n\n**Author:** Harrison (`harri665`)\n",
+        "content": "# OpenGL Star Simulation\n\nA real-time particle visualisation of a neutron star's magnetic field. Particles are advected on the GPU with OpenCL, through either a velocity field converted from Houdini VDB data (NASA IXPE observations, via LASP) or an analytic tilted magnetic dipole, and rendered with OpenGL.\n\n![Particles streaming around the star](docs/star-sim.webp)\n\n## Features\n\n- OpenCL particle integration, with up to 2M particle slots\n- Two field modes: sampled VDB-derived velocity frames, or an analytic dipole with Lorentz-force motion\n- Speed-coloured particles (red slow, blue fast), optional trails, field-line and velocity-vector debug views\n- Runtime controls for field strength, dipole tilt, emission, particle count and star radius\n- Python converter from `.vdb` to a dependency-free binary grid\n\n## Build\n\nRequires a C compiler, OpenGL, (free)GLUT and an OpenCL runtime (NVIDIA, AMD and Intel drivers include one). The OpenCL headers are bundled in `CL/`.\n\n```bash\nmake\n./final\n```\n\nOn Windows, build from an MSYS2 MinGW shell with freeglut and the OpenCL ICD loader installed (`pacman -S mingw-w64-x86_64-freeglut mingw-w64-x86_64-opencl-icd`). On macOS, the Makefile uses the system GLUT, OpenGL and OpenCL frameworks.\n\n## Data\n\nWithout data, the simulation uses the analytic dipole field. To drive it with a VDB velocity sequence:\n\n1. Put the Houdini `.vdb` frames in `v1/`, named `untitled.VelocityField_v1.0001.vdb`, `…0002.vdb`, and so on.\n2. Convert them (requires Python with `numpy` and OpenVDB bindings, for example `conda install -c conda-forge openvdb`):\n\n   ```bash\n   python convert_vdb_to_bin.py\n   ```\n\n   This writes a `.bin` next to each `.vdb`: a header (`GRID`, version, dimensions, voxel size, origin) followed by a dense `float32` xyz velocity array.\n3. Run `./final`. It loads the next frame each rendered frame and loops after frame 1000.\n\n## Controls\n\n| input | action |\n|---|---|\n| mouse drag | rotate the camera |\n| mouse wheel, `+` / `-` | zoom |\n| Space | pause / resume |\n| `[` / `]` | dipole tilt −/+ 5° |\n| `,` / `.` | field strength ×0.9 / ×1.1 |\n| `1` / `2` | max particles −/+ 500 |\n| `3` / `4` | emission −/+ 50 per second |\n| `5` / `6` | trail length −/+ |\n| `7` / `8` | star radius −/+ 0.1 |\n| `9` / `0` | grid scale ×0.9 / ×1.1 |\n| `T` | toggle trails |\n| `B` | trails from birth position |\n| `V` | toggle field lines |\n| `U` | toggle velocity vectors |\n| `R` | reset particles |\n| Esc / `Q` | quit |\n\n## Performance\n\nThe frame rate is currently limited by data movement, not the GPU. Each frame reads all 2M particle slots back from OpenCL (about 88 MB) and draws them with immediate-mode OpenGL on the CPU, and in data mode it also reads the next grid frame from disk. Sharing the particle buffer between OpenCL and OpenGL (`clCreateFromGLBuffer`) and dispatching over live particles only are the planned fixes.\n\n## Contributing\n\nIssues and pull requests are welcome, especially the performance work above, and trilinear sampling of the velocity grid (it currently uses the nearest voxel).\n\n## Related\n\n- The offline Houdini version of this visualisation: [IXPE Data Visualization](https://art.harrison-martin.com/8Bvxdn)\n- Write-up: [A Neutron Star's Magnetic Field in Real Time](https://blog.harrison-martin.com/neutron-star-fields)\n",
         "name": "README.md"
       }
     },
     "harri665/AITraffic": {
-      "fetchedAt": "2026-09-30T21:40:37.387Z",
+      "fetchedAt": "2026-10-01T03:03:26.687Z",
       "data": {
-        "content": "# AITraffic\n\nTraffic simulation in C with real-time OpenGL visualization and reinforcement-learning (Q-learning) traffic light control. The simulator models a 5×5 grid of intersections, spawns vehicles with randomized routes, and compares a fixed-timer signal strategy against learned, adaptive control.\n\n## What it does\n\n- Simulates vehicles driving across a grid of intersections\n- Routes each vehicle using **A\\*** shortest-path planning\n- Controls lights in two modes:\n  - **Fixed-timer mode** (baseline cycling)\n  - **RL mode**: **one Q-learning agent per intersection** that learns when to switch/hold greens based on queue state\n- Includes multiple vehicle types (e.g., normal, bus, emergency) to vary behavior\n- Displays live performance stats (e.g., average wait time) and exports metrics to `metrics.csv`\n- Supports a **fast training mode** to accelerate learning (reduces rendering overhead)\n\n## Tech stack\n\n- **Language:** C\n- **Rendering:** OpenGL (2D)\n- **Window/Input:** GLFW\n- **AI:** Q-learning implemented from scratch (no external ML libraries)\n\n## Controls (in-app)\n\n- `1` — Fixed-timer mode  \n- `2` — RL mode  \n- `+` / `-` — Adjust simulation speed  \n- `T` — Toggle fast-train mode  \n- `R` — Reset simulation  \n- `ESC` — Quit  \n\n## Build & Run\n\n### Prerequisites\n- A C compiler (gcc/clang)\n- OpenGL + GLFW installed\n- (Windows/macOS) GLEW may be required depending on your environment\n\n### Build\n```bash\nmake\n```\n\n### Run\n```bash\n./traffic\n```\n\n## Project structure\n\n- `traffic.h` — shared structs/constants/prototypes\n- `main.c` — window setup + main loop + controls\n- `simulation.c` — vehicle spawning/movement, queue stats, metrics export\n- `pathfinding.c` — A* routing on the grid\n- `rl_agent.c` — Q-learning controller (epsilon-greedy, replay, target table)\n- `render.c` — OpenGL drawing for roads/lights/vehicles/HUD\n\n## Results\n\nThe RL controller is designed to start suboptimal (exploration) and improve over time as it learns a switching policy that reduces queueing and average wait time compared to a fixed schedule. Metrics are logged to `metrics.csv` for comparison/plotting.\n\n---\n\n**Author:** Harrison (`harri665`)\n",
+        "content": "# AITraffic\n\nA traffic simulation in C with real-time OpenGL visualisation, where each intersection's lights can be run by a fixed timer or by its own Q-learning agent. It includes a headless benchmark for comparing the two.\n\n![Q-learning agents controlling a 5×5 grid](docs/aitraffic-rl-anim.webp)\n\n## Features\n\n- 5×5 grid of intersections, up to 300 vehicles, routes planned with A*\n- Rush-hour demand cycle (1× to 2.5× spawn rate over 2 minutes)\n- Normal cars, slower buses, and emergency vehicles that run red lights\n- Two controllers: **fixed timer**, or **one Q-learning agent per intersection** (experience replay and a target table, no ML libraries)\n- Fast-training mode that skips rendering\n- Live stats, a wait-time sparkline, and `metrics.csv` export\n- `bench/headless` for multi-seed comparisons without a window\n\n## Build\n\nRequires a C compiler, OpenGL and GLFW. On Windows, build from an MSYS2 MinGW shell with GLFW and GLEW installed (`pacman -S mingw-w64-x86_64-glfw mingw-w64-x86_64-glew`).\n\n```bash\nmake            # builds ./traffic\nmake bench      # builds ./bench/headless\n```\n\n## Usage\n\n```bash\n./traffic\n```\n\n| key | action |\n|---|---|\n| `1` | fixed-timer mode |\n| `2` | Q-learning mode |\n| `+` / `-` | simulation speed ×2 / ×0.5 (0.25× to 64×) |\n| `T` | toggle fast training (20 steps per frame, no rendering) |\n| `R` | reset |\n| Esc | quit |\n\nStats are printed every 10 simulated seconds and appended to `metrics.csv` (`time_s, mode, active, completed, avg_wait_s, avg_travel_s, demand_mult`). The file is overwritten on reset.\n\n## Benchmark\n\n```bash\n./bench/headless [train_seconds] [eval_seconds] [seeds] | grep -v '^\\['\n./bench/headless 7200 3600 8 | grep -v '^\\['\n```\n\nEach seed runs both controllers at a fixed `dt = 0.05`: `train_seconds` of warm-up (and training, for Q-learning), then `eval_seconds` of measurement. It reports trips per hour, average wait of finished trips, vehicle-hours spent waiting (including unfinished trips), mean active vehicles, and the share of time the 300-vehicle cap was hit. That last one matters: when the cap is hit, spawns are dropped and \"average wait\" becomes unreliable.\n\nResults on the default settings (mean of 8 seeds, 1 hour after 2 hours of training):\n\n![Average wait by controller](docs/aitraffic-results.png)\n\n| controller | average wait |\n|---|---|\n| fixed timer, 8 s green (default) | 19.0 s |\n| Q-learning, decides every 8 s (default) | 11.4 s |\n| fixed timer, 1 s green | 6.3 s |\n| Q-learning, decides every 2 s | 4.7 s |\n\nThroughput was the same in every configuration and the vehicle cap was never hit.\n\n## Configuration\n\nAll tunables are `#define`s in `traffic.h`:\n\n| constant | default | meaning |\n|---|---|---|\n| `GRID_W`, `GRID_H` | 5 | grid size |\n| `MAX_VEHICLES` | 300 | vehicle cap |\n| `SPAWN_INTERVAL` | 0.35 s | base time between spawns |\n| `RUSH_PERIOD`, `RUSH_PEAK` | 120 s, 2.5× | demand cycle |\n| `FIXED_CYCLE`, `YELLOW_TIME` | 8 s, 1.5 s | fixed-timer green and yellow |\n| `RL_INTERVAL` | 8 s | how often each agent decides (the biggest lever; see results) |\n| `RL_ALPHA`, `RL_GAMMA` | 0.2, 0.95 | learning rate, discount |\n| `RL_EPSILON_INIT`, `_MIN`, `_DECAY` | 0.3, 0.05, 0.995 | exploration schedule, per decision |\n| `REPLAY_CAPACITY`, `REPLAY_BATCH` | 2000, 32 | experience replay |\n| `TARGET_UPDATE_STEPS` | 20 | decisions between target-table syncs |\n| `REWARD_WAIT_W`, `REWARD_THRU_W` | 1.0, 0.5 | reward = −waiting × W + cleared × T |\n\nThe agent's state is each direction's queue length binned to 0 / 1–2 / 3–5 / 6+, plus the current phase (512 states). Actions are keep or switch.\n\n## Project structure\n\n```\ntraffic.h       structs, constants, prototypes\nmain.c          window, main loop, controls\nsimulation.c    spawning, movement, lights, queues, metrics, CSV\npathfinding.c   A* on the intersection grid\nrl_agent.c      Q-learning controller\nrender.c        OpenGL roads, lights, vehicles, sparkline\nbench/          headless benchmark\n```\n\n## Known limitations\n\n- There is no start-up lost time or minimum green, so switching lights costs almost nothing, which favours very short cycles.\n- Each agent sees only its own queues. The neighbour-congestion input described in `rl_agent.c`'s header comment is not implemented.\n\n## Contributing\n\nIssues and pull requests are welcome, especially start-up lost time and minimum greens in `simulation.c`, and neighbour information in the agents' state. Please include `bench/headless` numbers for changes to either controller.\n\n## Further reading\n\nHow the results above were measured, and why the first comparison was misleading: [My Traffic AI Beat the Baseline. Then I Tuned the Baseline.](https://blog.harrison-martin.com/tune-your-baseline)\n",
         "name": "README.md"
       }
     },
     "harri665/relight": {
-      "fetchedAt": "2026-09-30T22:57:27.820Z",
+      "fetchedAt": "2026-10-01T20:22:38.480Z",
       "data": {
         "content": "# Relight\n\nRelight a path-traced scene in the browser in milliseconds. This is a re-implementation of *Neural Render Proxies for Interactive and Differentiable Lighting* (Sancho et al., EGSR 2026): a Python pipeline trains a small network per scene, and a WebGPU viewer (with a WebGL2 fallback) runs it for interactive relighting and \"paint the light you want\" inverse lighting.\n\n**Live demo:** https://relight.harrison-martin.com\n\n![Dragging a light in the viewer](docs/relight-drag.webp)\n\n## Features\n\n- Move, resize and recolour sphere lights and see indirect light update in real time (about 5 ms per light on an RTX 3080 at 512²)\n- **Paint & Optimize:** paint the lighting you want, or load a target image, and gradient descent moves the lights to match\n- **Accuracy tab:** compare the network against path-traced references for held-out lights\n- WebGPU, with an automatic WebGL2 fallback for browsers without it (most phones)\n- Two shipped models for the Cornell box: fast (128×4) and quality (256×4)\n\n## Quick start\n\nRequires Node.js 20.19+ (Vite 7).\n\n```bash\nnpm install\nnpm run install:all\nnpm run dev              # open http://localhost:5173\n```\n\nThe trained Cornell box models are included in `client/public/scenes/`, so no Python is needed to run the viewer.\n\n### Other ways to run it\n\n| command | what it does |\n|---|---|\n| `npm run lan` | also serves to phones and tablets on your network (WebGL2 there, since WebGPU needs HTTPS) |\n| `npm run https` | same, over HTTPS with a self-signed certificate, so other devices get WebGPU. Accept the certificate warning once per device |\n| `npm run build` | static build into `client/dist` |\n| `docker compose up --build` | nginx serving the viewer on http://localhost:54890, API on 54891 |\n\nOn Windows, `lan` and `https` need Windows Firewall to allow Node on the network, and Windows only allows that for networks set to *Private*.\n\n## Usage\n\n| input | action |\n|---|---|\n| drag a light | move it across the image |\n| mouse wheel | move the selected light in depth |\n| Shift + wheel | change its radius |\n| double-click a surface | place the selected light there |\n\n### URL parameters\n\n| parameter | effect |\n|---|---|\n| `?backend=webgpu` / `?backend=webgl` | force a backend (the header switch does the same and keeps your lights) |\n| `?res=384` / `?res=768` | use a smaller or larger export of the scene (smaller is faster on weak GPUs; reference renders exist only at native size) |\n\nOn slow GPUs, a moving light is previewed on every 2nd, 4th or 8th pixel, chosen from measured timings, and refined to full resolution about 150 ms after it stops.\n\n## Train your own models\n\nThe Python pipeline needs an NVIDIA GPU with CUDA. Large files (the virtual environment and path dumps of about 2.5 GB per scene) live outside the repo in `%USERPROFILE%\\relight-work`; set `RELIGHT_WORK` to use a different location.\n\n```bash\npython -m venv %USERPROFILE%\\relight-work\\venv\npip install torch --index-url https://download.pytorch.org/whl/cu124\npip install mitsuba numpy pillow \"triton-windows<3.3\" oidn\n```\n\nOptional but about 20× faster data generation: unpack the [OIDN 2.x Windows release](https://github.com/RenderKit/oidn/releases) into `%USERPROFILE%\\relight-work`, or set `OIDN_DIR`.\n\n```bash\ncd nrp\npython sample_paths.py --scene cornell --res 512 --spp 128      # ~1 min on an RTX 3080\npython validate_gather.py                                       # optional sanity check\npython train.py --geo --head mul --width 128 --hidden 4 --iters 100000 --name cornell_geo_128x4   # ~21 min\npython export.py --run cornell_geo_128x4 --name cornell         # add --res N for other image sizes\npython evaluate.py --runs cornell_geo_128x4                     # optional: score against 1024-spp references\n```\n\n## Project layout\n\n```\nnrp/                        Python: data generation and training (PyTorch, Mitsuba 3, Triton, OIDN)\n  scenes.py                 emitter-free scenes and the light domain\n  sample_paths.py           SAMPLEPATHS: light-agnostic path dump\n  gather.py                 GATHERLIGHT: fused Triton kernel for sphere lights\n  direct.py                 analytic direct-view term\n  denoise.py                OIDN 2 (CUDA via ctypes) with CPU fallback\n  model.py / train.py       grid-encoded MLP and pool-based training\n  export.py / evaluate.py   export for the viewer; accuracy against references\nclient/                     React 19 + Vite + Tailwind CSS 4 viewer\n  src/engine/shaders.js     WGSL: precompute, fused MLP forward, composite, loss, backward\n  src/engine/nrp.js         WebGPU engine and Adam light optimizer\n  src/engine/nrp-gl.js      WebGL2 fallback engine\n  src/relight/relighter.js  lights, render loop, interaction, optimization\nserver/                     Express health-check API (the viewer itself is static)\n```\n\n## How it maps to the paper\n\n| paper | here |\n|---|---|\n| §3.1 SAMPLEPATHS / GATHERLIGHT | `sample_paths.py` (Mitsuba 3, BSDF sampling without NEE, fp16 vertices) and `gather.py` (one Triton kernel) |\n| §3.2 linearity | one network per light type; the viewer caches each light's contribution, so colour and intensity edits are free |\n| §4.3 network | `model.py`; in 2D the hash grid never collides, so it is stored as dense multi-resolution grids |\n| §4.4 training | `train.py`; pool of 300 denoised images, 2 replaced every 5 iterations, segment-based light sampling, relative MSE |\n| §5.3 inverse lighting | `client/src/engine/nrp.js` with a hand-written WGSL backward pass |\n\n**Deliberate deviations:** the directly visible light (segment 0) is computed analytically rather than learned, geometric per-light inputs and a multiplicative output head are added (+2 dB, 25% less error), and the networks are smaller (128×4 and 256×4 instead of 256×8) so they run interactively in a browser.\n\n## Accuracy\n\nScored by `evaluate.py` against denoised 1024-spp references on 37 lights:\n\n| model | PSNR | relative error | worst 5 lights | per light (RTX 3080, 512²) |\n|---|---|---|---|---|\n| `cornell` (fast, 128×4) | 44.0 dB | 4.4 % | 32.5 dB | 4.8 ms |\n| `cornell-hq` (quality, 256×4) | 46.2 dB | 3.5 % | 34.1 dB | 17.1 ms |\n\n![Proxy, reference and error for a light behind the tall box](docs/relight-accuracy-t6.webp)\n\nRegions the camera's paths rarely reach, like the wall behind the tall box, are the least accurate (test 6 above).\n\n## Limitations\n\n- A proxy is trained for one static scene and one camera.\n- Lights are valid only inside the training domain (`light_bbox`, `radius_range`); the viewer clamps them to it.\n- Inverse lighting with several lights is non-convex. If it lands somewhere odd, press Undo, drag a light roughly into place and optimize again.\n\n## Contributing\n\nIssues and pull requests are welcome. Good places to start:\n\n- **fp16 kernels** (`shader-f16`) in `shaders.js`, which should roughly halve the cost per light\n- **new scenes** in `nrp/scenes.py`\n- more path samples for regions the camera rarely reaches\n\nFor changes to the network or training, please include `evaluate.py` numbers before and after.\n\n## Further reading\n\nA write-up of how this was built, and what the accuracy harness showed: [Relighting a Path-Traced Room in 5 ms](https://blog.harrison-martin.com/neural-render-proxies-in-the-browser).\n",
         "name": "README.md"
@@ -3320,7 +3320,7 @@
   },
   "languages": {
     "harri665/MPM": {
-      "fetchedAt": "2026-09-30T21:46:59.907Z",
+      "fetchedAt": "2026-10-01T00:13:34.904Z",
       "data": {
         "C": 123822,
         "C#": 16607,
@@ -3337,7 +3337,7 @@
       }
     },
     "harri665/relight": {
-      "fetchedAt": "2026-09-30T22:57:27.887Z",
+      "fetchedAt": "2026-10-01T00:39:03.671Z",
       "data": {
         "JavaScript": 134457,
         "Python": 55923,
@@ -3354,7 +3354,7 @@
       }
     },
     "harri665/MadixOutdoors3DWebsite": {
-      "fetchedAt": "2026-09-30T21:46:25.827Z",
+      "fetchedAt": "2026-10-01T00:14:53.269Z",
       "data": {
         "JavaScript": 125784,
         "CSS": 7852,
@@ -3364,7 +3364,7 @@
       }
     },
     "harri665/OpenGL-Star-Simulation": {
-      "fetchedAt": "2026-09-30T21:46:46.919Z",
+      "fetchedAt": "2026-09-30T23:36:49.630Z",
       "data": {
         "C": 63998,
         "Python": 3588,
@@ -3374,7 +3374,7 @@
       }
     },
     "MurderMysteryCH/MurderMysteryV2": {
-      "fetchedAt": "2026-09-30T21:47:39.995Z",
+      "fetchedAt": "2026-10-01T00:12:09.950Z",
       "data": {
         "JavaScript": 4249,
         "Python": 1293,

@@ -14,18 +14,6 @@ import Tag from '../ui/Tag';
 
 const GITHUB_USERNAME = 'harri665';
 
-function formatDate(value) {
-  if (!value) {
-    return 'Unknown';
-  }
-
-  return new Date(value).toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  });
-}
-
 async function getResponseErrorMessage(response, fallbackMessage) {
   try {
     const data = await response.json();
@@ -254,8 +242,9 @@ export default function CSHomePage() {
         fullHeight
         peek
         align="left"
+        glassTitle
         title="Computer science"
-        subtitle="Software, tools, and research code, pulled live from GitHub."
+        subtitle="GPU simulations, renderers, and full-stack apps, plus the tools I build along the way."
       />
 
       <Container as="main" id="projects" className="relative z-10 pb-24">
@@ -301,8 +290,9 @@ function RepoCard({ repo, meta }) {
       onFocus={() => setEngaged(true)}
       onBlur={() => setEngaged(false)}
       onPointerMove={trackPointer}
-      // glass over the relit room, which bends it at the rim (LiquidGlassPass)
       data-liquid-glass
+      data-glass-bevel
+      data-glass-hover
       className="liquid-glass prism-glow lens-cs group relative flex flex-col overflow-hidden rounded-card"
     >
       <span aria-hidden="true" className="liquid-glass-rim" />
@@ -312,18 +302,19 @@ function RepoCard({ repo, meta }) {
 
       {/* z-index without position works on a flex item, keeps the title link stretched over the card */}
       <div className="z-[2] flex flex-1 flex-col p-5">
-        <p className="flex flex-wrap gap-x-4 text-sm text-ink-3">
-          {repo.language && <span className="text-accent">{repo.language}</span>}
-          <span>Updated {formatDate(repo.pushed_at)}</span>
-        </p>
+        {repo.language && <p className="mb-2 text-sm text-accent">{repo.language}</p>}
 
-        <h2 className="mt-2 text-xl font-semibold tracking-tight text-ink">
+        <h2 className="text-xl font-semibold tracking-tight text-ink">
           <Link to={`/${repo.name}`} className="after:absolute after:inset-0 after:content-['']">
             {title}
           </Link>
         </h2>
 
-        {summary && <p className="mt-2 text-sm leading-relaxed text-ink-2">{summary}</p>}
+        {summary && (
+          <p className="mt-2 text-sm leading-relaxed text-ink [text-shadow:0_1px_2px_rgb(0_0_0/0.7),0_0_12px_rgb(0_0_0/0.55)]">
+            {summary}
+          </p>
+        )}
 
         {topics.length > 0 && (
           <div className="mt-4 flex flex-wrap gap-1.5">
