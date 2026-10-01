@@ -334,9 +334,12 @@ function RepoCard({ repo, meta }) {
         )}
 
         <div className="relative z-10 mt-auto flex flex-wrap gap-2 pt-5">
-          <Button size="sm" href={repo.html_url} target="_blank" rel="noopener noreferrer">
-            GitHub
-          </Button>
+          {/* a private repo has no page visitors can open (getCsRepo, server.js) */}
+          {repo.html_url && (
+            <Button size="sm" href={repo.html_url} target="_blank" rel="noopener noreferrer">
+              GitHub
+            </Button>
+          )}
           {demoUrl && (
             <Button size="sm" href={demoUrl} target="_blank" rel="noopener noreferrer">
               Live demo

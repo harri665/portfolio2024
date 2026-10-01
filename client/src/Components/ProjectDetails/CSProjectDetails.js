@@ -219,9 +219,11 @@ export default function CSProjectDetails() {
                   Read the blog post
                 </OutLink>
               )}
-              <OutLink href={repoData.html_url} icon={<FaGithub />}>
-                Source on GitHub
-              </OutLink>
+              {repoData.html_url && (
+                <OutLink href={repoData.html_url} icon={<FaGithub />}>
+                  Source on GitHub
+                </OutLink>
+              )}
             </div>
 
             {sections.length > 1 && <Contents sections={sections} />}

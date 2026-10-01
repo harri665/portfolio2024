@@ -3,7 +3,8 @@
 // README is written for someone who wants to run the code; this page is
 // written for someone deciding whether to work with its author, so it leads
 // with the outcome and links out to the live demo, the code and the blog post.
-// A repo without a page keeps showing its README.
+// A repo without a page keeps showing its README. A page marked privateRepo
+// stands in for a repo visitors can't open, like a team's private one.
 
 import fs from 'fs';
 import path from 'path';
@@ -34,6 +35,7 @@ function normalizeMeta(data, repo) {
     cover: data.cover || '',
     video: data.video || '',
     published: data.published !== false,
+    privateRepo: data.privateRepo === true,
   };
 }
 
@@ -78,12 +80,14 @@ export function createProjectPages(dir) {
     if (!isProjectPageName(repo)) throw new Error('Invalid repository name');
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     const meta = normalizeMeta(fields, repo);
-    // Only the fields that are set, so the files stay short to read by hand
+    // Only the fields that are set, so the files stay short to read by hand;
+    // `published` is written either way, since leaving it out means true
     const frontmatter = Object.fromEntries(
-      Object.entries(meta).filter(
-        ([key, value]) =>
-          key !== 'repo' && (Array.isArray(value) ? value.length > 0 : value !== '')
-      )
+      Object.entries(meta).filter(([key, value]) => {
+        if (key === 'repo') return false;
+        if (Array.isArray(value)) return value.length > 0;
+        return value !== '' && (value !== false || key === 'published');
+      })
     );
     const file = fileFor(repo) || path.join(dir, `${repo}.md`);
     fs.writeFileSync(file, matter.stringify(content || '', frontmatter), 'utf-8');
