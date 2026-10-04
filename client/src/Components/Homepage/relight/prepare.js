@@ -30,9 +30,10 @@ import {
 } from './adaptiveQuality';
 import { RelightEngine } from './RelightEngine';
 import { RelightGPUEngine, requestRelightDevice } from './RelightGPU';
-import { encodePixels, loadRelightScene } from './scene';
+import { loadRelightScene } from './scene';
 
-const SCENE_URL = `${process.env.PUBLIC_URL}/relight/cornell`;
+// The room, packed by perf/relight-pack.mjs, by its network
+const SCENE_URL = `${process.env.PUBLIC_URL}/relight/cornell-128x4`;
 export const NATIVE = 512;
 const tierSuffix = (tier) => (tier === NATIVE ? '' : `-${tier}`);
 
@@ -68,7 +69,7 @@ export async function createRelightEngine(data, device, bandBytes, signal) {
       notGPU = `WebGPU couldn't build the network (${error.message})`;
     }
   }
-  return { engine: new RelightEngine(data, await encodePixels(data, signal), { bandBytes }), notGPU };
+  return { engine: new RelightEngine(data, { bandBytes }), notGPU };
 }
 
 let current = null;

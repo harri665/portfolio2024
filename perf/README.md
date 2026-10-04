@@ -80,3 +80,15 @@ normalisation and a Reinhard tonemap.
 `--save-reference` keeps each image in `relight-reference/` (not committed,
 as GPUs round differently); later runs report how far they moved from them,
 to check that a change meant to leave the image alone did.
+
+## Relight data
+
+The relit room ships packed by `relight-pack.mjs`, from the relight
+project's export (`export.py`, kept as exported in
+`relight-data/cornell-original/`): positions as 16-bit values instead of
+32-bit floats plus a distance, the duplicate normals dropped, and every
+channel stored as byte-split row differences that gzip well, with a `.gz`
+beside each file for nginx's `gzip_static`. The 512 px pixels go from
+3.4 MB gzipped to 0.7 MB, the 768 px ones from 7.4 to 1.4 MB.
+
+    node relight-pack.mjs --in ../relight-data/cornell-original --out ../client/public/relight/cornell-128x4

@@ -47,9 +47,6 @@ export async function requestRelightDevice() {
 
 const u = (x) => `${x >>> 0}u`;
 
-const nextTask = () => new Promise((resolve) => setTimeout(resolve, 0));
-// ms between yields to the page
-const SLICE_MS = 6;
 // ms, closer completions get reported together
 const QUEUE_GRAIN = 0.1;
 
@@ -100,21 +97,33 @@ fn geoFeatures(x: vec4f, n: vec3f, lc: vec4f) -> Geo {
 }
 `;
 
-// Per pixel: the grid encoding and aux features, packed as pairs of halves
-function precomputeWGSL({ W, H, levels, feats, gridRes, gridOff, auxDim, XW }) {
+function precomputeWGSL({ W, H, levels, feats, gridRes, gridOff, auxDim, XW, posRange, camO }) {
   const arr = (a) => `array<u32, ${a.length}>(${a.map(u).join(', ')})`;
+  const f = (x) => `${x}`.includes('.') || `${x}`.includes('e') ? `${x}` : `${x}.0`;
   return /* wgsl */ `
-@group(0) @binding(0) var<storage, read> grid: array<f32>;
-@group(0) @binding(1) var<storage, read> auxB: array<f32>;
-@group(0) @binding(2) var<storage, read_write> X: array<u32>;
+@group(0) @binding(0) var<storage, read> grid: array<u32>;
+@group(0) @binding(1) var<storage, read> auxB: array<u32>;
+@group(0) @binding(2) var<storage, read> posB: array<u32>;
+@group(0) @binding(3) var<storage, read_write> X: array<u32>;
+@group(0) @binding(4) var<storage, read_write> pgeo: array<vec4f>;
 var<private> RES: array<u32, ${levels}> = ${arr(gridRes)};
 var<private> GOFF: array<u32, ${levels}> = ${arr(gridOff)};
-const W = ${u(W)}; const H = ${u(H)}; const F = ${u(feats)};
+const W = ${u(W)}; const H = ${u(H)}; const F = ${u(feats)}; const NP = ${u(W * H)};
+const POS_LO = ${f(posRange[0])}; const POS_STEP = ${f((posRange[1] - posRange[0]) / 65534)};
+const CAM_O = vec3f(${camO.map(f).join(', ')});
+
+fn gridAt(i: u32) -> f32 {
+  return unpack2x16float(grid[i >> 1u])[i & 1u];
+}
+fn auxAt(p: u32, j: u32) -> f32 {
+  let i = ((j >> 2u) * NP + p) * 4u + (j & 3u);
+  return unpack2x16float(auxB[i >> 1u])[i & 1u];
+}
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3u) {
   let p = gid.x;
-  if (p >= W * H) { return; }
+  if (p >= NP) { return; }
   let uu = (f32(p % W) + 0.5) / f32(W);
   let vv = (f32(p / W) + 0.5) / f32(H);
   var x: array<f32, ${XW * 2}>;
@@ -125,15 +134,24 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     let tx = fx - f32(x0); let ty = fy - f32(y0);
     let b = GOFF[l];
     for (var f = 0u; f < F; f++) {
-      let v00 = grid[b + (y0 * R + x0) * F + f];
-      let v01 = grid[b + (y0 * R + x0 + 1u) * F + f];
-      let v10 = grid[b + ((y0 + 1u) * R + x0) * F + f];
-      let v11 = grid[b + ((y0 + 1u) * R + x0 + 1u) * F + f];
+      let v00 = gridAt(b + (y0 * R + x0) * F + f);
+      let v01 = gridAt(b + (y0 * R + x0 + 1u) * F + f);
+      let v10 = gridAt(b + ((y0 + 1u) * R + x0) * F + f);
+      let v11 = gridAt(b + ((y0 + 1u) * R + x0 + 1u) * F + f);
       x[l * F + f] = mix(mix(v00, v01, tx), mix(v10, v11, tx), ty);
     }
   }
-  for (var j = 0u; j < ${u(auxDim)}; j++) { x[${u(levels * feats)} + j] = auxB[p * ${u(auxDim)} + j]; }
+  for (var j = 0u; j < ${u(auxDim)}; j++) { x[${u(levels * feats)} + j] = auxAt(p, j); }
   for (var j = 0u; j < ${u(XW)}; j++) { X[p * ${u(XW)} + j] = pack2x16float(vec2f(x[2u * j], x[2u * j + 1u])); }
+
+  let q0 = posB[2u * p]; let q1 = posB[2u * p + 1u];
+  var g = vec4f(0.0);
+  if ((q0 & 0xffffu) != 0u) {
+    let w = POS_LO + (vec3f(f32(q0 & 0xffffu), f32(q0 >> 16u), f32(q1 & 0xffffu)) - 1.0) * POS_STEP;
+    g = vec4f(w, length(w - CAM_O));
+  }
+  pgeo[2u * p] = g;
+  pgeo[2u * p + 1u] = vec4f(auxAt(p, 3u), auxAt(p, 4u), auxAt(p, 5u), 0.0);
 }
 `;
 }
@@ -360,15 +378,15 @@ export class RelightGPUEngine extends RelightBase {
     return engine;
   }
 
-  constructor(device, { scene, geom }) {
-    super(scene, geom);
+  constructor(device, { scene, pos }) {
+    super(scene, pos);
     this.device = device;
     this.backend = 'webgpu';
     this.buffers = [];
     this.canvas = new OffscreenCanvas(this.W, this.H);
   }
 
-  async build({ scene, layers, grid, gridOff, aux, geom, normal }) {
+  async build({ scene, layers, grid, gridOff, aux, pos }) {
     const dev = this.device;
     const { W, H } = this;
     const NP = W * H;
@@ -445,24 +463,6 @@ export class RelightGPUEngine extends RelightBase {
       }
     }
 
-    // Each pixel's geometry and normal, yielding now and then: at 768 px
-    // it's 590K pixels, which held the page as one task
-    const pgeo = new Float32Array(NP * 8);
-    let slice = performance.now();
-    for (let p = 0; p < NP; p += 1) {
-      const o = p * 8;
-      for (let j = 0; j < 4; j += 1) {
-        pgeo[o + j] = geom[p * 4 + j];
-      }
-      for (let j = 0; j < 3; j += 1) {
-        pgeo[o + 4 + j] = normal[p * 3 + j];
-      }
-      if ((p & 0x3fff) === 0 && performance.now() - slice > SLICE_MS) {
-        await nextTask();
-        slice = performance.now();
-      }
-    }
-
     const shapes = { W, H, WD, NH, PIXIN, XW, geo, mul, threads, off, half };
     const module = (code, label) => dev.createShaderModule({ code, label });
     const compositeModule = module(compositeWGSL({ W, H }), 'relight composite');
@@ -472,7 +472,18 @@ export class RelightGPUEngine extends RelightBase {
         layout: 'auto',
         compute: {
           module: module(
-            precomputeWGSL({ W, H, levels, feats: net.feats, gridRes: net.grid_res, gridOff, auxDim, XW }),
+            precomputeWGSL({
+              W,
+              H,
+              levels,
+              feats: net.feats,
+              gridRes: net.grid_res,
+              gridOff,
+              auxDim,
+              XW,
+              posRange: scene.pixels.pos.range,
+              camO: this.cam.O,
+            }),
             'relight inputs'
           ),
           entryPoint: 'main',
@@ -502,7 +513,7 @@ export class RelightGPUEngine extends RelightBase {
     };
     const wBuf = half ? buffer(P.byteLength / 2, U.STORAGE, toHalf(P)) : buffer(P.byteLength, U.STORAGE, P);
     const xBuf = buffer(NP * XW * 4, U.STORAGE);
-    const pgeoBuf = buffer(pgeo.byteLength, U.STORAGE, pgeo);
+    const pgeoBuf = buffer(NP * 32, U.STORAGE);
     const outBuf = buffer(SLOTS * NP * 8, U.STORAGE);
     this.fwdBuf = buffer(32 + CG * 16, U.UNIFORM | U.COPY_DST);
     this.frameBuf = buffer(96 + SLOTS * 48, U.UNIFORM | U.COPY_DST);
@@ -522,23 +533,22 @@ export class RelightGPUEngine extends RelightBase {
       this.readBuf = buffer(16, U.MAP_READ | U.COPY_DST);
     }
 
-    // The pixel inputs, once
-    const gridBuf = dev.createBuffer({ size: grid.byteLength, usage: U.STORAGE, mappedAtCreation: true });
-    new Float32Array(gridBuf.getMappedRange()).set(grid);
-    gridBuf.unmap();
-    const auxBuf = dev.createBuffer({ size: aux.byteLength, usage: U.STORAGE, mappedAtCreation: true });
-    new Float32Array(auxBuf.getMappedRange()).set(aux);
-    auxBuf.unmap();
+    const upload = (data) => {
+      const b = dev.createBuffer({ size: Math.ceil(data.byteLength / 16) * 16, usage: U.STORAGE, mappedAtCreation: true });
+      new Uint16Array(b.getMappedRange()).set(data);
+      b.unmap();
+      return b;
+    };
+    const inputs = [upload(grid), upload(aux), upload(pos)];
     const enc = dev.createCommandEncoder();
     const pass = enc.beginComputePass();
     pass.setPipeline(pre);
-    pass.setBindGroup(0, bind(pre, [gridBuf, auxBuf, xBuf]));
+    pass.setBindGroup(0, bind(pre, [...inputs, xBuf, pgeoBuf]));
     pass.dispatchWorkgroups(Math.ceil(NP / 64));
     pass.end();
     dev.queue.submit([enc.finish()]);
     await dev.queue.onSubmittedWorkDone();
-    gridBuf.destroy();
-    auxBuf.destroy();
+    inputs.forEach((b) => b.destroy());
 
     this.context = this.canvas.getContext('webgpu');
     this.configure();

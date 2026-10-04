@@ -13,9 +13,10 @@ export const MIN_BAND_ROWS = 16;
 const MIN_TIMED_SHARE = 0.25;
 
 export class RelightBase {
-  constructor(scene, geom) {
+  constructor(scene, pos) {
     this.scene = scene;
-    this.geom = geom;
+    this.pos = pos;
+    [this.posLo, this.posHi] = scene.pixels.pos.range;
     const W = scene.width;
     const H = scene.height;
     this.W = W;
@@ -102,9 +103,15 @@ export class RelightBase {
 
   // interpolated, otherwise a light held off the floor stepped a whole row at a time
   surfaceDistance(u, v) {
+    const { O } = this.cam;
+    const scale = (this.posHi - this.posLo) / 65534;
     const at = (x, y) => {
-      const t = this.geom[(clampInt(y, this.H) * this.W + clampInt(x, this.W)) * 4 + 3];
-      return t > 0 ? t : Infinity;
+      const p = (clampInt(y, this.H) * this.W + clampInt(x, this.W)) * 4;
+      if (!this.pos[p]) {
+        return Infinity;
+      }
+      const d = [0, 1, 2].map((i) => this.posLo + (this.pos[p + i] - 1) * scale - O[i]);
+      return Math.hypot(d[0], d[1], d[2]);
     };
     const fx = u * this.W - 0.5;
     const fy = v * this.H - 0.5;

@@ -19,8 +19,57 @@ void main() {
 
 const HEAD = `#version 300 es
 precision highp float; precision highp int;
-precision highp sampler2D; precision highp sampler2DArray;
+precision highp sampler2D; precision highp sampler2DArray; precision highp usampler2D;
 `;
+
+const GEOM = `
+uniform usampler2D posT; uniform sampler2DArray auxT;
+uniform vec2 posMap; uniform vec3 camO;  // posMap: lowest position, step
+vec4 geomAt(ivec2 px) {
+  uvec4 q = texelFetch(posT, px, 0);
+  if (q.x == 0u) return vec4(0.0);
+  vec3 w = posMap.x + (vec3(q.xyz) - 1.0) * posMap.y;
+  return vec4(w, length(w - camO));
+}
+vec3 normalAt(ivec2 px) {
+  return vec3(texelFetch(auxT, ivec3(px, 0), 0).w, texelFetch(auxT, ivec3(px, 1), 0).xy);
+}`;
+
+function encodeFS({ W, H, levels, feats, gridRes, gridOff, auxDim, GW, k0, n }) {
+  const ENC = levels * feats;
+  const input = (i) => {
+    if (i < ENC) {
+      const l = Math.floor(i / feats);
+      return `bil(${gridRes[l]}, ${gridOff[l]}, ${i % feats}, uv)`;
+    }
+    if (i < ENC + auxDim) {
+      const j = i - ENC;
+      return `a${j >> 2}.${'xyzw'[j & 3]}`;
+    }
+    return '0.0';
+  };
+  const J = [...Array(n).keys()];
+  return `${HEAD}
+uniform sampler2D gridT; uniform sampler2DArray auxT;
+${J.map((j) => `layout(location = ${j}) out vec4 o${j};`).join('\n')}
+float gridAt(int i) { return texelFetch(gridT, ivec2(i % ${GW}, i / ${GW}), 0).x; }
+float bil(int R, int off, int f, vec2 uv) {
+  vec2 g = uv * float(R - 1);
+  ivec2 c = min(ivec2(floor(g)), ivec2(R - 2));
+  vec2 t = g - vec2(c);
+  int i00 = off + (c.y * R + c.x) * ${feats} + f;
+  int i10 = i00 + R * ${feats};
+  float top = mix(gridAt(i00), gridAt(i00 + ${feats}), t.x);
+  float bot = mix(gridAt(i10), gridAt(i10 + ${feats}), t.x);
+  return mix(top, bot, t.y);
+}
+void main() {
+  ivec2 px = ivec2(gl_FragCoord.xy);
+  vec2 uv = (vec2(px) + 0.5) / vec2(${W}.0, ${H}.0);
+  vec4 a0 = texelFetch(auxT, ivec3(px, 0), 0), a1 = texelFetch(auxT, ivec3(px, 1), 0);
+  ${J.map((j) => `o${j} = vec4(${[0, 1, 2, 3].map((c) => input(4 * (k0 + j) + c)).join(', ')});`).join('\n  ')}
+}`;
+}
 
 // One pass of a layer: `out` output groups from `kin` input groups.
 // stage 'l0':  first layer. Pixel features come from `src` (xg groups), then
@@ -45,19 +94,19 @@ layout(std140) uniform Wt { vec4 w[${kin * out * 4}]; };
 uniform vec4 bias[${out}];
 uniform int yOff;
 ${needItem ? 'uniform vec4 ln; uniform int stride;' : ''}
-${geo || mul ? `uniform sampler2D geomT; uniform sampler2D normT;
+${geo || mul ? `${GEOM}
 uniform vec3 boxLo, boxHi; uniform vec2 radRange;
 // Direction and cosine to the light, log distance and log solid angle, and the
 // unshadowed irradiance factor G
 void geoFeatures(ivec2 px, vec4 L, out vec4 g0, out vec4 g1, out float G) {
   vec3 c = boxLo + (L.xyz + 1.0) * 0.5 * (boxHi - boxLo);
   float r = radRange.x + (L.w + 1.0) * 0.5 * (radRange.y - radRange.x);
-  vec4 gm = texelFetch(geomT, px, 0);
+  vec4 gm = geomAt(px);
   float valid = gm.w > 0.0 ? 1.0 : 0.0;
   vec3 v = c - gm.xyz;
   float d = max(length(v), 1e-4);
   vec3 l = v / d;
-  float cosv = dot(texelFetch(normT, px, 0).xyz, l);
+  float cosv = dot(normalAt(px), l);
   float s = min(r / d, 1.0);
   float omega = 6.283185307 * s * s / (1.0 + sqrt(max(1.0 - s * s, 0.0)));
   g0 = vec4(l, cosv) * valid;
@@ -92,8 +141,9 @@ void main() {
 
 // rows bottom first, that's what three.js render targets expect
 const compositeFS = (W, H) => `${HEAD}
-uniform sampler2DArray outT; uniform sampler2D geomT;
-uniform vec3 camO, camX, camY, camZ; uniform vec2 tanxy;
+uniform sampler2DArray outT;
+${GEOM}
+uniform vec3 camX, camY, camZ; uniform vec2 tanxy;
 uniform float exposure; uniform int nLights;
 uniform vec4 lPR[${SLOTS}]; uniform vec3 lE[${SLOTS}]; uniform ivec3 lInfo[${SLOTS}];  // slot, stride, disc shown
 layout(location = 0) out vec4 disp;
@@ -104,7 +154,7 @@ vec3 camDir(vec2 uv) {
 }
 float directCov(ivec2 pix, int l) {
   vec3 c = lPR[l].xyz; float r = lPR[l].w;
-  vec4 g = texelFetch(geomT, pix, 0);
+  vec4 g = geomAt(pix);
   float surf = g.w > 0.0 ? g.w : 1e9;
   vec3 oc = camO - c;
   float px = float(pix.x), py = float(pix.y);
@@ -134,13 +184,13 @@ vec3 netAt(int slot, int s, ivec2 pix) {
   vec2 f = vec2(pix) / float(s);
   ivec2 c0 = min(ivec2(f), last), c1 = min(c0 + 1, last);
   vec2 t = f - vec2(c0);
-  vec4 g = texelFetch(geomT, pix, 0);
+  vec4 g = geomAt(pix);
   float sig = 1.5 * float(s) * 2.0 * tanxy.x / W * max(g.w, 1e-3);
   vec3 acc = vec3(0.0); float ws = 0.0;
   for (int k = 0; k < 4; k++) {
     ivec2 c = ivec2((k & 1) == 1 ? c1.x : c0.x, k >= 2 ? c1.y : c0.y);
     float wb = ((k & 1) == 1 ? t.x : 1.0 - t.x) * (k >= 2 ? t.y : 1.0 - t.y);
-    vec4 q = texelFetch(geomT, c * s, 0);
+    vec4 q = geomAt(c * s);
     vec3 dq = q.xyz - g.xyz;
     float wg = (q.w > 0.0) == (g.w > 0.0) ? exp(-dot(dq, dq) / (2.0 * sig * sig)) : 0.0;
     float w = wb * (wg + 1e-4);
@@ -188,12 +238,9 @@ function packLayer(layer, nIn, kin, out, inCol) {
   });
 }
 
-// Builds everything straight away, on a context of its own, from a loaded
-// scene (loadRelightScene) and its encoded pixels (encodePixels). bandBytes:
-// the size of one activation texture array.
 export class RelightEngine extends RelightBase {
-  constructor({ scene, layers, geom }, { X, XG, normal4 }, { bandBytes = BAND_BYTES } = {}) {
-    super(scene, geom);
+  constructor({ scene, layers, grid, gridOff, aux, pos }, { bandBytes = BAND_BYTES } = {}) {
+    super(scene, pos);
     // offscreen so we can hand over an ImageBitmap. without OffscreenCanvas the canvas has
     // to be read the same frame it's drawn
     this.canvas =
@@ -228,6 +275,7 @@ export class RelightEngine extends RelightBase {
     const geo = !!net.geo;
     const mul = net.head === 'mul';
     const PIXIN = net.grid_res.length * net.feats + auxDim;
+    const XG = Math.ceil(PIXIN / 4);
     const IN = layers[0].shape[1];
     if (IN !== PIXIN + 4 + (geo ? 6 : 0)) {
       throw new Error(`unexpected first-layer width ${IN}`);
@@ -274,16 +322,18 @@ export class RelightEngine extends RelightBase {
 
     const A2 = gl.TEXTURE_2D_ARRAY;
     const T2 = gl.TEXTURE_2D;
+    const [posLo, posHi] = scene.pixels.pos.range;
+    this.posMap = [posLo, (posHi - posLo) / 65534];
+    this.auxTex = this.texture(A2, gl.RGBA16F, W, H, 2);
+    gl.texSubImage3D(A2, 0, 0, 0, 0, W, H, 2, gl.RGBA, gl.HALF_FLOAT, aux);
+    this.posTex = this.texture(T2, gl.RGBA16UI, W, H);
+    gl.texSubImage2D(T2, 0, 0, 0, W, H, gl.RGBA_INTEGER, gl.UNSIGNED_SHORT, pos);
+    this.vao = gl.createVertexArray();
     this.xTex = this.texture(A2, gl.RGBA16F, W, H, XG);
-    gl.texSubImage3D(A2, 0, 0, 0, 0, W, H, XG, gl.RGBA, gl.FLOAT, X);
-    this.geomTex = this.texture(T2, gl.RGBA32F, W, H);
-    gl.texSubImage2D(T2, 0, 0, 0, W, H, gl.RGBA, gl.FLOAT, new Float32Array(geom));
-    this.normTex = this.texture(T2, gl.RGBA16F, W, H);
-    gl.texSubImage2D(T2, 0, 0, 0, W, H, gl.RGBA, gl.FLOAT, normal4);
+    this.encodeInputs({ grid, gridOff, XG, auxDim, maxRT });
+
     this.outTex = this.texture(A2, gl.RGBA16F, W, H, SLOTS);
     this.outFbos = Array.from({ length: SLOTS }, (_, s) => this.framebuffer([[this.outTex, s]]));
-
-    this.vao = gl.createVertexArray();
     this.pComp = this.program(compositeFS(W, H), 'composite');
     const th = Math.max(8, Math.min(H, Math.floor(bandBytes / (W * G * 8))));
     const arrs = [0, 1].map(() => this.texture(A2, gl.RGBA16F, W, th, G));
@@ -304,6 +354,37 @@ export class RelightEngine extends RelightBase {
     gl.bindVertexArray(null);
     gl.bindTexture(A2, null);
     gl.bindTexture(T2, null);
+  }
+
+  encodeInputs({ grid, gridOff, XG, auxDim, maxRT }) {
+    const gl = this.gl;
+    const { W, H } = this;
+    const net = this.scene.network;
+    const GW = Math.min(4096, gl.getParameter(gl.MAX_TEXTURE_SIZE));
+    const rows = Math.ceil(grid.length / GW);
+    const padded = new Uint16Array(GW * rows);
+    padded.set(grid);
+    const gridTex = this.texture(gl.TEXTURE_2D, gl.R16F, GW, rows);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, GW, rows, gl.RED, gl.HALF_FLOAT, padded);
+    gl.activeTexture(gl.TEXTURE6);
+    gl.bindTexture(gl.TEXTURE_2D, gridTex);
+    gl.activeTexture(gl.TEXTURE4);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.auxTex);
+    gl.bindVertexArray(this.vao);
+    gl.viewport(0, 0, W, H);
+    const shapes = { W, H, levels: net.grid_res.length, feats: net.feats, gridRes: net.grid_res, gridOff, auxDim, GW };
+    const n = Math.min(maxRT, 8);
+    for (let k0 = 0; k0 < XG; k0 += n) {
+      const count = Math.min(n, XG - k0);
+      const { p } = this.program(encodeFS({ ...shapes, k0, n: count }), 'input encoding');
+      const fbo = this.framebuffer(Array.from({ length: count }, (_, j) => [this.xTex, k0 + j]));
+      gl.useProgram(p);
+      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, fbo);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+    gl.deleteTexture(gridTex);
+    this.resources.textures.splice(this.resources.textures.indexOf(gridTex), 1);
   }
 
   texture(target, format, w, h, layers = 1) {
@@ -374,11 +455,15 @@ export class RelightEngine extends RelightBase {
       gl.uniformBlockBinding(p, block, 0);
     }
     gl.useProgram(p);
-    [['src', 0], ['outT', 0], ['geomT', 2], ['normT', 4]].forEach(([name, unit]) => {
+    [['src', 0], ['outT', 0], ['posT', 2], ['auxT', 4], ['gridT', 6]].forEach(([name, unit]) => {
       if (u[name]) {
         gl.uniform1i(u[name], unit);
       }
     });
+    if (u.posMap) {
+      gl.uniform2fv(u.posMap, this.posMap);
+      gl.uniform3fv(u.camO, this.cam.O);
+    }
     if (u.boxLo) {
       gl.uniform3fv(u.boxLo, this.lo);
       gl.uniform3fv(u.boxHi, this.hi);
@@ -410,9 +495,9 @@ export class RelightEngine extends RelightBase {
     this.startTiming(stride, r0, r1);
     gl.bindVertexArray(this.vao);
     gl.activeTexture(gl.TEXTURE2);
-    gl.bindTexture(gl.TEXTURE_2D, this.geomTex);
+    gl.bindTexture(gl.TEXTURE_2D, this.posTex);
     gl.activeTexture(gl.TEXTURE4);
-    gl.bindTexture(gl.TEXTURE_2D, this.normTex);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.auxTex);
     for (let y0 = r0; y0 < r1; y0 += E.th) {
       const h = Math.min(E.th, r1 - y0);
       let cur = -1;
@@ -475,7 +560,7 @@ export class RelightEngine extends RelightBase {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.outTex);
     gl.activeTexture(gl.TEXTURE2);
-    gl.bindTexture(gl.TEXTURE_2D, this.geomTex);
+    gl.bindTexture(gl.TEXTURE_2D, this.posTex);
     gl.bindVertexArray(this.vao);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
     gl.viewport(0, 0, this.W, this.H);
