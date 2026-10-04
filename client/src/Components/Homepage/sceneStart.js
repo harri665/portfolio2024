@@ -51,9 +51,8 @@ export function afterLoad(callback) {
   return () => window.removeEventListener('load', callback);
 }
 
-// Armed as soon as the app's script runs, so a pointer moved while the page
-// is still loading counts
-if (typeof window !== 'undefined') {
+// armed right away so a pointer move during load counts
+if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('relight') !== 'bench') {
   arm();
 }
 

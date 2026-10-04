@@ -41,6 +41,8 @@ const POSTER_TIME = 2;
 // don't ready the room straight away or lighthouse keeps recording and counts three.js
 // against us (mobile went 48-61 vs 71-82)
 const PREP_DELAY_MS = 2000;
+const RELIGHT_BENCH =
+  typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('relight') === 'bench';
 
 export function PrismBackdrop({ lens = 'hub', tone = 'page', image }) {
   const toneStyle = TONES[tone] || TONES.page;
@@ -148,6 +150,10 @@ function Scene({ poster, immediate = false, className, ...props }) {
 
   useEffect(() => {
     if (!room) {
+      return undefined;
+    }
+    if (RELIGHT_BENCH) {
+      import(/* webpackChunkName: "relight" */ './relight/bench').then((m) => m.installBench());
       return undefined;
     }
     let prepare = null;

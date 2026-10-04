@@ -26,3 +26,6 @@ yarn-debug.log*
 yarn-error.log*
 
 .env
+# perf: per-machine results and relight bench images
+/perf/results
+/perf/relight-reference

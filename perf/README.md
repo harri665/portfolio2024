@@ -61,3 +61,22 @@ from the dev server, so re-run it whenever a home page's scene changes:
 
     node posters.mjs                # every poster
     node posters.mjs --sites cs     # one site's
+
+## Relight bench
+
+`relight-bench.mjs` times the CS backdrop's network on its own, with no scene
+running (the CS home page with `?relight=bench`, see
+`client/src/Components/Homepage/relight/bench.js`): GPU ms per evaluation of
+a whole light at each stride and image size, on WebGPU and WebGL. At 512 px
+it also scores the image of each of the relight project's six test lights
+against its path-traced reference (`refs.bin`, read from that project's
+`web/scenes/cornell`), as its `evaluate.py` does: PSNR after exposure
+normalisation and a Reinhard tonemap.
+
+    node relight-bench.mjs                      # desktop, WebGPU and WebGL
+    node relight-bench.mjs --profiles low-end --strides 4,8,16 --no-quality
+    node relight-bench.mjs --save-reference     # keep these images to compare with
+
+`--save-reference` keeps each image in `relight-reference/` (not committed,
+as GPUs round differently); later runs report how far they moved from them,
+to check that a change meant to leave the image alone did.
