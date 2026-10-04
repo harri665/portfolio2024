@@ -9,6 +9,7 @@ import RootHomePage from './Components/Homepage/RootHomePage';
 import CSHomePage from './Components/Homepage/CSHomePage';
 import BlogIndex from './Components/Blog/BlogIndex';
 import { apiUrl } from './utils/api';
+import { startVisit } from './utils/visitor';
 import { detectSiteMode, SITE_MODES } from './utils/siteMode';
 
 const ProjectDetails = lazy(() => import('./Components/ProjectDetails/ProjectDetails'));
@@ -45,7 +46,7 @@ function MainRoutes({ siteMode }) {
   useEffect(() => {
     const host = typeof window !== 'undefined' ? window.location.hostname : 'unknown-host';
     const page = `${host}${location.pathname}`;
-    fetch(apiUrl(`/load?page=${encodeURIComponent(page)}`))
+    const logged = fetch(apiUrl(`/load?page=${encodeURIComponent(page)}`))
       .then(async (res) => {
         const contentType = res.headers.get('content-type') || '';
         const bodyText = await res.text();
@@ -61,9 +62,9 @@ function MainRoutes({ siteMode }) {
         }
 
         return JSON.parse(bodyText);
-      })
-      // .then((data) => console.log("Load endpoint data:", data))
-      .catch((error) => console.error("Error calling /api/load:", error));
+      });
+    startVisit(logged.then((data) => data?.id ?? null));
+    logged.catch((error) => console.error("Error calling /api/load:", error));
   }, [location]);
 
   const homePageByMode = {

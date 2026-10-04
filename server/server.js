@@ -9,6 +9,7 @@ import axios from 'axios';
 import useragent from 'express-useragent';
 import matter from 'gray-matter';
 import { fileURLToPath } from 'url';
+import { randomUUID } from 'crypto';
 import multer from 'multer';
 import { createOgHandler, isCrawler, detectSiteMode, siteOrigin } from './og.js';
 import { prettyRepoName, readmeMedia, readmeTitle } from './repoMeta.js';
@@ -426,16 +427,37 @@ app.post('/api/discord/dm', async (req, res) => {
   }
 });
 
-// -------------------------
-// /api/load Endpoint
-// -------------------------
+const IP_API_FIELDS =
+  'status,message,country,countryCode,regionName,city,lat,lon,timezone,isp,org,as,mobile,proxy,hosting,query';
+
+// scripts hitting the api directly usually don't send sec-fetch-* or accept-language
+function requestSigns(req) {
+  const h = req.headers;
+  const short = (value) => (typeof value === 'string' ? value.slice(0, 120) : undefined);
+  const hostOf = (value) => {
+    try {
+      return value ? new URL(value).host : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  return {
+    secFetchSite: short(h['sec-fetch-site']),
+    secFetchMode: short(h['sec-fetch-mode']),
+    acceptLanguage: short(h['accept-language']),
+    origin: hostOf(h.origin),
+    referer: hostOf(h.referer),
+  };
+}
 app.get('/api/load', async (req, res) => {
   try {
     const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
     const { os, browser, platform, source } = req.useragent;
     const page = req.query.page || 'unknown';
 
-    const locationResponse = await axios.get(`http://ip-api.com/json/${ip}`);
+    const locationResponse = await axios.get(`http://ip-api.com/json/${ip}`, {
+      params: { fields: IP_API_FIELDS },
+    });
     const locationData = locationResponse.data;
 
     console.log('--- /api/load called ---');
@@ -455,7 +477,9 @@ app.get('/api/load', async (req, res) => {
     const timeStamp = new Date().toISOString();
 
     const logs = JSON.parse(fs.readFileSync(logFilePath, 'utf-8'));
+    const id = randomUUID();
     logs.push({
+      id,
       timestamp: timeStamp,
       ip,
       device: os,
@@ -464,11 +488,13 @@ app.get('/api/load', async (req, res) => {
       userAgent: source,
       pageAccessed: page,
       location: locationData,
+      headers: requestSigns(req),
     });
     fs.writeFileSync(logFilePath, JSON.stringify(logs, null, 2));
 
     res.json({
       message: 'Load endpoint data logged successfully',
+      id,
       ip,
       device: os,
       browser,
@@ -478,6 +504,62 @@ app.get('/api/load', async (req, res) => {
   } catch (error) {
     console.error('Error in /api/load:', error);
     res.status(500).json({ error: 'Failed to process load request' });
+  }
+});
+
+// only these fields, and only for visits from the last few hours, so this can't be used to grow the log
+const REPORT_FIELDS = {
+  relight: {
+    phase: 'string', reason: 'string', backend: 'string', notGPU: 'string', network: 'string',
+    gpu: 'string', kernel: 'string', prepared: 'string', screen: 'string',
+    size: 'number', fps: 'number', dpr: 'number', budget: 'number', cost: 'number', moving: 'number',
+    resting: 'number', roomDpr: 'number', cores: 'number', memory: 'number', frames: 'number',
+    frameRate: 'number', latePct: 'number', runningSec: 'number',
+    half: 'boolean', capped: 'boolean', fixedLayer: 'boolean', fromProfile: 'boolean', seeded: 'boolean',
+  },
+  visitor: {
+    firstInput: 'string', language: 'string', timezone: 'string', screen: 'string', viewport: 'string',
+    outer: 'string', renderer: 'string', visibility: 'string',
+    moves: 'number', clicks: 'number', touches: 'number', scrolls: 'number', keys: 'number',
+    firstInputMs: 'number', dwellMs: 'number', languages: 'number', tzOffset: 'number',
+    touchPoints: 'number', cores: 'number', memory: 'number',
+    webdriver: 'boolean', finePointer: 'boolean',
+  },
+};
+const REPORT_HOURS = 6;
+
+app.post('/api/load/report', express.text({ type: () => true, limit: '4kb' }), (req, res) => {
+  try {
+    // sendBeacon sends text
+    const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
+    const id = typeof body.id === 'string' ? body.id.slice(0, 64) : '';
+    const fields = REPORT_FIELDS[body.kind];
+    const logFilePath = path.join(DATA_DIR, 'loadLogs.json');
+    if (!id || !fields || !fs.existsSync(logFilePath)) {
+      return res.status(400).json({ error: 'Unknown visit' });
+    }
+    const logs = JSON.parse(fs.readFileSync(logFilePath, 'utf-8'));
+    const log = logs.find((entry) => entry.id === id);
+    if (!log || Date.now() - new Date(log.timestamp).getTime() > REPORT_HOURS * 3600 * 1000) {
+      return res.status(404).json({ error: 'Unknown visit' });
+    }
+    const report = {};
+    Object.entries(fields).forEach(([key, type]) => {
+      const value = body[key];
+      if (type === 'string' && typeof value === 'string') {
+        report[key] = value.slice(0, 200);
+      } else if (type === 'number' && typeof value === 'number' && Number.isFinite(value)) {
+        report[key] = value;
+      } else if (type === 'boolean' && typeof value === 'boolean') {
+        report[key] = value;
+      }
+    });
+    log[body.kind] = { ...report, reportedAt: new Date().toISOString() };
+    fs.writeFileSync(logFilePath, JSON.stringify(logs, null, 2));
+    res.status(204).end();
+  } catch (error) {
+    console.error('Error in /api/load/report:', error);
+    res.status(400).json({ error: 'Bad report' });
   }
 });
 
