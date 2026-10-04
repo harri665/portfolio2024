@@ -90,9 +90,17 @@ function Config({ status: s }) {
     ['Moving light', every(s.moving)],
     ['Resting light', `refined to ${every(s.resting)}`],
     ['Pixel ratio', `${s.dpr}×`],
-    ['Frame-rate floor', `${s.fps} fps${s.fps > 30 ? ' (touch screen)' : ''}`],
+    ['Frame rate', s.capped ? `${s.fps} fps (held there on touch screens)` : `at least ${s.fps} fps`],
     ['Room layer', s.fixedLayer ? `fixed to the screen, at ${s.roomDpr}×` : 'scrolls with the page'],
     ['Settings', s.fromProfile ? 'tuned on an earlier visit' : 'being tuned on this visit'],
+    [
+      'Warm-up',
+      s.prepared === 'timed'
+        ? 'built and timed while the page loaded'
+        : s.prepared === 'built'
+          ? 'built while the page loaded'
+          : 'none; built when the room started',
+    ],
   ];
   return <Rows rows={rows} className="mt-4" />;
 }
@@ -260,7 +268,7 @@ function BrowserSupport() {
     ['Memory', d.memory ? `${d.memory} GB or more` : 'not reported', 'the largest image needs 4 GB'],
     ['CPU threads', d.cores ? String(d.cores) : 'not reported'],
     ['Screen', `${d.screen} at ${d.dpr}×`],
-    ['Touch screen', yes(d.touch), 'holds 60 fps instead of 30'],
+    ['Touch screen', yes(d.touch), 'draws the page at 30 fps, so the room gets the GPU time'],
     ['Reduced motion', yes(d.reducedMotion)],
     ['Connection', d.network || 'not reported', d.saveData ? 'data saver is on: the room stays off' : null],
   ];

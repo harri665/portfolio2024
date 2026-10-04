@@ -57,11 +57,13 @@ if (typeof window !== 'undefined') {
   arm();
 }
 
-// True once the scenes may start
-export default function useSceneStart() {
-  const [ready, setReady] = useState(started);
+export default function useSceneStart(immediate = false) {
+  const [ready, setReady] = useState(started || immediate);
 
   useEffect(() => {
+    if (immediate) {
+      start();
+    }
     if (started) {
       setReady(true);
       return undefined;
@@ -71,7 +73,7 @@ export default function useSceneStart() {
     return () => {
       listeners.delete(listener);
     };
-  }, []);
+  }, [immediate]);
 
   return ready;
 }

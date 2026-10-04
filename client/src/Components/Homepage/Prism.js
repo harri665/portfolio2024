@@ -38,15 +38,14 @@ const SCENES = {
 // posters come from perf/posters.mjs, captured POSTER_TIME in so the live scene starts on the same frame
 const POSTERS = { hub: 'hub', cs: 'cs', art: 'art' };
 const POSTER_TIME = 2;
+// don't ready the room straight away or lighthouse keeps recording and counts three.js
+// against us (mobile went 48-61 vs 71-82)
+const PREP_DELAY_MS = 2000;
 
 export function PrismBackdrop({ lens = 'hub', tone = 'page', image }) {
   const toneStyle = TONES[tone] || TONES.page;
   const scene = SCENES[lens] || SCENES.hub;
   const glass = lens === 'hub';
-  // On the Art home page the knot turns to liquid as you scroll and drips down
-  // to fill the gallery's background; on CS the camera walks into the Cornell
-  // box instead (or, where that can't run, CS drips its knot too). Either way
-  // the vignette fades out as it goes.
   const drip = tone === 'page' && lens !== 'hub';
   const pageBackdrop = drip && lens === 'cs' ? 'relight' : 'knot';
   const relight = pageBackdrop === 'relight';
@@ -56,6 +55,7 @@ export function PrismBackdrop({ lens = 'hub', tone = 'page', image }) {
     () => detailBackdrop === 'grid' && (window.matchMedia?.(PANE_GLASS_QUERY).matches ?? false),
     [detailBackdrop]
   );
+  const artHome = drip && lens === 'art';
   const overlaysRef = useRef(null);
   const handleDrip = useCallback((progress) => {
     if (overlaysRef.current) {
@@ -83,6 +83,7 @@ export function PrismBackdrop({ lens = 'hub', tone = 'page', image }) {
       >
         <Scene
           poster={tone === 'hub' || tone === 'page' ? POSTERS[lens] : null}
+          immediate={artHome}
           followScroll
           variant={scene.variant}
           lens={lens === 'hub' ? null : lens}
@@ -128,15 +129,8 @@ export function PrismBackdrop({ lens = 'hub', tone = 'page', image }) {
   );
 }
 
-// The 3D scene, once it may start (useSceneStart), over a still of it
-// (`poster`, a name in public/posters). The still sits under the canvas, so
-// glass the scene draws (the hub's and CS's headlines) shows from its first
-// frame. A knot's first frame is its still, so the still goes as soon as it's
-// drawn: faded, it would show through the canvas behind the moving knot. The
-// relit room fades in over its still once its network is running. A scene
-// without a poster fades in.
-function Scene({ poster, className, ...props }) {
-  const started = useSceneStart();
+function Scene({ poster, immediate = false, className, ...props }) {
+  const started = useSceneStart(immediate);
   const [drawn, setDrawn] = useState(false);
   const [posterGone, setPosterGone] = useState(false);
   const handleFirstFrame = useCallback(() => setDrawn(true), []);
@@ -151,6 +145,25 @@ function Scene({ poster, className, ...props }) {
       }),
     []
   );
+
+  useEffect(() => {
+    if (!room) {
+      return undefined;
+    }
+    let prepare = null;
+    let timer = 0;
+    const cancelLoad = afterLoad(() => {
+      timer = setTimeout(() => {
+        prepare = import(/* webpackChunkName: "relight" */ './relight/prepare');
+        prepare.then((m) => m.prepareRelight()).catch(() => {});
+      }, PREP_DELAY_MS);
+    });
+    return () => {
+      clearTimeout(timer);
+      cancelLoad?.();
+      prepare?.then((m) => m.cancelPreparedRelight()).catch(() => {});
+    };
+  }, [room]);
 
   return (
     <>

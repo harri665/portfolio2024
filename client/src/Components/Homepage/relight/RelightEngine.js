@@ -10,6 +10,7 @@ export { SLOTS };
 
 // 32MB ran ~20% faster than 8MB
 const BAND_BYTES = 16 << 20;
+const FENCE_GIVE_UP = 1000;
 
 const VS = `#version 300 es
 void main() {
@@ -481,9 +482,8 @@ export class RelightEngine extends RelightBase {
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
-  // ─── Timing ────────────────────────────────────────────────────────────
-  // A timer query when the GPU has one, otherwise a fence (which also counts
-  // whatever three.js queued before, so it errs slow)
+  // fences get watched every ms or so. checking once a frame made every eval read as at least
+  // a frame long and iphones (no timer queries) ran way coarser than they needed to
 
   startTiming(stride, r0, r1) {
     const gl = this.gl;
@@ -496,6 +496,9 @@ export class RelightEngine extends RelightBase {
     if (this.timer) {
       pending.query = gl.createQuery();
       gl.beginQuery(this.timer.TIME_ELAPSED_EXT, pending.query);
+    } else {
+      pending.before = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+      gl.flush();
     }
     this.timing.pending = pending;
   }
@@ -511,7 +514,39 @@ export class RelightEngine extends RelightBase {
     } else {
       pending.sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
       gl.flush();
+      this.watchFences(pending);
     }
+  }
+
+  watchFences(pending) {
+    const gl = this.gl;
+    const passed = (sync) => gl.clientWaitSync(sync, 0, 0) !== gl.TIMEOUT_EXPIRED;
+    const check = () => {
+      pending.timer = null;
+      if (pending.cancelled) {
+        return;
+      }
+      const now = performance.now();
+      if (pending.before && passed(pending.before)) {
+        pending.beforeAt = now;
+        gl.deleteSync(pending.before);
+        pending.before = null;
+      }
+      if (!pending.before && passed(pending.sync)) {
+        pending.ms = now - Math.max(pending.start, pending.beforeAt ?? pending.start);
+      } else if (now - pending.start < FENCE_GIVE_UP) {
+        pending.timer = setTimeout(check, 1);
+        return;
+      }
+      if (pending.before) {
+        gl.deleteSync(pending.before);
+        pending.before = null;
+      }
+      gl.deleteSync(pending.sync);
+      pending.sync = null;
+      pending.done = true;
+    };
+    check();
   }
 
   pollTiming() {
@@ -529,12 +564,11 @@ export class RelightEngine extends RelightBase {
         ms = gl.getQueryParameter(pending.query, gl.QUERY_RESULT) / 1e6;
       }
       gl.deleteQuery(pending.query);
-    } else if (pending.sync) {
-      if (gl.clientWaitSync(pending.sync, 0, 0) === gl.TIMEOUT_EXPIRED) {
+    } else if (!this.timer) {
+      if (!pending.done) {
         return;
       }
-      ms = performance.now() - pending.start;
-      gl.deleteSync(pending.sync);
+      ms = pending.ms ?? null;
     }
     this.timing.pending = null;
     this.recordTiming(pending.stride, pending.share, ms);
@@ -549,8 +583,11 @@ export class RelightEngine extends RelightBase {
     if (this.timing.pending?.query) {
       gl.deleteQuery(this.timing.pending.query);
     }
-    if (this.timing.pending?.sync) {
-      gl.deleteSync(this.timing.pending.sync);
+    const pending = this.timing.pending;
+    if (pending && !pending.query) {
+      pending.cancelled = true;
+      clearTimeout(pending.timer);
+      [pending.before, pending.sync].forEach((sync) => sync && gl.deleteSync(sync));
     }
     this.resources.textures.forEach((t) => gl.deleteTexture(t));
     this.resources.framebuffers.forEach((f) => gl.deleteFramebuffer(f));

@@ -47,6 +47,12 @@ export async function requestRelightDevice() {
 
 const u = (x) => `${x >>> 0}u`;
 
+const nextTask = () => new Promise((resolve) => setTimeout(resolve, 0));
+// ms between yields to the page
+const SLICE_MS = 6;
+// ms, closer completions get reported together
+const QUEUE_GRAIN = 0.1;
+
 // f32 -> f16 bits, round to nearest even
 function toHalf(values) {
   const out = new Uint16Array(values.length);
@@ -132,17 +138,22 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
 `;
 }
 
-// The network for a band of items [i0, i1) of one light's item grid at a
-// stride, into the light's slot. `add` carries the first layer's bias plus
-// its light columns times the light, which are the same for every pixel.
-// `half` runs it in 16-bit floats, from 16-bit weights.
+// activations are vec4s so a thread loads 4 inputs at once. one at a time, the workgroup
+// memory loads outnumbered the FMAs, which is what phone gpus are worst at
 function forwardWGSL({ W, H, WD, NH, PIXIN, XW, geo, mul, threads, off, half }) {
   const CG = WD / 4;
   const PG = threads / CG;
   const TP = PG * 4;
   const HSTRIDE = WD * CG + CG;
-  const S = half ? 'f16' : 'f32';
+  const X4 = Math.ceil(XW / 2);
+  const PIN4 = Math.ceil(PIXIN / 4);
   const V = half ? 'vec4h' : 'vec4f';
+  const fma = (accs, x, w) =>
+    accs
+      .map((acc, q) => `${acc} += ${x(q)}.x * ${w}0 + ${x(q)}.y * ${w}1 + ${x(q)}.z * ${w}2 + ${x(q)}.w * ${w}3;`)
+      .join('\n      ');
+  const rows4 = (at) =>
+    [0, 1, 2, 3].map((j) => `let w${j} = Wv[${at} + ${u(j * CG)}];`).join(' ');
   return /* wgsl */ `
 ${half ? 'enable f16;' : ''}
 struct Fwd { i0: u32, i1: u32, stride: u32, slot: u32, lc: vec4f, add: array<vec4f, ${CG}> };
@@ -151,7 +162,7 @@ struct Fwd { i0: u32, i1: u32, stride: u32, slot: u32, lc: vec4f, add: array<vec
 @group(0) @binding(2) var<storage, read> pgeo: array<vec4f>;
 @group(0) @binding(3) var<uniform> fu: Fwd;
 @group(0) @binding(4) var<storage, read_write> outB: array<vec2u>;
-var<workgroup> act: array<${S}, ${TP * WD}>;
+var<workgroup> act: array<${V}, ${TP * CG}>;
 var<workgroup> pf: array<vec4f, ${2 * TP}>;
 var<workgroup> res: array<f32, ${TP * 3}>;
 ${GEO_WGSL}
@@ -164,9 +175,7 @@ fn outRow(o: u32, pl: u32) -> f32 {
   var acc = f32(Wv[${u(off.BO)} + o / 4u][o % 4u]);
   let row = ${u(off.WO)} + o * ${u(CG)};
   for (var k = 0u; k < ${u(CG)}; k++) {
-    let w = Wv[row + k];
-    let b = pl * ${u(WD)} + k * 4u;
-    acc += f32(w.x * act[b] + w.y * act[b + 1u] + w.z * act[b + 2u] + w.w * act[b + 3u]);
+    acc += f32(dot(Wv[row + k], act[pl * ${u(CG)} + k]));
   }
   return acc;
 }
@@ -177,12 +186,15 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) t: u3
   let pg = t / ${u(CG)};
   let cg = t % ${u(CG)};
 
-  for (var e = t; e < ${u(TP * XW)}; e += ${u(threads)}) {
-    let pl = e / ${u(XW)}; let j = e % ${u(XW)};
-    var v = vec2f(0.0);
-    if (base + pl < fu.i1) { v = unpack2x16float(X[pixelOf(base + pl) * ${u(XW)} + j]); }
-    act[pl * ${u(WD)} + 2u * j] = ${S}(v.x);
-    act[pl * ${u(WD)} + 2u * j + 1u] = ${S}(v.y);
+  for (var e = t; e < ${u(TP * X4)}; e += ${u(threads)}) {
+    let pl = e / ${u(X4)}; let q = e % ${u(X4)};
+    var v = vec4f(0.0);
+    if (base + pl < fu.i1) {
+      let at = pixelOf(base + pl) * ${u(XW)} + 2u * q;
+      let hi = ${XW % 2 ? `select(vec2f(0.0), unpack2x16float(X[at + 1u]), 2u * q + 1u < ${u(XW)})` : 'unpack2x16float(X[at + 1u])'};
+      v = vec4f(unpack2x16float(X[at]), hi);
+    }
+    act[pl * ${u(CG)} + q] = ${V}(v);
   }
   if (t < ${u(TP)}) {
     var g: Geo;
@@ -196,13 +208,10 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) t: u3
 
   let add = ${V}(fu.add[cg]);
   var h = array<${V}, 4>(add, add, add, add);
-  let r0 = pg * ${u(4 * WD)};
-  for (var k = 0u; k < ${u(PIXIN)}; k++) {
-    let w = Wv[${u(off.W0T)} + k * ${u(CG)} + cg];
-    h[0] += act[r0 + k] * w;
-    h[1] += act[r0 + ${u(WD)} + k] * w;
-    h[2] += act[r0 + ${u(2 * WD)} + k] * w;
-    h[3] += act[r0 + ${u(3 * WD)} + k] * w;
+  let r0 = pg * ${u(4 * CG)};
+  for (var k = 0u; k < ${u(PIN4)}; k++) {
+    ${rows4(`${u(off.W0T)} + k * ${u(4 * CG)} + cg`)}
+    ${fma(['h[0]', 'h[1]', 'h[2]', 'h[3]'], (q) => `act[r0 + ${u(q * CG)} + k]`, 'w')}
   }
   ${geo ? `for (var q = 0u; q < 4u; q++) {
     let f0 = ${V}(pf[2u * (pg * 4u + q)]); let f1 = ${V}(pf[2u * (pg * 4u + q) + 1u]);
@@ -213,9 +222,7 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) t: u3
   workgroupBarrier();
   for (var q = 0u; q < 4u; q++) {
     let pl = pg * 4u + q;
-    let v = select(${V}(0.0), max(h[q], ${V}(0.0)), base + pl < fu.i1);
-    let a = pl * ${u(WD)} + cg * 4u;
-    act[a] = v.x; act[a + 1u] = v.y; act[a + 2u] = v.z; act[a + 3u] = v.w;
+    act[pl * ${u(CG)} + cg] = select(${V}(0.0), max(h[q], ${V}(0.0)), base + pl < fu.i1);
   }
   workgroupBarrier();
 
@@ -223,20 +230,15 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) t: u3
     let wo = ${u(off.HID)} + l * ${u(HSTRIDE)};
     let bias = Wv[wo + ${u(WD * CG)} + cg];
     var a0 = bias; var a1 = bias; var a2 = bias; var a3 = bias;
-    for (var k = 0u; k < ${u(WD)}; k++) {
-      let w = Wv[wo + k * ${u(CG)} + cg];
-      a0 += act[r0 + k] * w;
-      a1 += act[r0 + ${u(WD)} + k] * w;
-      a2 += act[r0 + ${u(2 * WD)} + k] * w;
-      a3 += act[r0 + ${u(3 * WD)} + k] * w;
+    for (var k = 0u; k < ${u(CG)}; k++) {
+      ${rows4(`wo + k * ${u(4 * CG)} + cg`)}
+      ${fma(['a0', 'a1', 'a2', 'a3'], (q) => `act[r0 + ${u(q * CG)} + k]`, 'w')}
     }
     workgroupBarrier();
-    let outs = array<${V}, 4>(max(a0, ${V}(0.0)), max(a1, ${V}(0.0)), max(a2, ${V}(0.0)), max(a3, ${V}(0.0)));
-    for (var q = 0u; q < 4u; q++) {
-      let a = (pg * 4u + q) * ${u(WD)} + cg * 4u;
-      let v = outs[q];
-      act[a] = v.x; act[a + 1u] = v.y; act[a + 2u] = v.z; act[a + 3u] = v.w;
-    }
+    act[r0 + cg] = max(a0, ${V}(0.0));
+    act[r0 + ${u(CG)} + cg] = max(a1, ${V}(0.0));
+    act[r0 + ${u(2 * CG)} + cg] = max(a2, ${V}(0.0));
+    act[r0 + ${u(3 * CG)} + cg] = max(a3, ${V}(0.0));
     workgroupBarrier();
   }
 
@@ -407,7 +409,7 @@ export class RelightGPUEngine extends RelightBase {
       off[key] = len;
       len += vec4s;
     };
-    alloc('W0T', PIXIN * CG);
+    alloc('W0T', Math.ceil(PIXIN / 4) * 4 * CG);
     alloc('W0G', geo ? 6 * CG : 0);
     alloc('HID', NH * (WD * CG + CG));
     const NO = mul ? 6 : 3;
@@ -443,10 +445,22 @@ export class RelightGPUEngine extends RelightBase {
       }
     }
 
+    // Each pixel's geometry and normal, yielding now and then: at 768 px
+    // it's 590K pixels, which held the page as one task
     const pgeo = new Float32Array(NP * 8);
+    let slice = performance.now();
     for (let p = 0; p < NP; p += 1) {
-      pgeo.set(geom.subarray(p * 4, p * 4 + 4), p * 8);
-      pgeo.set(normal.subarray(p * 3, p * 3 + 3), p * 8 + 4);
+      const o = p * 8;
+      for (let j = 0; j < 4; j += 1) {
+        pgeo[o + j] = geom[p * 4 + j];
+      }
+      for (let j = 0; j < 3; j += 1) {
+        pgeo[o + 4 + j] = normal[p * 3 + j];
+      }
+      if ((p & 0x3fff) === 0 && performance.now() - slice > SLICE_MS) {
+        await nextTask();
+        slice = performance.now();
+      }
     }
 
     const shapes = { W, H, WD, NH, PIXIN, XW, geo, mul, threads, off, half };
@@ -581,15 +595,20 @@ export class RelightGPUEngine extends RelightBase {
       enc.resolveQuerySet(this.querySet, 0, 2, this.queryBuf, 0);
       enc.copyBufferToBuffer(this.queryBuf, 0, this.readBuf, 0, 16);
     }
+    const queued = timed && !stamped ? this.queueDone() : null;
     dev.queue.submit([enc.finish()]);
     if (timed) {
-      this.time(stride, (r1 - r0) / this.rows(stride), stamped);
+      this.time(stride, (r1 - r0) / this.rows(stride), stamped, queued);
     }
   }
 
-  // GPU time from the pass's timestamps when the device has them, otherwise
-  // until the queue is done (which counts the wait for the GPU, so errs slow)
-  time(stride, share, stamped) {
+  queueDone() {
+    return this.device.queue.onSubmittedWorkDone().then(() => performance.now());
+  }
+
+  // no timestamp queries on a lot of phones. timing from submit counted the rest of the
+  // frame and made the network look several times slower than it is
+  time(stride, share, stamped, queued) {
     const pending = { stride, share, done: false, ms: null };
     this.timing.pending = pending;
     const start = performance.now();
@@ -608,9 +627,12 @@ export class RelightGPUEngine extends RelightBase {
         })
         .catch(() => settle(null));
     } else {
-      this.device.queue
-        .onSubmittedWorkDone()
-        .then(() => settle(performance.now() - start))
+      // chrome sometimes resolves both at once behind a long queue, fall back to time since submit
+      Promise.all([queued, this.queueDone()])
+        .then(([before, after]) => {
+          const ms = after - Math.max(start, before);
+          settle(ms > QUEUE_GRAIN ? ms : after - start);
+        })
         .catch(() => settle(null));
     }
   }

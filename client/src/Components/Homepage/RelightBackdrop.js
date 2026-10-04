@@ -6,6 +6,7 @@ import {
   AdaptiveQuality,
   MIN_FPS,
   REFINE_FRAMES,
+  firstBudget,
   firstTier,
   gpuName,
   loadProfile,
@@ -16,10 +17,16 @@ import {
   upgradeTier,
 } from './relight/adaptiveQuality';
 import { MIN_BAND_ROWS } from './relight/RelightBase';
-import { RelightEngine } from './relight/RelightEngine';
-import { RelightGPUEngine, requestRelightDevice } from './relight/RelightGPU';
+import {
+  COMPACT_QUERY,
+  NATIVE,
+  bandBytesFor,
+  createRelightEngine,
+  loadRoom,
+  takePreparedRelight,
+} from './relight/prepare';
+import { requestRelightDevice } from './relight/RelightGPU';
 import { ROOM_FRAGMENT, RoomLayer } from './relight/roomLayer';
-import { encodePixels, loadRelightScene } from './relight/scene';
 import { setRelightStatus } from './relight/status';
 import useCardLights, { CARD_SELECTOR } from './useCardLights';
 
@@ -47,13 +54,14 @@ import useCardLights, { CARD_SELECTOR } from './useCardLights';
 // The frame budget, the canvas's pixel ratio and the image size rise for as
 // long as the page holds 30 fps (relight/adaptiveQuality), and are remembered
 // for the device's next visit. A larger size is fetched in the background and
-// swapped in once ready. Refinement waits while the page scrolls, so those
-// frames go to keeping the canvas over the viewport. The fixed layer draws at
+// swapped in once ready. Most of that is done before the backdrop mounts:
+// while the page still shows its still, the room is fetched, the network
+// built and timed on this GPU, and a larger size fetched if it has room for
+// one (relight/prepare), so the room starts at the size and strides it would
+// have settled on rather than at a guess. Refinement waits while the page
+// scrolls, so those frames go to keeping the canvas over the viewport. The fixed layer draws at
 // the screen's own pixel ratio, up to ROOM_MAX_DPR, whatever the canvas's.
 
-const SCENE_URL = `${process.env.PUBLIC_URL}/relight/cornell`;
-const NATIVE = 512;
-const tierSuffix = (tier) => (tier === NATIVE ? '' : `-${tier}`);
 const PANEL_SELECTOR = '[data-prism-panel]';
 const HERO_SELECTOR = '[data-prism-hero]';
 // px below the nav bar
@@ -78,13 +86,9 @@ const KEY = { radius: 0.1, color: [1, 0.83, 0.64], intensity: 26 };
 // hidden fill light so the room is never fully black
 const FILL = { pos: [0.64, 0.72, -0.64], radius: 0.07, color: [0.55, 0.7, 1], intensity: 9, hidden: true };
 
-// GPU time per frame for the network (ms), until the device shows what it can take
-const START_BUDGET = { compact: 5, full: 7 };
 const MAX_DPR = { compact: 1.5, full: 2 };
 const SAVE_EVERY = 5;
 const PUBLISH_EVERY = 0.5;
-// 32MB is ~20% faster than 8MB but phones don't have the memory
-const BAND_BYTES = { compact: 16 << 20, full: 32 << 20 };
 // drawn at the canvas's dpr (1 on phones) it got upscaled twice and looked
 // a third of its resolution on a 3x phone
 const ROOM_MAX_DPR = 2;
@@ -100,10 +104,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
     () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false,
     []
   );
-  const compact = useMemo(
-    () => window.matchMedia?.('(max-width: 768px), (pointer: coarse)').matches ?? false,
-    []
-  );
+  const compact = useMemo(() => window.matchMedia?.(COMPACT_QUERY).matches ?? false, []);
 
   const [webgl, setWebgl] = useState(
     () => new URLSearchParams(window.location.search).get('relight') === 'webgl'
@@ -112,9 +113,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
   const st = useRef(null);
   if (!st.current) {
     const gpu = gpuName(renderer.getContext());
-    // Touch screens held 60 fps while the room scrolled with the canvas and
-    // trailed the finger; on its fixed layer it doesn't, and at 60 the
-    // network had half the time and phones saw a coarse room
+    // phones held 60 but then the network only had half the time and the room looked coarse
     const fps = MIN_FPS;
     const profile = loadProfile(gpu, fps);
     const device = window.devicePixelRatio || 1;
@@ -125,7 +124,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
       device: null,
       notGPU: null,
       publishedAt: -Infinity,
-      bandBytes: compact ? BAND_BYTES.compact : BAND_BYTES.full,
+      bandBytes: bandBytesFor(compact),
       readyAt: null,
       progress: 0,
       box: { left: 0, top: 0, size: 1 },
@@ -140,17 +139,20 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
       scrolledAt: -Infinity,
       gpu,
       fps,
+      capped: compact,
       profile,
       fromProfile: !!profile,
       savedAt: 0,
       tier: firstTier(profile, compact),
+      // 'timed' | 'built' | null
+      prepared: null,
       upgrading: null, // the AbortController of a larger size on its way
       upgradeFailed: false,
       upgradeCheckedAt: 0,
       shownPx: 0,
       roomDpr: 1,
       quality: new AdaptiveQuality({
-        budget: finite(profile?.budget, compact ? START_BUDGET.compact : START_BUDGET.full),
+        budget: firstBudget(profile, compact),
         dpr: finite(profile?.dpr, compact ? 1 : Math.min(device, 1.5)),
         dprRange: [1, Math.max(1, Math.min(device, compact ? MAX_DPR.compact : MAX_DPR.full))],
         failedDpr: finite(profile?.failedDpr, Infinity),
@@ -188,11 +190,10 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // The WebGPU device, asked for once and kept across image sizes. A device
-  // that's lost (a GPU reset, a driver update) hands over to WebGL.
-  const deviceFor = (state) => {
+  // lost device (gpu reset, driver update) falls back to webgl
+  const deviceFor = (state, requested = null) => {
     if (!state.device) {
-      state.device = requestRelightDevice()
+      state.device = (requested || requestRelightDevice())
         .catch((error) => {
           state.notGPU = error.message;
           return null;
@@ -259,9 +260,8 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
       return undefined;
     }
 
-    // A missing size falls back to the one every device can have
-    const load = (tier) => loadRelightScene(SCENE_URL, signal, tierSuffix(tier));
-    const start = async () => {
+    const load = (tier) => loadRoom(tier, signal);
+    const prepare = async () => {
       const [device, data] = await Promise.all([
         webgl ? null : deviceFor(state),
         load(state.tier).catch((error) => {
@@ -272,17 +272,37 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
           return load(NATIVE);
         }),
       ]);
-      const built = await buildEngine(data, device, state.bandBytes, signal);
+      const built = await createRelightEngine(data, device, state.bandBytes, signal);
+      seedCosts(built.engine, state.profile);
+      return built;
+    };
+    const start = async () => {
+      const prepared = await takePreparedRelight();
+      if (prepared?.error) {
+        throw prepared.error;
+      }
+      if (prepared) {
+        if (prepared.device) {
+          deviceFor(state, prepared.device);
+        }
+        state.tier = prepared.tier;
+        state.prepared = prepared.timed ? 'timed' : 'built';
+        state.upgradeFailed = prepared.upgradeFailed;
+      }
+      const built = withTexture(prepared || (await prepare()));
       if (signal.aborted) {
         built.dispose();
+        prepared?.upgrade?.controller.abort();
         return;
       }
       if (built.notGPU) {
         state.notGPU = built.notGPU;
       }
-      seedCosts(built.engine, state.profile);
       install(state, built, uniforms);
       publish(state);
+      if (prepared?.upgrade) {
+        startUpgrade(prepared.upgrade.tier, prepared.upgrade);
+      }
     };
     start().catch(fail);
 
@@ -301,15 +321,16 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
   }, [renderer, uniforms, webgl]);
 
   // Fetches and prepares the room at `tier` px while the current one keeps
-  // running, then swaps it in, starting from the current one's costs
-  const startUpgrade = (tier) => {
+  // running, then swaps it in, starting from the current one's costs.
+  // `pending`: a fetch of it already on its way ({ controller, data }).
+  const startUpgrade = (tier, pending = null) => {
     const state = st.current;
-    const controller = new AbortController();
+    const controller = pending?.controller || new AbortController();
     const { signal } = controller;
     state.upgrading = controller;
     // on the device the current one runs on
     const device = state.engine.backend === 'webgpu' ? state.device : null;
-    Promise.all([device, loadRelightScene(SCENE_URL, signal, tierSuffix(tier))])
+    Promise.all([device, pending?.data || loadRoom(tier, signal)])
       .then(([gpu, data]) => buildEngine(data, gpu, state.bandBytes, signal))
       .then((built) => {
         if (signal.aborted || !state.engine) {
@@ -556,6 +577,7 @@ function publish(state) {
     size: engine.W,
     gpu: state.gpu,
     fps: state.fps,
+    capped: state.capped,
     dpr: quality.dpr,
     budget: round(quality.budget),
     cost: round(engine.evalCost(1)),
@@ -565,6 +587,7 @@ function publish(state) {
     fixedLayer: !!state.layer,
     roomDpr: state.roomDpr,
     fromProfile: state.fromProfile,
+    prepared: state.prepared,
     upgrading: !!state.upgrading,
   });
 }
@@ -576,29 +599,11 @@ function saveState({ engine, gpu, fps, quality }) {
   }
 }
 
-// The network for a loaded scene: on `device` (WebGPU) if there is one and
-// it can run it, else on WebGL. Returns { engine, texture, present, dispose,
-// notGPU }: the texture the backdrop samples, present(layer) to call after
-// each composite, which hands the image to the texture and the fixed layer,
-// dispose() for all of it, and why a device couldn't run it, if it couldn't.
 async function buildEngine(data, device, bandBytes, signal) {
-  let engine = null;
-  let notGPU = null;
-  if (device) {
-    try {
-      engine = await RelightGPUEngine.create(device, data);
-    } catch (error) {
-      if (signal.aborted) {
-        throw error;
-      }
-      console.warn('Relight backdrop running on WebGL instead of WebGPU:', error);
-      notGPU = `WebGPU couldn't build the network (${error.message})`;
-    }
-  }
-  if (!engine) {
-    engine = new RelightEngine(data, await encodePixels(data, signal), { bandBytes });
-  }
+  return withTexture(await createRelightEngine(data, device, bandBytes, signal));
+}
 
+function withTexture({ engine, notGPU }) {
   // images come bottom row first so don't flip
   const texture = new THREE.Texture();
   texture.flipY = false;

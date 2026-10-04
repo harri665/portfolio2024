@@ -15,22 +15,36 @@ const f16tab = (() => {
   return t;
 })();
 
-function typed(buf, entry) {
+const nextTask = () => new Promise((resolve) => setTimeout(resolve, 0));
+// ms between yields to the page
+const SLICE_MS = 6;
+// Halves converted between looks at the clock
+const DECODE_STEP = 1 << 16;
+
+// An array of the file, as float32. Halves are converted a slice at a time,
+// yielding between them: at 768 px the pixels are ~8M of them, which held
+// the page for a few hundred ms on a phone.
+async function typed(buf, entry, signal) {
   const n = entry.shape.reduce((a, b) => a * b, 1);
   if (entry.dtype === 'float32') {
     return new Float32Array(buf, entry.offset, n);
   }
   const h = new Uint16Array(buf, entry.offset, n);
   const out = new Float32Array(n);
-  for (let i = 0; i < n; i += 1) {
-    out[i] = f16tab[h[i]];
+  let slice = performance.now();
+  for (let i0 = 0; i0 < n; i0 += DECODE_STEP) {
+    const i1 = Math.min(n, i0 + DECODE_STEP);
+    for (let i = i0; i < i1; i += 1) {
+      out[i] = f16tab[h[i]];
+    }
+    if (performance.now() - slice > SLICE_MS) {
+      await nextTask();
+      throwIfAborted(signal);
+      slice = performance.now();
+    }
   }
   return out;
 }
-
-const nextTask = () => new Promise((resolve) => setTimeout(resolve, 0));
-// ms between yields to the page
-const SLICE_MS = 6;
 
 function throwIfAborted(signal) {
   if (signal?.aborted) {
@@ -40,13 +54,14 @@ function throwIfAborted(signal) {
 
 // Fetches and unpacks a scene. `suffix` picks another image size of the same
 // network (scene-768.json and pixels-768.bin for '-768'); model.bin is shared.
+// `priority` is the fetches' (fetch's own; 'low' to stay behind the page's).
 // Returns { scene, layers, grid, gridOff, aux, geom, normal }: the network's
 // layers ({w, b, shape}), its multi-resolution grids flattened into one
 // array, and per pixel the aux features, geometry (position, camera distance)
 // and shading normal.
-export async function loadRelightScene(base, signal, suffix = '') {
+export async function loadRelightScene(base, signal, suffix = '', priority = 'auto') {
   const get = async (file) => {
-    const response = await fetch(`${base}/${file}`, { signal });
+    const response = await fetch(`${base}/${file}`, { signal, priority });
     if (!response.ok) {
       throw new Error(`failed to load ${file} (${response.status})`);
     }
@@ -69,15 +84,20 @@ export async function loadRelightScene(base, signal, suffix = '') {
     return offset;
   });
   const grid = new Float32Array(gridLen);
-  scene.model.grids.forEach((g, i) => grid.set(typed(model, g), gridOff[i]));
-  const layers = scene.model.layers.map((l) => ({
-    w: typed(model, l.weight),
-    b: typed(model, l.bias),
-    shape: l.weight.shape,
-  }));
-  const aux = typed(pixels, scene.pixels.aux);
-  const geom = typed(pixels, scene.pixels.geom);
-  const normal = typed(pixels, scene.pixels.normal);
+  for (let i = 0; i < scene.model.grids.length; i += 1) {
+    grid.set(await typed(model, scene.model.grids[i], signal), gridOff[i]);
+  }
+  const layers = [];
+  for (const l of scene.model.layers) {
+    layers.push({
+      w: await typed(model, l.weight, signal),
+      b: await typed(model, l.bias, signal),
+      shape: l.weight.shape,
+    });
+  }
+  const aux = await typed(pixels, scene.pixels.aux, signal);
+  const geom = await typed(pixels, scene.pixels.geom, signal);
+  const normal = await typed(pixels, scene.pixels.normal, signal);
   await nextTask();
   throwIfAborted(signal);
 

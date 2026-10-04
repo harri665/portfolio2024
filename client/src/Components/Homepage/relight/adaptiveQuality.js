@@ -1,25 +1,5 @@
-// Fits the relight backdrop to the device it runs on. Nothing is benchmarked
-// up front and nothing extra is loaded: it watches the page's own frames and
-// spends the GPU on image quality for as long as the page holds 30 fps. The
-// display's own refresh rate isn't the goal; a frame that runs past the floor
-// says the last thing asked of the GPU may have been too much.
-//
-// Three settings follow from that:
-// - The network's budget per frame (ms of GPU time), which sets how coarse a
-//   moving light's preview is and how far a resting one is refined. It grows
-//   while frames that ran the network stay on time and backs off when they
-//   run late more often than the frames that didn't: on a phone the page
-//   itself misses frames (a slow CPU, the browser scrolling), and taking the
-//   network's budget away for those only coarsened the image.
-// - The canvas's pixel ratio, which sets what every frame costs, the glass
-//   most of all. It's judged only on frames with no network work, so the two
-//   don't chase each other: a resting room that still misses frames has too
-//   many pixels, and one that never does can afford more.
-// - The image size the network runs at (its tier). The first visit loads a
-//   small or a middle one; once the network has been timed, a GPU with room
-//   to spare fetches the next size up in the background and swaps it in.
-//
-// What was learned is kept for the next visit (loadProfile, saveProfile).
+// tunes the relight backdrop to the device: network budget, canvas dpr and image size,
+// pushing quality up as long as the page holds 30fps. saved per gpu for next visit
 
 export const MIN_FPS = 30;
 // ms. slack is for frames vsync rounds just past 33ms (5 refreshes at 144Hz, 9 at 240Hz)
@@ -133,6 +113,8 @@ export class AdaptiveQuality {
 }
 
 export const TIERS = [384, 512, 768];
+// ms. phones used to start lower back when they ran at 60
+const START_BUDGET = { compact: 7, full: 7 };
 export const REFINE_FRAMES = 40;
 const UPGRADE_FRAMES = 12;
 
@@ -142,6 +124,14 @@ export function firstTier(profile, compact) {
     return profile.tier;
   }
   return compact || slowConnection() ? TIERS[0] : TIERS[1];
+}
+
+export function firstBudget(profile, compact) {
+  const budget = profile?.budget;
+  if (Number.isFinite(budget) && budget > 0) {
+    return budget;
+  }
+  return compact ? START_BUDGET.compact : START_BUDGET.full;
 }
 
 export function upgradeTier(engine, budget, shownPx) {

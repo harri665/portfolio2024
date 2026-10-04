@@ -9,6 +9,7 @@ import PaintedPage from '../Glass/PaintedPage';
 import { CoverBackdrop, DraftingGrid } from './ProjectBackdrops';
 import LiquidGlassPass from './LiquidGlassPass';
 import RelightBackdrop from './RelightBackdrop';
+import { MIN_FPS } from './relight/adaptiveQuality';
 import useCardLights, { CARD_SELECTOR } from './useCardLights';
 
 // type: 'torusKnot',
@@ -18,7 +19,8 @@ const SCENE_PRESETS = {
   art: {
     shape: {
       type: 'torusKnot',
-      args: [0.5, 0.3, 512, 32, 2],
+      // needs this many segments or the shader's ripples show up as facets
+      args: [0.5, 0.3, 1024, 128, 2],
       baseRotation: [0.2, 0, 0],
       tiltSpeed: 0.28,
       tiltAmplitude: 0.06,
@@ -82,13 +84,6 @@ const SCENE_PRESETS = {
   },
 };
 
-// Each site looks at the same prism through its own lens: the shader pulls
-// the spectrum toward two colours. The hub leaves it unfiltered.
-// `solidFocus` lights the liquid under the focused card as a white band along
-// its edge, instead of a pool of the drifting gradient.
-// `settledGlow` keeps some of the drifting gradient across the whole settled
-// liquid behind the gallery, instead of only a glow just inside its edge.
-// `slosh` scales how far scrolling makes that liquid's surface wave (1 = default)
 const LENSES = {
   // anodised titanium look
   cs: {
@@ -98,7 +93,14 @@ const LENSES = {
     solidFocus: true,
     settledSaturation: 0.25,
   },
-  art: { a: [1.0, 0.36, 0.44], b: [1.0, 0.68, 0.3], strength: 0.72, settledGlow: 0.24, slosh: 2.2 },
+  art: {
+    a: [1.0, 0.36, 0.44],
+    b: [1.0, 0.68, 0.3],
+    strength: 0.72,
+    settledGlow: 0.24,
+    slosh: 2.2,
+    smoothFill: true,
+  },
 };
 
 export default function DistortedTorusScene({
@@ -149,7 +151,13 @@ export default function DistortedTorusScene({
           }}
           style={{ width: '100%', height: '100%', pointerEvents: 'none' }}
         >
-          <AfterMotion settle={settles} onFirstFrame={onFirstFrame} startAt={startAt} />
+          <AfterMotion
+            settle={settles}
+            onFirstFrame={onFirstFrame}
+            startAt={startAt}
+            // phones run the room at 30. at 60 the glass drew twice per room frame and ate its gpu time
+            maxFps={relight && compact ? MIN_FPS : null}
+          />
           // has to be first so every frame callback sees the canvas over the viewport
           {followScroll && <ScrollFollow layer={layer} />}
           <ambientLight intensity={preset.ambientLightIntensity} color="#ffffff" />
@@ -210,8 +218,10 @@ export default function DistortedTorusScene({
 // drives frames after framer-motion moves the cards. on r3f's own loop the glass
 // drew the cards where they were a frame ago
 const SETTLE_MS = 900;
+// ms of slack so vsync jitter doesn't skip a frame
+const FRAME_SLACK = 4;
 
-function AfterMotion({ settle = false, onFirstFrame, startAt = 0 }) {
+function AfterMotion({ settle = false, onFirstFrame, startAt = 0, maxFps = null }) {
   const advance = useThree((state) => state.advance);
   const firstFrame = useRef(onFirstFrame);
   firstFrame.current = onFirstFrame;
@@ -221,7 +231,12 @@ function AfterMotion({ settle = false, onFirstFrame, startAt = 0 }) {
     const start = performance.now();
     let last = '';
     let busyUntil = start + SETTLE_MS;
+    let drawnAt = -Infinity;
+    const interval = maxFps ? 1000 / maxFps - FRAME_SLACK : 0;
     const tick = ({ timestamp }) => {
+      if (timestamp - drawnAt < interval) {
+        return;
+      }
       if (settle) {
         const now = sceneState();
         if (now !== last) {
@@ -233,6 +248,7 @@ function AfterMotion({ settle = false, onFirstFrame, startAt = 0 }) {
         }
       }
       const elapsed = window.__sceneStill ? 0 : Math.max(0, (timestamp - start) / 1000);
+      drawnAt = timestamp;
       advance(startAt + elapsed);
       if (!drawn.current) {
         drawn.current = true;
@@ -241,7 +257,7 @@ function AfterMotion({ settle = false, onFirstFrame, startAt = 0 }) {
     };
     frame.postRender(tick, true);
     return () => cancelFrame(tick);
-  }, [advance, settle, startAt]);
+  }, [advance, settle, startAt, maxFps]);
 
   return null;
 }
@@ -276,12 +292,6 @@ function ScrollFollow({ layer }) {
   return null;
 }
 
-// ─── The drip ──────────────────────────────────────────────────────────────
-// With `drip` on, scrolling toward the gallery turns the knot into liquid: it
-// condenses into a droplet, the droplet falls onto the gallery's top edge and
-// splashes out along it, then drips down until the gallery's rounded panel is
-// full. The gallery marks itself with this attribute; the liquid fills its box
-// plus a margin and scrolls with it.
 const PANEL_SELECTOR = '[data-prism-panel]';
 const DRIP_START = 0.03;
 const DRIP_END_TOP = 0.14;
@@ -434,7 +444,9 @@ function LiquidDrip({ lens, state }) {
         : fill > 0
           ? THREE.MathUtils.lerp(top + 20, Math.max(size.height + 160, top + 20), easeInOutCubic(fill))
           : -1e4;
-    uniforms.dripLength.value = (small ? 110 : 190) * Math.sin(Math.PI * Math.min(fill * 1.4, 1));
+    uniforms.dripLength.value = lens?.smoothFill
+      ? 0
+      : (small ? 110 : 190) * Math.sin(Math.PI * Math.min(fill * 1.4, 1));
 
     uniforms.settle.value = easeInOutCubic(phase(progress, SETTLE));
     uniforms.slosh.value =

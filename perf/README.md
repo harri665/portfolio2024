@@ -56,7 +56,7 @@ the machine they were measured on.
 
 The home pages paint a still of their 3D scene first and start the live scene
 once the page has loaded and the visitor moves, scrolls or types (or 3.5 s
-after load). `posters.mjs` captures those stills into `client/public/posters`
+after load); the art home page starts its scene straight away. `posters.mjs` captures those stills into `client/public/posters`
 from the dev server, so re-run it whenever a home page's scene changes:
 
     node posters.mjs                # every poster
