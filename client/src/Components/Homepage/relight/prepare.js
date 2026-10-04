@@ -249,6 +249,17 @@ export async function tuneEngine(engine, signal = null, slot = 0) {
   }
 }
 
+// whole light at every 16th pixel is so few pixels the per pass overhead dominates. an AMD 860M
+// read 330ms for a light that takes 47 and got stuck at every 16th pixel
+export function benchStride(engine) {
+  const known = Object.keys(engine.timing.byStride).map(Number);
+  if (!known.length || engine.timing.seeded) {
+    return null;
+  }
+  const finest = [1, 2, 4].find((s) => engine.evalCost(s) <= BENCH_MAX_MS) ?? 8;
+  return finest < Math.min(...known) ? finest : null;
+}
+
 async function benchmark(engine, prep) {
   const { signal } = prep.controller;
   const { lo, hi, rmin, rmax } = engine;

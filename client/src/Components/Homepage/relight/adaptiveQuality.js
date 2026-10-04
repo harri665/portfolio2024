@@ -41,11 +41,9 @@ export class AdaptiveQuality {
     this.stats = { frames: 0, seconds: 0, late: 0 };
   }
 
-  // Once a frame, before any work, with the frame's delta (s). `judgeDpr`
-  // lets the pixel ratio change; keep it off while loading, when the CPU
-  // work would read as too many pixels. `hold` leaves everything be (while a
-  // tier is prepared). Returns a new pixel ratio, or null.
-  frame(delta, judgeDpr, hold = false) {
+  // keep `settled` off while loading. shader compiles made frames late and on first visits
+  // the intro light dropped the budget to the floor
+  frame(delta, settled, hold = false) {
     this.frameNo += 1;
     if (!(delta > 0) || delta > GAP || hold) {
       return null;
@@ -57,9 +55,11 @@ export class AdaptiveQuality {
     this.stats.late += late ? 1 : 0;
     const rates = this.lateRate;
     const kind = recent ? 'work' : 'idle';
-    rates[kind] += RATE_ALPHA * ((late ? 1 : 0) - rates[kind]);
+    if (settled) {
+      rates[kind] += RATE_ALPHA * ((late ? 1 : 0) - rates[kind]);
+    }
 
-    if (recent && late && rates.work > rates.idle + BLAME) {
+    if (recent && late && settled && rates.work > rates.idle + BLAME) {
       this.ceiling = this.budget * 0.9;
       this.budget *= BACK_OFF;
     } else if (recent && !late) {
@@ -68,7 +68,7 @@ export class AdaptiveQuality {
     }
     this.budget = clamp(this.budget, BUDGET_MIN, this.budgetMax);
 
-    return !recent && judgeDpr ? this.judgeDpr(late) : null;
+    return !recent && settled ? this.judgeDpr(late) : null;
   }
 
   worked() {

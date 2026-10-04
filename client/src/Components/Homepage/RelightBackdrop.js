@@ -29,6 +29,7 @@ import {
   bandBytesFor,
   createRelightEngine,
   loadRoom,
+  benchStride,
   takePreparedRelight,
   tuneEngine,
 } from './relight/prepare';
@@ -53,6 +54,7 @@ const END_TOP = 0.14;
 const MOVE_EPS = 0.004;
 // s at rest before it's refined
 const REFINE_DELAY = 0.12;
+const BENCH_TRIES = 6;
 const SCROLL_REST = 0.15;
 // margin so the glass has something to bend at the edge. widened when you scroll
 // back out so it doesn't re-evaluate every frame
@@ -133,9 +135,10 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
       network: firstNetwork(profile),
       // 'timed' | 'built' | null
       prepared: null,
-      visit: visitId(), // the page view the room runs in, for its reports
-      upgrading: null, // the AbortController of a larger size on its way
-      tuning: false, // whether the network is being tuned (relight/prepare's tuneEngine)
+      visit: visitId(),
+      upgrading: null,
+      tuning: false,
+      benching: false,
       tuneController: new AbortController(),
       upgradeFailed: false,
       upgradeCheckedAt: 0,
@@ -420,9 +423,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
 
     const { engine, quality } = state;
     const age = engine && state.readyAt !== null ? now - state.readyAt : 0;
-    // ...and held while a larger size is prepared, which costs CPU, not
-    // pixels, or the network is tuned
-    const dpr = quality.frame(delta, age > 1.5, !!state.upgrading || state.tuning);
+    const dpr = quality.frame(delta, age > 1.5, !!state.upgrading || state.tuning || state.benching);
     if (dpr !== null) {
       onDpr?.(dpr);
     }
@@ -433,6 +434,9 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
       return;
     }
     engine.pollTiming();
+    if (!engine.timing.pending) {
+      state.benching = false;
+    }
     if (state.readyAt === null) {
       state.readyAt = now;
     }
@@ -492,6 +496,15 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
     }
     const resting = (light) => light.evalPos && distance(light.pos, light.evalPos) <= MOVE_EPS && !light.refineRect;
     const timed = engine.evalCost(1) !== null;
+
+    const bench = timed && !engine.timing.pending && (engine.benchRuns ?? 0) < BENCH_TRIES ? benchStride(engine) : null;
+    if (bench && age > 2 && !scrolling && resting(key) && resting(fill) && now - key.still > 0.5) {
+      engine.benchRuns = (engine.benchRuns ?? 0) + 1;
+      state.benching = true;
+      engine.evaluate({ pos: key.evalPos, radius: key.radius }, fill.slots[1 - fill.shown], bench);
+      state.layer?.draw(uniforms, vw, vh, roomDpr);
+      return;
+    }
     if (!engine.tuned && timed && age > 3 && !scrolling && resting(key) && resting(fill) && now - key.still > 1) {
       state.tuning = true;
       tuneEngine(engine, state.tuneController.signal, fill.slots[1 - fill.shown])
