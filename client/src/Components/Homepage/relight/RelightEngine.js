@@ -71,13 +71,7 @@ void main() {
 }`;
 }
 
-// One pass of a layer: `out` output groups from `kin` input groups.
-// stage 'l0':  first layer. Pixel features come from `src` (xg groups), then
-//              the normalised light, then (geo) 6 geometric features.
-//       'hid': hidden layer, activations from `src` at the band-local row.
-//       'out': output layer, written at the item's absolute row. With the
-//              'mul' head, out = h[0..2] * G + h[3..5].
-function layerFS({ kin, out, relu, stage, xg = 0, geo = false, mul = false }) {
+function layerFS({ kin, out, relu, stage, xg = 0, geo = false }) {
   const J = [...Array(out).keys()];
   const acc = (x, b) =>
     J.map(
@@ -85,20 +79,17 @@ function layerFS({ kin, out, relu, stage, xg = 0, geo = false, mul = false }) {
         `a${j} += w[${b} + ${4 * j}] * ${x}.x + w[${b} + ${4 * j + 1}] * ${x}.y + ` +
         `w[${b} + ${4 * j + 2}] * ${x}.z + w[${b} + ${4 * j + 3}] * ${x}.w;`
     ).join('\n    ');
-  const needItem = stage === 'l0' || (stage === 'out' && mul);
-  const nTex = stage === 'l0' ? xg : kin;
-  const targets = stage === 'out' ? 1 : out;
+  const first = stage === 'l0';
+  const nTex = first ? xg : kin;
   return `${HEAD}
 uniform sampler2DArray src;
 layout(std140) uniform Wt { vec4 w[${kin * out * 4}]; };
 uniform vec4 bias[${out}];
 uniform int yOff;
-${needItem ? 'uniform vec4 ln; uniform int stride;' : ''}
-${geo || mul ? `${GEOM}
+${first ? 'uniform vec4 ln; uniform int stride;' : ''}
+${first && geo ? `${GEOM}
 uniform vec3 boxLo, boxHi; uniform vec2 radRange;
-// Direction and cosine to the light, log distance and log solid angle, and the
-// unshadowed irradiance factor G
-void geoFeatures(ivec2 px, vec4 L, out vec4 g0, out vec4 g1, out float G) {
+void geoFeatures(ivec2 px, vec4 L, out vec4 g0, out vec4 g1) {
   vec3 c = boxLo + (L.xyz + 1.0) * 0.5 * (boxHi - boxLo);
   float r = radRange.x + (L.w + 1.0) * 0.5 * (radRange.y - radRange.x);
   vec4 gm = geomAt(px);
@@ -111,13 +102,11 @@ void geoFeatures(ivec2 px, vec4 L, out vec4 g0, out vec4 g1, out float G) {
   float omega = 6.283185307 * s * s / (1.0 + sqrt(max(1.0 - s * s, 0.0)));
   g0 = vec4(l, cosv) * valid;
   g1 = vec4(0.5 * log(d), 0.25 * log(omega + 1e-6), 0.0, 0.0) * valid;
-  G = omega * max(cosv, 0.0) / 3.141592654 * valid;
 }` : ''}
-${[...Array(targets).keys()].map((j) => `layout(location = ${j}) out vec4 o${j};`).join('\n')}
+${J.map((j) => `layout(location = ${j}) out vec4 o${j};`).join('\n')}
 void main() {
   ivec2 q = ivec2(gl_FragCoord.xy);
   ${stage === 'l0' ? 'vec4 L = ln; ivec2 px = ivec2(q.x, q.y + yOff) * stride;' : 'ivec2 px = ivec2(q.x, q.y - yOff);'}
-  ${stage === 'out' && mul ? 'vec4 L = ln; ivec2 ip = q * stride;' : ''}
   ${J.map((j) => `vec4 a${j} = bias[${j}];`).join(' ')}
   for (int k = 0; k < ${nTex}; k++) {
     vec4 x = texelFetch(src, ivec3(px, k), 0);
@@ -125,22 +114,16 @@ void main() {
     ${acc('x', 'b')}
   }
   ${stage === 'l0' ? acc('L', xg * out * 4) : ''}
-  ${stage === 'l0' && geo ? `vec4 g0, g1; float G;
-  geoFeatures(px, L, g0, g1, G);
+  ${stage === 'l0' && geo ? `vec4 g0, g1;
+  geoFeatures(px, L, g0, g1);
   ${acc('g0', (xg + 1) * out * 4)}
   ${acc('g1', (xg + 2) * out * 4)}` : ''}
-  ${stage === 'out' && mul
-    ? `vec4 g0, g1; float G;
-  geoFeatures(ip, L, g0, g1, G);
-  o0 = vec4(a0.xyz * G + vec3(a0.w, a1.xy), 0.0);`
-    : stage === 'out'
-      ? 'o0 = a0;'
-      : J.map((j) => `o${j} = ${relu ? `max(a${j}, vec4(0.0))` : `a${j}`};`).join('\n  ')}
+  ${J.map((j) => `o${j} = ${relu ? `max(a${j}, vec4(0.0))` : `a${j}`};`).join('\n  ')}
 }`;
 }
 
 // rows bottom first, that's what three.js render targets expect
-const compositeFS = (W, H) => `${HEAD}
+const compositeFS = (W, H, mul) => `${HEAD}
 uniform sampler2DArray outT;
 ${GEOM}
 uniform vec3 camX, camY, camZ; uniform vec2 tanxy;
@@ -178,15 +161,24 @@ float directCov(ivec2 pix, int l) {
   }
   return cnt / 16.0;
 }
-vec3 netAt(int slot, int s, ivec2 pix) {
-  if (s <= 1) return max(texelFetch(outT, ivec3(pix, slot), 0).xyz, 0.0);
+void outAt(int slot, ivec2 c, out vec3 a, out vec3 b) {
+  ${mul
+    ? `vec4 v0 = texelFetch(outT, ivec3(c, 2 * slot), 0), v1 = texelFetch(outT, ivec3(c, 2 * slot + 1), 0);
+  a = v0.xyz; b = vec3(v0.w, v1.xy);`
+    : 'a = texelFetch(outT, ivec3(c, slot), 0).xyz; b = vec3(0.0);'}
+}
+void netAt(int slot, int s, ivec2 pix, out vec3 a, out vec3 b) {
+  if (s <= 1) {
+    outAt(slot, pix, a, b);
+    return;
+  }
   ivec2 last = ivec2((${W} + s - 1) / s - 1, (${H} + s - 1) / s - 1);
   vec2 f = vec2(pix) / float(s);
   ivec2 c0 = min(ivec2(f), last), c1 = min(c0 + 1, last);
   vec2 t = f - vec2(c0);
   vec4 g = geomAt(pix);
   float sig = 1.5 * float(s) * 2.0 * tanxy.x / W * max(g.w, 1e-3);
-  vec3 acc = vec3(0.0); float ws = 0.0;
+  a = vec3(0.0); b = vec3(0.0); float ws = 0.0;
   for (int k = 0; k < 4; k++) {
     ivec2 c = ivec2((k & 1) == 1 ? c1.x : c0.x, k >= 2 ? c1.y : c0.y);
     float wb = ((k & 1) == 1 ? t.x : 1.0 - t.x) * (k >= 2 ? t.y : 1.0 - t.y);
@@ -194,10 +186,26 @@ vec3 netAt(int slot, int s, ivec2 pix) {
     vec3 dq = q.xyz - g.xyz;
     float wg = (q.w > 0.0) == (g.w > 0.0) ? exp(-dot(dq, dq) / (2.0 * sig * sig)) : 0.0;
     float w = wb * (wg + 1e-4);
-    acc += w * max(texelFetch(outT, ivec3(c, slot), 0).xyz, 0.0);
+    vec3 na, nb;
+    outAt(slot, c, na, nb);
+    a += w * na; b += w * nb;
     ws += w;
   }
-  return acc / max(ws, 1e-12);
+  a /= max(ws, 1e-12); b /= max(ws, 1e-12);
+}
+vec3 lit(int l, ivec2 pix) {
+  vec3 a, b;
+  netAt(lInfo[l].x, lInfo[l].y, pix, a, b);
+  ${mul
+    ? `vec4 gm = geomAt(pix);
+  if (gm.w <= 0.0) return max(b, 0.0);
+  vec3 v = lPR[l].xyz - gm.xyz;
+  float d = max(length(v), 1e-4);
+  float s = min(lPR[l].w / d, 1.0);
+  float omega = 6.283185307 * s * s / (1.0 + sqrt(max(1.0 - s * s, 0.0)));
+  float G = omega * max(dot(normalAt(pix), v / d), 0.0) / 3.141592654;
+  return max(a * G + b, 0.0);`
+    : 'return max(a, 0.0);'}
 }
 vec3 tone(vec3 x) { vec3 y = max(x, 0.0) * exposure; return y / (1.0 + y); }
 vec3 srgb(vec3 c) { return mix(1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, 12.92 * c, lessThanEqual(c, vec3(0.0031308))); }
@@ -206,7 +214,7 @@ void main() {
   vec3 I = vec3(0.0);
   for (int l = 0; l < ${SLOTS}; l++) {
     if (l >= nLights) break;
-    I += lE[l] * (netAt(lInfo[l].x, lInfo[l].y, pix) + (lInfo[l].z != 0 ? directCov(pix, l) : 0.0));
+    I += lE[l] * (lit(l, pix) + (lInfo[l].z != 0 ? directCov(pix, l) : 0.0));
   }
   disp = vec4(clamp(srgb(tone(I)), 0.0, 1.0), 1.0);
 }`;
@@ -332,9 +340,12 @@ export class RelightEngine extends RelightBase {
     this.xTex = this.texture(A2, gl.RGBA16F, W, H, XG);
     this.encodeInputs({ grid, gridOff, XG, auxDim, maxRT });
 
-    this.outTex = this.texture(A2, gl.RGBA16F, W, H, SLOTS);
-    this.outFbos = Array.from({ length: SLOTS }, (_, s) => this.framebuffer([[this.outTex, s]]));
-    this.pComp = this.program(compositeFS(W, H), 'composite');
+    const per = mul ? 2 : 1;
+    this.outTex = this.texture(A2, gl.RGBA16F, W, H, SLOTS * per);
+    this.outFbos = Array.from({ length: SLOTS }, (_, s) =>
+      this.framebuffer(Array.from({ length: per }, (__, j) => [this.outTex, s * per + j]))
+    );
+    this.pComp = this.program(compositeFS(W, H, mul), 'composite');
     const th = Math.max(8, Math.min(H, Math.floor(bandBytes / (W * G * 8))));
     const arrs = [0, 1].map(() => this.texture(A2, gl.RGBA16F, W, th, G));
     this.net = {
@@ -346,10 +357,9 @@ export class RelightEngine extends RelightBase {
         )
       ),
       w: weights,
-      mul,
       l0: this.program(layerFS({ kin: XG + 1 + (geo ? 2 : 0), out, relu: true, stage: 'l0', xg: XG, geo }), 'layer 0'),
       hid: this.program(layerFS({ kin: G, out, relu: true, stage: 'hid' }), 'hidden layer'),
-      out: this.program(layerFS({ kin: G, out: mul ? 2 : 1, relu: false, stage: 'out', mul }), 'output layer'),
+      out: this.program(layerFS({ kin: G, out: mul ? 2 : 1, relu: false, stage: 'out' }), 'output layer'),
     };
     gl.bindVertexArray(null);
     gl.bindTexture(A2, null);
@@ -523,9 +533,6 @@ export class RelightEngine extends RelightBase {
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D_ARRAY, E.arrs[cur]);
       gl.uniform1i(P.u.yOff, y0);
-      if (E.mul) {
-        setLight(P);
-      }
       gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.outFbos[slot]);
       gl.viewport(0, y0, gw, h);
       draw(this.wOut, P);
@@ -561,6 +568,8 @@ export class RelightEngine extends RelightBase {
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.outTex);
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, this.posTex);
+    gl.activeTexture(gl.TEXTURE4);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.auxTex);
     gl.bindVertexArray(this.vao);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
     gl.viewport(0, 0, this.W, this.H);

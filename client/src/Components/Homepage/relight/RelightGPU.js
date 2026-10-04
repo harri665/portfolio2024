@@ -14,11 +14,14 @@ import { RelightBase, SLOTS } from './RelightBase';
 const THREADS = [256, 128];
 
 // Workgroup memory (bytes) a workgroup of `threads` needs: the activations
-// of its tile, each pixel's geometric features, and the three outputs
-function workgroupBytes(threads, width, half) {
+// of its tile, each pixel's geometric features, and its `outputs` outputs
+function workgroupBytes(threads, width, half, outputs) {
   const tile = (threads / (width / 4)) * 4;
-  return tile * width * (half ? 2 : 4) + tile * 32 + tile * 12;
+  return tile * width * (half ? 2 : 4) + tile * 32 + tile * outputs * 4;
 }
+
+const outputsOf = (mul) => (mul ? 6 : 3);
+const wordsOf = (mul) => (mul ? 3 : 2);
 
 // asks for the adapter's own workgroup memory limit, the 16KB default only fits the small kernel
 export async function requestRelightDevice() {
@@ -160,6 +163,8 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
 // memory loads outnumbered the FMAs, which is what phone gpus are worst at
 function forwardWGSL({ W, H, WD, NH, PIXIN, XW, geo, mul, threads, off, half }) {
   const CG = WD / 4;
+  const NO = outputsOf(mul);
+  const NW = wordsOf(mul);
   const PG = threads / CG;
   const TP = PG * 4;
   const HSTRIDE = WD * CG + CG;
@@ -179,10 +184,10 @@ struct Fwd { i0: u32, i1: u32, stride: u32, slot: u32, lc: vec4f, add: array<vec
 @group(0) @binding(1) var<storage, read> X: array<u32>;
 @group(0) @binding(2) var<storage, read> pgeo: array<vec4f>;
 @group(0) @binding(3) var<uniform> fu: Fwd;
-@group(0) @binding(4) var<storage, read_write> outB: array<vec2u>;
+@group(0) @binding(4) var<storage, read_write> outB: array<u32>;
 var<workgroup> act: array<${V}, ${TP * CG}>;
 var<workgroup> pf: array<vec4f, ${2 * TP}>;
-var<workgroup> res: array<f32, ${TP * 3}>;
+var<workgroup> res: array<f32, ${TP * NO}>;
 ${GEO_WGSL}
 fn pixelOf(i: u32) -> u32 {
   let s = fu.stride;
@@ -260,22 +265,27 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) t: u3
     workgroupBarrier();
   }
 
-  // Output: rgb, with the 'mul' head as h[0..2] * G + h[3..5]
-  if (t < ${u(TP * 3)}) {
-    let pl = t / 3u; let o = t % 3u;
-    res[t] = ${mul ? 'outRow(o, pl) * pf[2u * pl + 1u].z + outRow(o + 3u, pl)' : 'outRow(o, pl)'};
+  for (var e = t; e < ${u(TP * NO)}; e += ${u(threads)}) {
+    res[e] = outRow(e % ${u(NO)}, e / ${u(NO)});
   }
   workgroupBarrier();
   if (t < ${u(TP)} && base + t < fu.i1) {
-    outB[fu.slot * ${u(W * H)} + base + t] =
-      vec2u(pack2x16float(vec2f(res[3u * t], res[3u * t + 1u])), pack2x16float(vec2f(res[3u * t + 2u], 0.0)));
+    let o = (fu.slot * ${u(W * H)} + base + t) * ${u(NW)};
+    let r = t * ${u(NO)};
+    ${mul
+      ? `outB[o] = pack2x16float(vec2f(res[r], res[r + 1u]));
+    outB[o + 1u] = pack2x16float(vec2f(res[r + 2u], res[r + 3u]));
+    outB[o + 2u] = pack2x16float(vec2f(res[r + 4u], res[r + 5u]));`
+      : `outB[o] = pack2x16float(vec2f(res[r], res[r + 1u]));
+    outB[o + 1u] = pack2x16float(vec2f(res[r + 2u], 0.0));`}
   }
 }
 `;
 }
 
 // rows bottom first like the webgl render target
-function compositeWGSL({ W, H }) {
+function compositeWGSL({ W, H, mul }) {
+  const NW = wordsOf(mul);
   return /* wgsl */ `
 struct Light { pr: vec4f, e: vec4f, info: vec4u };  // info: slot, stride, disc shown
 struct Frame {
@@ -284,9 +294,11 @@ struct Frame {
   lights: array<Light, ${SLOTS}>,
 };
 @group(0) @binding(0) var<uniform> frame: Frame;
-@group(0) @binding(1) var<storage, read> outB: array<vec2u>;
+@group(0) @binding(1) var<storage, read> outB: array<u32>;
 @group(0) @binding(2) var<storage, read> pgeo: array<vec4f>;
 const W = ${u(W)}; const H = ${u(H)}; const NP = ${u(W * H)};
+${GEO_WGSL}
+struct Net { a: vec3f, b: vec3f };
 
 fn camDir(uv: vec2f) -> vec3f {
   return normalize(frame.camX.xyz * ((0.5 - uv.x) * 2.0 * frame.tanxy.x)
@@ -320,13 +332,22 @@ fn directCov(p: u32, l: u32) -> f32 {
   }
   return cnt / 16.0;
 }
-fn outAt(i: u32) -> vec3f {
-  let v = outB[i];
-  return max(vec3f(unpack2x16float(v.x), unpack2x16float(v.y).x), vec3f(0.0));
+fn outAt(i: u32) -> Net {
+  let w0 = unpack2x16float(outB[${u(NW)} * i]); let w1 = unpack2x16float(outB[${u(NW)} * i + 1u]);
+  ${mul
+    ? `let w2 = unpack2x16float(outB[3u * i + 2u]);
+  return Net(vec3f(w0, w1.x), vec3f(w1.y, w2));`
+    : 'return Net(vec3f(w0, w1.x), vec3f(0.0));'}
 }
-// A slot's network output at pixel p. A preview (stride s > 1) is upsampled
-// bilinearly, weighted by surface position so light doesn't bleed across edges.
-fn netAt(slot: u32, s: u32, p: u32) -> vec3f {
+// previews upsample weighted by position so light doesn't bleed across edges. G is
+// computed per pixel so a preview keeps the light's shape, not just its colour
+fn lit(n: Net, p: u32, light: vec4f) -> vec3f {
+  ${mul
+    ? `let G = geoFeatures(pgeo[2u * p], pgeo[2u * p + 1u].xyz, light).f1.z;
+  return max(n.a * G + n.b, vec3f(0.0));`
+    : 'return max(n.a, vec3f(0.0));'}
+}
+fn netAt(slot: u32, s: u32, p: u32) -> Net {
   let base = slot * NP;
   if (s <= 1u) { return outAt(base + p); }
   let cw = (W + s - 1u) / s; let ch = (H + s - 1u) / s;
@@ -336,7 +357,7 @@ fn netAt(slot: u32, s: u32, p: u32) -> vec3f {
   let tx = fx - f32(x0); let ty = fy - f32(y0);
   let g = pgeo[2u * p];
   let sig = 1.5 * f32(s) * 2.0 * frame.tanxy.x / f32(W) * max(g.w, 1e-3);
-  var acc = vec3f(0.0); var ws = 0.0;
+  var acc = Net(vec3f(0.0), vec3f(0.0)); var ws = 0.0;
   for (var k = 0u; k < 4u; k++) {
     let cx = select(x0, x1, (k & 1u) == 1u); let cy = select(y0, y1, k >= 2u);
     let wb = select(1.0 - tx, tx, (k & 1u) == 1u) * select(1.0 - ty, ty, k >= 2u);
@@ -345,10 +366,12 @@ fn netAt(slot: u32, s: u32, p: u32) -> vec3f {
     var wgt = exp(-dot(dq, dq) / (2.0 * sig * sig));
     if ((q.w > 0.0) != (g.w > 0.0)) { wgt = 0.0; }
     let w = wb * (wgt + 1e-4);
-    acc += w * outAt(base + cy * cw + cx);
+    let n = outAt(base + cy * cw + cx);
+    acc.a += w * n.a; acc.b += w * n.b;
     ws += w;
   }
-  return acc / max(ws, 1e-12);
+  let iw = 1.0 / max(ws, 1e-12);
+  return Net(acc.a * iw, acc.b * iw);
 }
 fn tone(x: vec3f) -> vec3f { let y = max(x, vec3f(0.0)) * frame.exposure; return y / (1.0 + y); }
 fn srgb(c: vec3f) -> vec3f {
@@ -364,7 +387,7 @@ fn srgb(c: vec3f) -> vec3f {
   var I = vec3f(0.0);
   for (var l = 0u; l < frame.nLights; l++) {
     let L = frame.lights[l];
-    I += L.e.xyz * (netAt(L.info.x, L.info.y, p) + select(0.0, directCov(p, l), L.info.z != 0u));
+    I += L.e.xyz * (lit(netAt(L.info.x, L.info.y, p), p, L.pr) + select(0.0, directCov(p, l), L.info.z != 0u));
   }
   return vec4f(clamp(srgb(tone(I)), vec3f(0.0), vec3f(1.0)), 1.0);
 }
@@ -414,7 +437,7 @@ export class RelightGPUEngine extends RelightBase {
       (t) =>
         t % CG === 0 &&
         t <= limits.maxComputeInvocationsPerWorkgroup &&
-        workgroupBytes(t, WD, half) <= limits.maxComputeWorkgroupStorageSize
+        workgroupBytes(t, WD, half, outputsOf(mul)) <= limits.maxComputeWorkgroupStorageSize
     );
     if (!threads) {
       throw new Error('not enough workgroup memory for the network');
@@ -465,7 +488,7 @@ export class RelightGPUEngine extends RelightBase {
 
     const shapes = { W, H, WD, NH, PIXIN, XW, geo, mul, threads, off, half };
     const module = (code, label) => dev.createShaderModule({ code, label });
-    const compositeModule = module(compositeWGSL({ W, H }), 'relight composite');
+    const compositeModule = module(compositeWGSL({ W, H, mul }), 'relight composite');
     this.format = navigator.gpu.getPreferredCanvasFormat();
     const [pre, forward, composite] = await Promise.all([
       dev.createComputePipelineAsync({
@@ -514,7 +537,7 @@ export class RelightGPUEngine extends RelightBase {
     const wBuf = half ? buffer(P.byteLength / 2, U.STORAGE, toHalf(P)) : buffer(P.byteLength, U.STORAGE, P);
     const xBuf = buffer(NP * XW * 4, U.STORAGE);
     const pgeoBuf = buffer(NP * 32, U.STORAGE);
-    const outBuf = buffer(SLOTS * NP * 8, U.STORAGE);
+    const outBuf = buffer(SLOTS * NP * wordsOf(mul) * 4, U.STORAGE);
     this.fwdBuf = buffer(32 + CG * 16, U.UNIFORM | U.COPY_DST);
     this.frameBuf = buffer(96 + SLOTS * 48, U.UNIFORM | U.COPY_DST);
     const bind = (pipeline, list) =>
