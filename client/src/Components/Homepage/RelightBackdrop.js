@@ -2,11 +2,15 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 
+import { visitId } from '../../utils/visit';
+
 import {
   AdaptiveQuality,
   MIN_FPS,
+  NETWORKS,
   REFINE_FRAMES,
   firstBudget,
+  firstNetwork,
   firstTier,
   gpuName,
   loadProfile,
@@ -14,6 +18,8 @@ import {
   profileFor,
   saveProfile,
   seedCosts,
+  switchNetwork,
+  tunedKernel,
   upgradeTier,
 } from './relight/adaptiveQuality';
 import { MIN_BAND_ROWS } from './relight/RelightBase';
@@ -24,43 +30,16 @@ import {
   createRelightEngine,
   loadRoom,
   takePreparedRelight,
+  tuneEngine,
 } from './relight/prepare';
 import { requestRelightDevice } from './relight/RelightGPU';
 import { ROOM_FRAGMENT, RoomLayer } from './relight/roomLayer';
+import { reportRelight } from './relight/report';
 import { setRelightStatus } from './relight/status';
 import useCardLights, { CARD_SELECTOR } from './useCardLights';
 
-// ─── CS: a Cornell box lit by a neural network ─────────────────────────────
-// The CS home page's backdrop is a live neural render proxy: a small MLP,
-// trained on path-traced light transport, predicts the global illumination of
-// a Cornell box for a sphere light anywhere inside it (see relight/). The
-// light is yours. On the hero it follows the pointer through the room, its
-// glow bleeding red and green off the walls; phones get a light that drops in
-// from the ceiling and settles. Scrolling to the gallery walks the camera into
-// the box until it fills the screen behind the glass cards, and the light
-// moves behind whichever card you hover (on touch screens, the one in focus),
-// so each pane is lit from behind by the room's bounce light.
-//
-// The network runs on WebGPU where the browser has it (relight/RelightGPU),
-// about five times faster than on WebGL2, where it runs otherwise
-// (relight/RelightEngine); add ?relight=webgl to the URL to compare. Either
-// hands each image over as an ImageBitmap. The room is drawn on a layer
-// fixed to the viewport (relight/roomLayer), which stays put while the page
-// scrolls; this canvas draws it too, but only for the glass to bend.
-// Only a light that moves is re-evaluated, on every 2nd to 16th pixel if a
-// full evaluation won't fit the frame budget. Once it rests, it's refined to
-// full resolution a band of rows per frame, into a second slot that swaps in
-// when done. A resting room costs one composite, and only when it changes.
-// The frame budget, the canvas's pixel ratio and the image size rise for as
-// long as the page holds 30 fps (relight/adaptiveQuality), and are remembered
-// for the device's next visit. A larger size is fetched in the background and
-// swapped in once ready. Most of that is done before the backdrop mounts:
-// while the page still shows its still, the room is fetched, the network
-// built and timed on this GPU, and a larger size fetched if it has room for
-// one (relight/prepare), so the room starts at the size and strides it would
-// have settled on rather than at a guess. Refinement waits while the page
-// scrolls, so those frames go to keeping the canvas over the viewport. The fixed layer draws at
-// the screen's own pixel ratio, up to ROOM_MAX_DPR, whatever the canvas's.
+// CS backdrop: cornell box lit live by a small MLP trained on path traced GI (see relight/)
+// webgpu is ~5x faster than webgl2. ?relight=webgl to compare
 
 const PANEL_SELECTOR = '[data-prism-panel]';
 const HERO_SELECTOR = '[data-prism-hero]';
@@ -75,6 +54,10 @@ const MOVE_EPS = 0.004;
 // s at rest before it's refined
 const REFINE_DELAY = 0.12;
 const SCROLL_REST = 0.15;
+// margin so the glass has something to bend at the edge. widened when you scroll
+// back out so it doesn't re-evaluate every frame
+const VIEW_MARGIN = 0.03;
+const VIEW_GROW = 0.15;
 
 // box is -1..1 on every axis, camera at z = 3.9 looking down -z
 const POINTER_DEPTH = 0.15;
@@ -89,6 +72,8 @@ const FILL = { pos: [0.64, 0.72, -0.64], radius: 0.07, color: [0.55, 0.7, 1], in
 const MAX_DPR = { compact: 1.5, full: 2 };
 const SAVE_EVERY = 5;
 const PUBLISH_EVERY = 0.5;
+// s, and again when the page goes
+const REPORT_AFTER = 10;
 // drawn at the canvas's dpr (1 on phones) it got upscaled twice and looked
 // a third of its resolution on a 3x phone
 const ROOM_MAX_DPR = 2;
@@ -128,7 +113,8 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
       readyAt: null,
       progress: 0,
       box: { left: 0, top: 0, size: 1 },
-      pointer: null, // image uv under the pointer, fixed when it moves
+      view: [0, 1, 0, 1],
+      pointer: null,
       card: { el: null, uv: null },
       key: makeLight(INTRO_FROM, KEY, [0, 1]),
       fill: makeLight(FILL.pos, FILL, [2, 3]),
@@ -144,9 +130,13 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
       fromProfile: !!profile,
       savedAt: 0,
       tier: firstTier(profile, compact),
+      network: firstNetwork(profile),
       // 'timed' | 'built' | null
       prepared: null,
+      visit: visitId(), // the page view the room runs in, for its reports
       upgrading: null, // the AbortController of a larger size on its way
+      tuning: false, // whether the network is being tuned (relight/prepare's tuneEngine)
+      tuneController: new AbortController(),
       upgradeFailed: false,
       upgradeCheckedAt: 0,
       shownPx: 0,
@@ -181,7 +171,12 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
   useEffect(() => {
     const state = st.current;
     onDpr?.(state.quality.dpr);
-    const save = () => saveState(state);
+    const save = () => {
+      saveState(state);
+      if (state.reported) {
+        report(state);
+      }
+    };
     window.addEventListener('pagehide', save);
     return () => {
       window.removeEventListener('pagehide', save);
@@ -247,6 +242,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
       if (error?.name !== 'AbortError') {
         console.warn('Relight backdrop unavailable:', error);
         setRelightStatus({ phase: 'failed', reason: error?.message || String(error) });
+        reportRelight({ phase: 'failed', reason: error?.message || String(error), gpu: st.current.gpu }, st.current.visit);
         onFail?.();
       }
     };
@@ -260,19 +256,21 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
       return undefined;
     }
 
-    const load = (tier) => loadRoom(tier, signal);
     const prepare = async () => {
       const [device, data] = await Promise.all([
         webgl ? null : deviceFor(state),
-        load(state.tier).catch((error) => {
-          if (error?.name === 'AbortError' || state.tier === NATIVE) {
+        loadRoom(state.tier, signal, undefined, state.network).catch((error) => {
+          if (error?.name === 'AbortError' || (state.tier === NATIVE && state.network === NETWORKS[0])) {
             throw error;
           }
           state.tier = NATIVE;
-          return load(NATIVE);
+          state.network = NETWORKS[0];
+          return loadRoom(NATIVE, signal);
         }),
       ]);
-      const built = await createRelightEngine(data, device, state.bandBytes, signal);
+      const kernel = tunedKernel(state.profile, state.network);
+      const built = await createRelightEngine(data, device, state.bandBytes, signal, kernel);
+      built.engine.tuned = !!kernel && built.engine.kernelName === kernel;
       seedCosts(built.engine, state.profile);
       return built;
     };
@@ -286,6 +284,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
           deviceFor(state, prepared.device);
         }
         state.tier = prepared.tier;
+        state.network = prepared.network;
         state.prepared = prepared.timed ? 'timed' : 'built';
         state.upgradeFailed = prepared.upgradeFailed;
       }
@@ -301,13 +300,14 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
       install(state, built, uniforms);
       publish(state);
       if (prepared?.upgrade) {
-        startUpgrade(prepared.upgrade.tier, prepared.upgrade);
+        startUpgrade(prepared.upgrade, prepared.upgrade);
       }
     };
     start().catch(fail);
 
     return () => {
       controller.abort();
+      state.tuneController.abort();
       state.upgrading?.abort();
       state.upgrading = null;
       saveState(state);
@@ -320,19 +320,17 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [renderer, uniforms, webgl]);
 
-  // Fetches and prepares the room at `tier` px while the current one keeps
-  // running, then swaps it in, starting from the current one's costs.
-  // `pending`: a fetch of it already on its way ({ controller, data }).
-  const startUpgrade = (tier, pending = null) => {
+  const startUpgrade = ({ tier, network }, pending = null) => {
     const state = st.current;
     const controller = pending?.controller || new AbortController();
     const { signal } = controller;
     state.upgrading = controller;
-    // on the device the current one runs on
     const device = state.engine.backend === 'webgpu' ? state.device : null;
-    Promise.all([device, pending?.data || loadRoom(tier, signal)])
-      .then(([gpu, data]) => buildEngine(data, gpu, state.bandBytes, signal))
+    const kernel = network === state.network && state.engine.tuned ? state.engine.kernelName : null;
+    Promise.all([device, pending?.data || loadRoom(tier, signal, undefined, network)])
+      .then(([gpu, data]) => buildEngine(data, gpu, state.bandBytes, signal, kernel))
       .then((built) => {
+        built.engine.tuned = !!kernel;
         if (signal.aborted || !state.engine) {
           built.dispose();
           return;
@@ -340,10 +338,11 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
         seedCosts(built.engine, measuredCosts(state.engine));
         install(state, built, uniforms);
         state.tier = tier;
+        state.network = network;
       })
       .catch((error) => {
         if (error?.name !== 'AbortError') {
-          console.warn(`Relight backdrop staying at ${state.tier} px:`, error);
+          console.warn(`Relight backdrop staying at ${state.tier} px (${state.network}):`, error);
           state.upgradeFailed = true;
         }
       })
@@ -421,8 +420,9 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
 
     const { engine, quality } = state;
     const age = engine && state.readyAt !== null ? now - state.readyAt : 0;
-    // ...and held while a larger size is prepared, which costs CPU, not pixels
-    const dpr = quality.frame(delta, age > 1.5, !!state.upgrading);
+    // ...and held while a larger size is prepared, which costs CPU, not
+    // pixels, or the network is tuned
+    const dpr = quality.frame(delta, age > 1.5, !!state.upgrading || state.tuning);
     if (dpr !== null) {
       onDpr?.(dpr);
     }
@@ -440,12 +440,12 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
       state.savedAt = now;
       saveState(state);
     }
-    // Once a second, whether the GPU has room for a larger image
-    if (!state.upgrading && !state.upgradeFailed && age > 2 && now - state.upgradeCheckedAt > 1) {
+    if (!state.upgrading && !state.tuning && !state.upgradeFailed && age > 2 && now - state.upgradeCheckedAt > 1) {
       state.upgradeCheckedAt = now;
-      const next = upgradeTier(engine, quality.budget, state.shownPx);
-      if (next) {
-        startUpgrade(next);
+      const network = switchNetwork(engine, quality.budget);
+      const tier = network ? state.tier : upgradeTier(engine, quality.budget, state.shownPx);
+      if (tier) {
+        startUpgrade({ tier, network: network || state.network });
       }
     }
 
@@ -485,15 +485,39 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
     }
     keepInRoom(engine, key.pos, key.radius);
 
-    // ── Evaluate what changed, within the frame budget
     const { budget } = quality;
-    const finest = refineStride(engine, budget);
+    if (state.tuning) {
+      state.layer?.draw(uniforms, vw, vh, roomDpr);
+      return;
+    }
+    const resting = (light) => light.evalPos && distance(light.pos, light.evalPos) <= MOVE_EPS && !light.refineRect;
+    const timed = engine.evalCost(1) !== null;
+    if (!engine.tuned && timed && age > 3 && !scrolling && resting(key) && resting(fill) && now - key.still > 1) {
+      state.tuning = true;
+      tuneEngine(engine, state.tuneController.signal, fill.slots[1 - fill.shown])
+        .catch((error) => {
+          engine.tuned = true;
+          console.warn('Relight backdrop tuning failed:', error);
+        })
+        .finally(() => {
+          state.tuning = false;
+          if (state.engine === engine) {
+            publish(state);
+          }
+        });
+      state.layer?.draw(uniforms, vw, vh, roomDpr);
+      return;
+    }
+
+    const view = visibleRect(state.box, vw, vh);
+    state.view = view;
+    const finest = refineStride(engine, budget, areaOf(grow(view, VIEW_MARGIN)));
     let dirty = false;
     const passes = [];
-    if (needsWork(key, now, finest, scrolling)) {
+    if (needsWork(key, now, finest, scrolling, view)) {
       passes.push(key);
     }
-    if (needsWork(fill, now, finest, scrolling) && (!passes.length || !fill.evalPos)) {
+    if (needsWork(fill, now, finest, scrolling, view) && (!passes.length || !fill.evalPos)) {
       passes.push(fill);
     }
 
@@ -510,7 +534,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
     }
     if (passes.length || dirty) {
       passes.forEach((light) => {
-        if (step(engine, light, now, budget / passes.length, finest)) {
+        if (step(engine, light, now, budget / passes.length, finest, view)) {
           dirty = true;
         }
       });
@@ -534,6 +558,10 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
     if (now - state.publishedAt > PUBLISH_EVERY) {
       state.publishedAt = now;
       publish(state);
+    }
+    if (!state.reported && age > REPORT_AFTER) {
+      state.reported = true;
+      report(state);
     }
   });
 
@@ -564,17 +592,44 @@ function phoneHero(state, vw, vh) {
 }
 
 function publish(state) {
-  const { engine, quality } = state;
-  if (!engine) {
+  const status = statusOf(state);
+  if (status) {
+    setRelightStatus(status);
+  }
+}
+
+function report(state) {
+  const status = statusOf(state);
+  if (!status) {
     return;
   }
+  const { frames, seconds, late } = state.quality.stats;
+  reportRelight(
+    {
+      ...status,
+      frames,
+      frameRate: seconds > 0 ? Math.round(frames / seconds) : null,
+      latePct: frames ? Math.round((late / frames) * 1000) / 10 : null,
+      runningSec: state.readyAt === null ? null : Math.round(seconds),
+    },
+    state.visit
+  );
+}
+
+function statusOf(state) {
+  const { engine, quality } = state;
+  if (!engine) {
+    return null;
+  }
   const round = (x) => (x === null ? null : Number(x.toFixed(1)));
-  setRelightStatus({
+  return {
     phase: 'running',
     backend: engine.backend,
     notGPU: engine.backend === 'webgpu' ? null : state.notGPU,
     half: !!engine.half,
     size: engine.W,
+    network: state.network,
+    kernel: engine.kernelName ? `${engine.kernelName}${engine.tuned ? '' : ', untuned'}` : null,
     gpu: state.gpu,
     fps: state.fps,
     capped: state.capped,
@@ -582,14 +637,14 @@ function publish(state) {
     budget: round(quality.budget),
     cost: round(engine.evalCost(1)),
     seeded: engine.timing.seeded,
-    moving: previewStride(engine, quality.budget),
-    resting: refineStride(engine, quality.budget),
+    moving: previewStride(engine, quality.budget, areaOf(grow(state.view, VIEW_MARGIN))),
+    resting: refineStride(engine, quality.budget, areaOf(grow(state.view, VIEW_MARGIN))),
     fixedLayer: !!state.layer,
     roomDpr: state.roomDpr,
     fromProfile: state.fromProfile,
     prepared: state.prepared,
     upgrading: !!state.upgrading,
-  });
+  };
 }
 
 function saveState({ engine, gpu, fps, quality }) {
@@ -599,8 +654,8 @@ function saveState({ engine, gpu, fps, quality }) {
   }
 }
 
-async function buildEngine(data, device, bandBytes, signal) {
-  return withTexture(await createRelightEngine(data, device, bandBytes, signal));
+async function buildEngine(data, device, bandBytes, signal, kernel) {
+  return withTexture(await createRelightEngine(data, device, bandBytes, signal, kernel));
 }
 
 function withTexture({ engine, notGPU }) {
@@ -638,13 +693,15 @@ function withTexture({ engine, notGPU }) {
 }
 
 function install(state, built, uniforms) {
+  state.tuneController.abort();
+  state.tuneController = new AbortController();
   state.built?.dispose();
   state.built = built;
   state.engine = built.engine;
   uniforms.tRelight.value = built.texture;
   uniforms.texSize.value.set(built.engine.W, built.engine.H);
   [state.key, state.fill].forEach((light) =>
-    Object.assign(light, { evalPos: null, shown: 0, stride: 0, refineStride: 0, refineRow: 0 })
+    Object.assign(light, { evalPos: null, rect: null, shown: 0, stride: 0, refineStride: 0, refineRect: null })
   );
   state.lastLevels = null;
 }
@@ -656,79 +713,112 @@ function makeLight(pos, { radius, color, hidden = false }, slots) {
     color,
     hidden,
     slots,
-    // what the shown slot holds: its position, stride, and when it was set
+    // rect is image uv: u0, u1, v0, v1
     evalPos: null,
+    rect: null,
     shown: 0,
     stride: 0,
     still: 0,
-    // the refinement under way in the other slot: its stride and next row
     refineStride: 0,
+    refineRect: null,
     refineRow: 0,
   };
 }
 
-// A moved light always needs work; refining a resting one waits out a scroll
-function needsWork(light, now, finest, scrolling) {
+function needsWork(light, now, finest, scrolling, view) {
   return (
     !light.evalPos ||
     distance(light.pos, light.evalPos) > MOVE_EPS ||
+    !covers(light.rect, view) ||
     (!scrolling && light.stride > finest && now - light.still > REFINE_DELAY)
   );
 }
 
-// One frame's work on a light. A moved light is re-evaluated in its shown
-// slot, as coarsely as the budget needs; a resting preview is refined into
-// the other slot (at stride `finest`) a band at a time, then swapped in.
-// True if the image changed.
-function step(engine, light, now, budget, finest) {
-  if (!light.evalPos || distance(light.pos, light.evalPos) > MOVE_EPS) {
-    const stride = previewStride(engine, budget);
-    light.evalPos = [...light.pos];
-    engine.evaluate({ pos: light.evalPos, radius: light.radius }, light.slots[light.shown], stride);
+function step(engine, light, now, budget, finest, view) {
+  const moved = !light.evalPos || distance(light.pos, light.evalPos) > MOVE_EPS;
+  if (moved || !covers(light.rect, view)) {
+    const rect = grow(view, moved ? VIEW_MARGIN : VIEW_GROW);
+    const stride = previewStride(engine, budget, areaOf(rect));
+    if (moved) {
+      light.evalPos = [...light.pos];
+      light.still = now;
+    }
+    const at = { pos: light.evalPos, radius: light.radius };
+    engine.evaluate(at, light.slots[light.shown], stride, ...itemRect(engine, rect, stride));
+    light.rect = rect;
     light.stride = stride;
-    light.still = now;
-    light.refineRow = 0;
+    light.refineRect = null;
     return true;
   }
   if (light.stride > finest) {
-    if (light.refineStride !== finest) {
+    if (light.refineStride !== finest || !light.refineRect) {
       light.refineStride = finest;
+      light.refineRect = light.rect;
       light.refineRow = 0;
     }
+    const [r0, r1, c0, c1] = itemRect(engine, light.refineRect, finest);
     const other = 1 - light.shown;
-    const total = engine.rows(finest);
     const cost = engine.evalCost(finest);
-    const rows = cost ? Math.floor((total * budget) / cost / 4) * 4 : MIN_BAND_ROWS;
-    const r1 = Math.min(total, light.refineRow + THREE.MathUtils.clamp(rows, MIN_BAND_ROWS, total));
-    engine.evaluate({ pos: light.evalPos, radius: light.radius }, light.slots[other], finest, light.refineRow, r1);
-    light.refineRow = r1;
-    if (r1 >= total) {
+    const rowCost = cost && cost * engine.share(finest, 0, 1, c0, c1);
+    const rows = rowCost ? Math.floor(budget / rowCost / 4) * 4 : MIN_BAND_ROWS;
+    const from = Math.max(r0, light.refineRow);
+    const to = Math.min(r1, from + THREE.MathUtils.clamp(rows, MIN_BAND_ROWS, r1 - r0));
+    engine.evaluate({ pos: light.evalPos, radius: light.radius }, light.slots[other], finest, from, to, c0, c1);
+    light.refineRow = to;
+    if (to >= r1) {
       light.shown = other;
       light.stride = finest;
-      light.refineRow = 0;
+      light.rect = light.refineRect;
+      light.refineRect = null;
       return true;
     }
   }
   return false;
 }
 
-// How far a resting light is refined: the finest stride whose whole
-// evaluation fits in about 40 frames' budget. Fast GPUs reach every pixel;
-// slow ones stop at a softer image rather than stall the page for seconds.
-// Nothing is refined before the GPU's speed is known.
-function refineStride(engine, budget) {
+// ~40 frames of budget. slow gpus stop at a softer image instead of stalling for seconds
+function refineStride(engine, budget, area = 1) {
   if (engine.evalCost(1) === null) {
     return 4;
   }
-  return [1, 2, 4].find((s) => engine.evalCost(s) <= budget * REFINE_FRAMES) ?? 8;
+  return [1, 2, 4].find((s) => engine.evalCost(s) * area <= budget * REFINE_FRAMES) ?? 8;
 }
 
-// The finest stride whose evaluation fits the budget; unmeasured, a cheap one
-function previewStride(engine, budget) {
+function previewStride(engine, budget, area = 1) {
   if (engine.evalCost(1) === null) {
     return 4;
   }
-  return [1, 2, 4, 8].find((s) => engine.evalCost(s) <= budget) ?? 16;
+  return [1, 2, 4, 8].find((s) => engine.evalCost(s) * area <= budget) ?? 16;
+}
+
+function visibleRect(box, vw, vh) {
+  return [
+    clamp01(-box.left / box.size),
+    clamp01((vw - box.left) / box.size),
+    clamp01(-box.top / box.size),
+    clamp01((vh - box.top) / box.size),
+  ];
+}
+
+function grow([u0, u1, v0, v1], m) {
+  return [clamp01(u0 - m), clamp01(u1 + m), clamp01(v0 - m), clamp01(v1 + m)];
+}
+
+function covers(rect, view) {
+  return !!rect && rect[0] <= view[0] && rect[1] >= view[1] && rect[2] <= view[2] && rect[3] >= view[3];
+}
+
+function areaOf([u0, u1, v0, v1]) {
+  return Math.max(0, u1 - u0) * Math.max(0, v1 - v0);
+}
+
+function itemRect(engine, [u0, u1, v0, v1], stride) {
+  return [
+    Math.floor((v0 * engine.H) / stride),
+    Math.min(engine.rows(stride), Math.floor((v1 * engine.H) / stride) + 2),
+    Math.floor((u0 * engine.W) / stride),
+    Math.min(engine.cols(stride), Math.floor((u1 * engine.W) / stride) + 2),
+  ];
 }
 
 function shown(light, intensity) {

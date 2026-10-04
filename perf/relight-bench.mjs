@@ -23,11 +23,12 @@ const { values: args } = parseArgs({
     backends: { type: 'string', default: 'webgpu,webgl' },
     tiers: { type: 'string', default: '512' },
     strides: { type: 'string', default: '1,2,4,8' },
-    scene: { type: 'string', default: 'cornell' },
+    networks: { type: 'string', default: '128x4' },
     refs: { type: 'string', default: 'E:/NextCloud/Documents/relight/web/scenes/cornell' },
     port: { type: 'string', default: '3000' },
     'no-quality': { type: 'boolean', default: false },
     'save-reference': { type: 'boolean', default: false },
+    tune: { type: 'boolean', default: false },
     headed: { type: 'boolean', default: false },
     label: { type: 'string', default: '' },
   },
@@ -144,88 +145,96 @@ for (const profileName of list(args.profiles)) {
     }
     await page.goto(`${origin}/?relight=bench`, { waitUntil: 'load', timeout: 120000 });
     await page.waitForFunction(() => window.__relightBench, null, { timeout: 120000 });
-    const entry = { profile: profileName, backend, tiers: {}, quality: null, errors: [] };
-    results.push(entry);
+    for (const network of list(args.networks)) {
+      const entry = { profile: profileName, backend, network, tiers: {}, quality: null, errors: [] };
+      results.push(entry);
 
-    for (const tier of tiers) {
-      let info;
-      const t0 = Date.now();
-      try {
-        info = await page.evaluate((o) => window.__relightBench.open(o), { tier, backend });
-      } catch (error) {
-        entry.errors.push(`${tier}: ${error.message.split('\n')[0]}`);
-        console.log(`${profileName} ${backend} ${tier}px: ${error.message.split('\n')[0]}`);
-        continue;
-      }
-      if (info.backend !== backend) {
-        entry.errors.push(`${tier}: asked for ${backend}, ran on ${info.backend}`);
-      }
-      const row = { ...info, buildMs: Date.now() - t0, strides: {} };
-      entry.tiers[tier] = row;
-      for (const stride of strides) {
-        const probe = await page.evaluate((s) => window.__relightBench.time({ stride: s, n: 1, batches: 1 }), stride);
-        if (probe.ms > MAX_EVAL_MS) {
-          row.strides[stride] = { ms: probe.ms, items: probe.items, probeOnly: true };
-          break;
-        }
-        const n = Math.max(1, Math.min(16, Math.round(BATCH_MS / Math.max(probe.ms, 0.1))));
-        const t = await page.evaluate((o) => window.__relightBench.time(o), { stride, n, batches: 3 });
-        row.strides[stride] = { ms: t.ms, items: t.items, nsPerItem: (t.ms * 1e6) / t.items };
-      }
-      const line = Object.entries(row.strides)
-        .sort((a, b) => a[0] - b[0])
-        .map(([s, v]) => `s${s} ${v.ms.toFixed(2)} ms`)
-        .join('  ');
-      console.log(`${profileName} ${info.backend}${info.half ? ' f16' : ''} ${tier}px ${info.network}: ${line}`);
-    }
-
-    if (refs && !entry.errors.some((e) => e.startsWith(`${refs[0].W}:`))) {
-      const W = refs[0].W;
-      const info = await page.evaluate((o) => window.__relightBench.open(o), { tier: W, backend });
-      entry.quality = {};
-      for (const stride of strides) {
-        const timed = entry.tiers[W]?.strides[stride];
-        if (timed?.probeOnly) {
+      for (const tier of tiers) {
+        let info;
+        const t0 = Date.now();
+        try {
+          info = await page.evaluate((o) => window.__relightBench.open(o), { tier, backend, network });
+        } catch (error) {
+          entry.errors.push(`${tier}: ${error.message.split('\n')[0]}`);
+          console.log(`${profileName} ${backend} ${tier}px: ${error.message.split('\n')[0]}`);
           continue;
         }
-        const scores = [];
-        const regress = [];
-        for (let i = 0; i < refs.length; i += 1) {
-          const ref = refs[i];
-          const shot = await page.evaluate((o) => window.__relightBench.render(o), {
-            lights: [ref.light],
-            stride,
-            exposure: ref.exposure,
-          });
-          const { out, bytes } = toneOf(shot);
-          scores.push(psnr(out, ref.tm));
-          const file = path.join(REFERENCE, `${info.backend}-s${stride}-ref${i}.rgba.gz`);
-          if (args['save-reference']) {
-            fs.mkdirSync(REFERENCE, { recursive: true });
-            fs.writeFileSync(file, zlib.gzipSync(bytes, { level: 9 }));
-          } else if (fs.existsSync(file)) {
-            regress.push(compareBytes(bytes, zlib.gunzipSync(fs.readFileSync(file))));
-          }
+        if (args.tune) {
+          const probe = await page.evaluate(() => window.__relightBench.time({ stride: 4, n: 1, batches: 1 }));
+          const stride = [1, 2, 4, 8].find((s) => probe.ms * (4 / s) ** 2 <= 30) ?? 8;
+          const tuned = await page.evaluate((o) => window.__relightBench.tune(o), { stride, runs: 4 });
+          info.kernel = tuned.kernel;
         }
-        const mean = scores.reduce((a, b) => a + b, 0) / scores.length;
-        entry.quality[stride] = {
-          psnr: mean,
-          psnrPerLight: scores,
-          ...(regress.length && {
-            vsReference: {
-              maxDiff: Math.max(...regress.map((r) => r.maxDiff)),
-              minPsnr: Math.min(...regress.map((r) => r.psnr)),
-            },
-          }),
-        };
-        const ms = timed?.ms;
-        const vs = entry.quality[stride].vsReference;
-        console.log(
-          `  quality s${stride}: ${mean.toFixed(2)} dB vs path-traced` +
-            (ms ? `, ${ms.toFixed(2)} ms` : '') +
-            (vs ? `; vs saved: max diff ${vs.maxDiff}/255, worst ${vs.minPsnr.toFixed(1)} dB` : '') +
-            `  [${scores.map((s) => s.toFixed(1)).join(' ')}]`
-        );
+        if (info.backend !== backend) {
+          entry.errors.push(`${tier}: asked for ${backend}, ran on ${info.backend}`);
+        }
+        const row = { ...info, buildMs: Date.now() - t0, strides: {} };
+        entry.tiers[tier] = row;
+        for (const stride of strides) {
+          const probe = await page.evaluate((s) => window.__relightBench.time({ stride: s, n: 1, batches: 1 }), stride);
+          if (probe.ms > MAX_EVAL_MS) {
+            row.strides[stride] = { ms: probe.ms, items: probe.items, probeOnly: true };
+            break;
+          }
+          const n = Math.max(1, Math.min(16, Math.round(BATCH_MS / Math.max(probe.ms, 0.1))));
+          const t = await page.evaluate((o) => window.__relightBench.time(o), { stride, n, batches: 3 });
+          row.strides[stride] = { ms: t.ms, items: t.items, nsPerItem: (t.ms * 1e6) / t.items };
+        }
+        const line = Object.entries(row.strides)
+          .sort((a, b) => a[0] - b[0])
+          .map(([s, v]) => `s${s} ${v.ms.toFixed(2)} ms`)
+          .join('  ');
+        console.log(`${profileName} ${info.backend}${info.half ? ' f16' : ''} ${tier}px ${info.network} ${info.kernel}: ${line}`);
+      }
+
+      if (refs && !entry.errors.some((e) => e.startsWith(`${refs[0].W}:`))) {
+        const W = refs[0].W;
+        const info = await page.evaluate((o) => window.__relightBench.open(o), { tier: W, backend, network });
+        entry.quality = {};
+        for (const stride of strides) {
+          const timed = entry.tiers[W]?.strides[stride];
+          if (timed?.probeOnly) {
+            continue;
+          }
+          const scores = [];
+          const regress = [];
+          for (let i = 0; i < refs.length; i += 1) {
+            const ref = refs[i];
+            const shot = await page.evaluate((o) => window.__relightBench.render(o), {
+              lights: [ref.light],
+              stride,
+              exposure: ref.exposure,
+            });
+            const { out, bytes } = toneOf(shot);
+            scores.push(psnr(out, ref.tm));
+            const file = path.join(REFERENCE, `${info.backend}-s${stride}-ref${i}.rgba.gz`);
+            if (args['save-reference']) {
+              fs.mkdirSync(REFERENCE, { recursive: true });
+              fs.writeFileSync(file, zlib.gzipSync(bytes, { level: 9 }));
+            } else if (fs.existsSync(file)) {
+              regress.push(compareBytes(bytes, zlib.gunzipSync(fs.readFileSync(file))));
+            }
+          }
+          const mean = scores.reduce((a, b) => a + b, 0) / scores.length;
+          entry.quality[stride] = {
+            psnr: mean,
+            psnrPerLight: scores,
+            ...(regress.length && {
+              vsReference: {
+                maxDiff: Math.max(...regress.map((r) => r.maxDiff)),
+                minPsnr: Math.min(...regress.map((r) => r.psnr)),
+              },
+            }),
+          };
+          const ms = timed?.ms;
+          const vs = entry.quality[stride].vsReference;
+          console.log(
+            `  quality s${stride}: ${mean.toFixed(2)} dB vs path-traced` +
+              (ms ? `, ${ms.toFixed(2)} ms` : '') +
+              (vs ? `; vs saved: max diff ${vs.maxDiff}/255, worst ${vs.minPsnr.toFixed(1)} dB` : '') +
+              `  [${scores.map((s) => s.toFixed(1)).join(' ')}]`
+          );
+        }
       }
     }
     await page.evaluate(() => window.__relightBench.close());

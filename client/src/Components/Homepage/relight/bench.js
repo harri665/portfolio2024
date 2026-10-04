@@ -1,13 +1,5 @@
-// A bench for the relight engines, for perf/relight-bench.mjs. With
-// ?relight=bench in the URL the CS home page starts no scene and loads this
-// instead, which puts window.__relightBench up:
-//   open({ tier, backend })   builds an engine ('webgpu' or 'webgl') at a size
-//   time({ stride, n })       GPU ms per evaluation of a whole light (median)
-//   render({ lights, stride, exposure })
-//                             the composite of those lights (white, intensity
-//                             1, discs shown) as base64 RGBA, rows bottom first
-//   close()
-// Nothing here runs on a normal visit.
+// ?relight=bench, used by perf/relight-bench.mjs. exposes window.__relightBench
+// with open / time / render / tune / close. never runs on a normal visit
 
 import { createRelightEngine, loadRoom } from './prepare';
 import { requestRelightDevice } from './RelightGPU';
@@ -45,14 +37,14 @@ function close() {
   engine = null;
 }
 
-async function open({ tier = 512, backend = 'webgpu' } = {}) {
+async function open({ tier = 512, backend = 'webgpu', network, kernel = null, bandBytes = BAND_BYTES } = {}) {
   close();
   const signal = new AbortController().signal;
   if (backend === 'webgpu' && !device) {
     device = await requestRelightDevice();
   }
-  const data = await loadRoom(tier, signal);
-  const built = await createRelightEngine(data, backend === 'webgpu' ? device : null, BAND_BYTES, signal);
+  const data = await loadRoom(tier, signal, 'auto', network);
+  const built = await createRelightEngine(data, backend === 'webgpu' ? device : null, bandBytes, signal, kernel);
   engine = built.engine;
   // warm up so shader compiles aren't timed
   engine.evaluate(midLight(), 0, 8);
@@ -64,6 +56,7 @@ async function open({ tier = 512, backend = 'webgpu' } = {}) {
     size: engine.W,
     half: !!engine.half,
     network: `${engine.scene.network.width}x${engine.scene.network.hidden}`,
+    kernel: engine.kernelName,
   };
 }
 
@@ -88,11 +81,9 @@ async function time({ stride = 1, n = 8, batches = 3, light = midLight() } = {})
   return { ms: runs[runs.length >> 1], runs, items: engine.rows(stride) * Math.ceil(engine.W / stride) };
 }
 
-// The composite of `lights` ([{pos, radius}]), each in a slot of its own, as
-// base64 RGBA bytes, rows bottom first as the engines draw them
-async function render({ lights, stride = 1, exposure = 1 }) {
+async function render({ lights, stride = 1, exposure = 1, rect = [] }) {
   const shown = lights.map((l, i) => {
-    engine.evaluate(l, i, stride);
+    engine.evaluate(l, i, stride, ...rect);
     return { pos: l.pos, radius: l.radius, color: [1, 1, 1], intensity: 1, slot: i, stride, hidden: false };
   });
   engine.composite(shown, exposure);
@@ -111,6 +102,10 @@ async function render({ lights, stride = 1, exposure = 1 }) {
   return { width: engine.W, height: engine.H, rgba: btoa(text) };
 }
 
+function tune({ stride = 1, runs = 4 } = {}) {
+  return engine.tune(midLight(), stride, runs);
+}
+
 export function installBench() {
-  window.__relightBench = { open, time, render, close };
+  window.__relightBench = { open, time, render, tune, close };
 }

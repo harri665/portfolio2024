@@ -1,9 +1,4 @@
-// What the WebGL and WebGPU engines share: the scene's camera and light
-// domain, and the model of what an evaluation costs on this GPU.
-//
-// Both evaluate a light into a slot at a stride s: every s-th pixel only, in
-// a compact ceil(W/s) x ceil(H/s) grid the composite upsamples along the
-// geometry. Evaluations can run a band of that grid's rows at a time.
+// shared by the webgl + webgpu engines: camera, light domain and the cost model
 
 // two lights, double buffered
 export const SLOTS = 4;
@@ -34,10 +29,18 @@ export class RelightBase {
     return Math.ceil(this.H / stride);
   }
 
-  // Whether an evaluation of rows r0 to r1 at `stride` is worth timing
-  timeable(stride, r0, r1) {
+  cols(stride = 1) {
+    return Math.ceil(this.W / stride);
+  }
+
+  share(stride, r0, r1, c0, c1) {
+    return ((r1 - r0) * (c1 - c0)) / (this.rows(stride) * this.cols(stride));
+  }
+
+  timeable(stride, r0, r1, c0, c1) {
     const rows = this.rows(stride);
-    return !this.timing.pending && r1 - r0 >= Math.min(rows, Math.max(MIN_BAND_ROWS, rows * MIN_TIMED_SHARE));
+    const least = Math.min(1, Math.max(MIN_BAND_ROWS / rows, MIN_TIMED_SHARE));
+    return !this.timing.pending && r1 - r0 >= Math.min(rows, MIN_BAND_ROWS) && this.share(stride, r0, r1, c0, c1) >= least;
   }
 
   recordTiming(stride, share, ms) {

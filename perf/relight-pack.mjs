@@ -3,6 +3,7 @@
 // actually does something. relight/scene.js undoes it
 //
 //     node relight-pack.mjs --in ../relight-data/cornell-original --out ../client/public/relight/cornell-128x4
+//     node relight-pack.mjs --in <relight>/web/scenes/cornell-lite --out ../client/public/relight/cornell-64x4 --share-pixels cornell-128x4
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
@@ -12,6 +13,7 @@ const { values: args } = parseArgs({
   options: {
     in: { type: 'string' },
     out: { type: 'string' },
+    'share-pixels': { type: 'string' },
   },
 });
 if (!args.in || !args.out) {
@@ -118,7 +120,16 @@ for (const file of fs.readdirSync(args.in).filter((f) => /^scene(-\d+)?\.json$/.
   delete out.refs;
   delete out.train;
   const bin = blob.buffer();
-  sizes.push([`pixels${suffix}.bin`, bin.length, write(path.join(args.out, `pixels${suffix}.bin`), bin)]);
+  const share = args['share-pixels'];
+  if (share) {
+    const shared = path.join(args.out, '..', share, `pixels${suffix}.bin`);
+    if (!fs.existsSync(shared) || !fs.readFileSync(shared).equals(bin)) {
+      throw new Error(`${file}: ${shared} isn't these pixels`);
+    }
+    pixels.file = `../${share}/pixels${suffix}.bin`;
+  } else {
+    sizes.push([`pixels${suffix}.bin`, bin.length, write(path.join(args.out, `pixels${suffix}.bin`), bin)]);
+  }
   const json = Buffer.from(JSON.stringify(out));
   sizes.push([file, json.length, write(path.join(args.out, file), json)]);
   console.log(`${file}: ${W}x${H}, worst position error ${worst.toExponential(1)}`);

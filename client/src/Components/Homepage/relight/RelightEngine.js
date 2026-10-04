@@ -10,6 +10,10 @@ export { SLOTS };
 
 // 32MB ran ~20% faster than 8MB
 const BAND_BYTES = 16 << 20;
+// on a 3080 one group per pass is 2x as fast as eight, but it depends on the gpu so tune() decides
+const OUTPUTS = [1, 2, 4, 8];
+const DEFAULT_OUTPUTS = 2;
+const outputsName = (n) => `o${n}`;
 const FENCE_GIVE_UP = 1000;
 
 const VS = `#version 300 es
@@ -247,7 +251,7 @@ function packLayer(layer, nIn, kin, out, inCol) {
 }
 
 export class RelightEngine extends RelightBase {
-  constructor({ scene, layers, grid, gridOff, aux, pos }, { bandBytes = BAND_BYTES } = {}) {
+  constructor({ scene, layers, grid, gridOff, aux, pos }, { bandBytes = BAND_BYTES, kernel = null } = {}) {
     super(scene, pos);
     // offscreen so we can hand over an ImageBitmap. without OffscreenCanvas the canvas has
     // to be read the same frame it's drawn
@@ -290,43 +294,12 @@ export class RelightEngine extends RelightBase {
     }
     this.NH = NH;
 
-    // Output groups per pass: bounded by render targets, 64 B of targets per
-    // pixel, and the uniform block size
     const P = (p) => gl.getParameter(p);
     const maxBlock = P(gl.MAX_UNIFORM_BLOCK_SIZE);
-    const align = P(gl.UNIFORM_BUFFER_OFFSET_ALIGNMENT);
     const maxRT = Math.min(P(gl.MAX_DRAW_BUFFERS), P(gl.MAX_COLOR_ATTACHMENTS));
-    let out = Math.max(1, Math.min(maxRT, 8, Math.floor(maxBlock / (G * 64))));
-    while (G % out) {
-      out -= 1;
-    }
-
-    // Weights in one uniform buffer, one aligned block per (layer, pass)
-    const blocks = [];
-    let uboLen = 0;
-    const place = ({ w, b }) => {
-      const off = uboLen;
-      uboLen += Math.ceil(w.byteLength / align) * align;
-      blocks.push([off, w]);
-      return { off, size: w.byteLength, b };
-    };
-    const l0 = packLayer(layers[0], IN, XG + 1 + (geo ? 2 : 0), out, (k, c) => {
-      if (k < XG) {
-        return 4 * k + c < PIXIN ? 4 * k + c : -1;
-      }
-      const i = PIXIN + 4 * (k - XG) + c;
-      return i < IN ? i : -1;
-    });
-    const hidden = layers.slice(1, NH + 1).map((L) => packLayer(L, WD, G, out, (k, c) => 4 * k + c));
-    const weights = [l0, ...hidden].map((passes) => passes.map(place));
-    this.wOut = place(packLayer(layers[NH + 1], WD, G, mul ? 2 : 1, (k, c) => 4 * k + c)[0]);
-    const all = new Float32Array(uboLen / 4);
-    blocks.forEach(([off, w]) => all.set(w, off / 4));
-    this.ubo = gl.createBuffer();
-    this.resources.buffers.push(this.ubo);
-    gl.bindBuffer(gl.UNIFORM_BUFFER, this.ubo);
-    gl.bufferData(gl.UNIFORM_BUFFER, all, gl.STATIC_DRAW);
-    gl.bindBuffer(gl.UNIFORM_BUFFER, null);
+    this.outputs = OUTPUTS.filter((n) => n <= maxRT && G % n === 0 && G * 64 * n <= maxBlock);
+    this.shape = { WD, G, XG, PIXIN, IN, geo, mul, align: P(gl.UNIFORM_BUFFER_OFFSET_ALIGNMENT) };
+    this.layers = layers;
 
     const A2 = gl.TEXTURE_2D_ARRAY;
     const T2 = gl.TEXTURE_2D;
@@ -347,23 +320,149 @@ export class RelightEngine extends RelightBase {
     );
     this.pComp = this.program(compositeFS(W, H, mul), 'composite');
     const th = Math.max(8, Math.min(H, Math.floor(bandBytes / (W * G * 8))));
-    const arrs = [0, 1].map(() => this.texture(A2, gl.RGBA16F, W, th, G));
-    this.net = {
-      th,
-      arrs,
-      fbos: arrs.map((t) =>
+    this.arrs = [0, 1].map(() => this.texture(A2, gl.RGBA16F, W, th, G));
+    this.th = th;
+    this.pOut = this.program(layerFS({ kin: G, out: mul ? 2 : 1, relu: false, stage: 'out' }), 'output layer');
+    this.passes = new Map();
+    const named = this.outputs.find((n) => outputsName(n) === kernel);
+    this.setOutputs(named ?? this.outputs.filter((n) => n <= DEFAULT_OUTPUTS).pop() ?? this.outputs[0]);
+    gl.bindVertexArray(null);
+    gl.bindTexture(A2, null);
+    gl.bindTexture(T2, null);
+  }
+
+  passesFor(out) {
+    if (this.passes.has(out)) {
+      return this.passes.get(out);
+    }
+    const gl = this.gl;
+    const { layers } = this;
+    const { WD, G, XG, PIXIN, IN, geo, mul, align } = this.shape;
+    const before = { programs: this.resources.programs.length, framebuffers: this.resources.framebuffers.length };
+    const blocks = [];
+    let uboLen = 0;
+    const place = ({ w, b }) => {
+      const off = uboLen;
+      uboLen += Math.ceil(w.byteLength / align) * align;
+      blocks.push([off, w]);
+      return { off, size: w.byteLength, b };
+    };
+    const l0 = packLayer(layers[0], IN, XG + 1 + (geo ? 2 : 0), out, (k, c) => {
+      if (k < XG) {
+        return 4 * k + c < PIXIN ? 4 * k + c : -1;
+      }
+      const i = PIXIN + 4 * (k - XG) + c;
+      return i < IN ? i : -1;
+    });
+    const hidden = layers.slice(1, this.NH + 1).map((L) => packLayer(L, WD, G, out, (k, c) => 4 * k + c));
+    const w = [l0, ...hidden].map((passes) => passes.map(place));
+    const wOut = place(packLayer(layers[this.NH + 1], WD, G, mul ? 2 : 1, (k, c) => 4 * k + c)[0]);
+    const all = new Float32Array(uboLen / 4);
+    blocks.forEach(([off, data]) => all.set(data, off / 4));
+    const ubo = gl.createBuffer();
+    this.resources.buffers.push(ubo);
+    gl.bindBuffer(gl.UNIFORM_BUFFER, ubo);
+    gl.bufferData(gl.UNIFORM_BUFFER, all, gl.STATIC_DRAW);
+    gl.bindBuffer(gl.UNIFORM_BUFFER, null);
+    const passes = {
+      out,
+      ubo,
+      w,
+      wOut,
+      fbos: this.arrs.map((t) =>
         Array.from({ length: G / out }, (_, p) =>
           this.framebuffer(Array.from({ length: out }, (_, j) => [t, p * out + j]))
         )
       ),
-      w: weights,
       l0: this.program(layerFS({ kin: XG + 1 + (geo ? 2 : 0), out, relu: true, stage: 'l0', xg: XG, geo }), 'layer 0'),
       hid: this.program(layerFS({ kin: G, out, relu: true, stage: 'hid' }), 'hidden layer'),
-      out: this.program(layerFS({ kin: G, out: mul ? 2 : 1, relu: false, stage: 'out' }), 'output layer'),
     };
-    gl.bindVertexArray(null);
-    gl.bindTexture(A2, null);
-    gl.bindTexture(T2, null);
+    passes.resources = {
+      programs: this.resources.programs.slice(before.programs),
+      framebuffers: this.resources.framebuffers.slice(before.framebuffers),
+    };
+    this.passes.set(out, passes);
+    return passes;
+  }
+
+  setOutputs(out) {
+    this.net = { ...this.passesFor(out), th: this.th, arrs: this.arrs, outLayer: this.pOut };
+  }
+
+  get kernelName() {
+    return outputsName(this.net.out);
+  }
+
+  dropOtherPasses() {
+    const gl = this.gl;
+    this.passes.forEach((passes, out) => {
+      if (out === this.net.out) {
+        return;
+      }
+      const drop = (list, items, del) =>
+        items.forEach((item) => {
+          del(item);
+          list.splice(list.indexOf(item), 1);
+        });
+      drop(this.resources.programs, passes.resources.programs, (p) => gl.deleteProgram(p));
+      drop(this.resources.framebuffers, passes.resources.framebuffers, (f) => gl.deleteFramebuffer(f));
+      drop(this.resources.buffers, [passes.ubo], (b) => gl.deleteBuffer(b));
+      this.passes.delete(out);
+    });
+  }
+
+  // fence state only changes between tasks so poll across them
+  finish() {
+    const gl = this.gl;
+    const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    gl.flush();
+    return new Promise((resolve) => {
+      const channel = new MessageChannel();
+      channel.port1.onmessage = () => {
+        if (gl.clientWaitSync(sync, 0, 0) === gl.TIMEOUT_EXPIRED) {
+          channel.port2.postMessage(0);
+          return;
+        }
+        gl.deleteSync(sync);
+        channel.port1.close();
+        resolve();
+      };
+      channel.port2.postMessage(0);
+    });
+  }
+
+  async tune(light, stride, runs = 3, signal = null, slot = 0) {
+    const timing = this.timing;
+    this.timing = { ...timing, pending: {} };
+    const times = {};
+    let best = null;
+    try {
+      for (const out of this.outputs) {
+        if (signal?.aborted) {
+          break;
+        }
+        this.setOutputs(out);
+        this.evaluate(light, slot, stride);
+        await this.finish();
+        const t0 = performance.now();
+        for (let i = 0; i < runs; i += 1) {
+          this.evaluate(light, slot, stride);
+        }
+        await this.finish();
+        const ms = (performance.now() - t0) / runs;
+        times[outputsName(out)] = ms;
+        if (!best || ms < best.ms) {
+          best = { out, ms };
+        }
+      }
+    } finally {
+      this.timing = timing;
+    }
+    if (best) {
+      this.setOutputs(best.out);
+    }
+    this.dropOtherPasses();
+    return { kernel: this.kernelName, times };
   }
 
   encodeInputs({ grid, gridOff, XG, auxDim, maxRT }) {
@@ -483,17 +582,18 @@ export class RelightEngine extends RelightBase {
     return { p, u };
   }
 
-  // ─── Evaluation ────────────────────────────────────────────────────────
-
-  // Evaluates `light` ({pos, radius}) at stride s into `slot`, rows r0 to r1
-  // of its item grid (all of them by default)
-  evaluate(light, slot, stride = 1, r0 = 0, r1 = this.rows(stride)) {
+  evaluate(light, slot, stride = 1, r0 = 0, r1 = this.rows(stride), c0 = 0, c1 = this.cols(stride)) {
     const gl = this.gl;
     const E = this.net;
+    r1 = Math.min(r1, this.rows(stride));
+    c1 = Math.min(c1, this.cols(stride));
+    const gw = c1 - c0;
+    if (r1 <= r0 || gw <= 0) {
+      return;
+    }
     const ln = this.normLight(light);
-    const gw = Math.ceil(this.W / stride);
     const draw = (chunk, P) => {
-      gl.bindBufferRange(gl.UNIFORM_BUFFER, 0, this.ubo, chunk.off, chunk.size);
+      gl.bindBufferRange(gl.UNIFORM_BUFFER, 0, E.ubo, chunk.off, chunk.size);
       gl.uniform4fv(P.u.bias, chunk.b);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     };
@@ -502,7 +602,7 @@ export class RelightEngine extends RelightBase {
       gl.uniform1i(P.u.stride, stride);
     };
 
-    this.startTiming(stride, r0, r1);
+    this.startTiming(stride, r0, r1, c0, c1);
     gl.bindVertexArray(this.vao);
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, this.posTex);
@@ -521,21 +621,21 @@ export class RelightEngine extends RelightBase {
         if (l === 0) {
           setLight(P);
         }
-        gl.viewport(0, 0, gw, h);
+        gl.viewport(c0, 0, gw, h);
         E.w[l].forEach((chunk, p) => {
           gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, E.fbos[dst][p]);
           draw(chunk, P);
         });
         cur = dst;
       }
-      const P = E.out;
+      const P = E.outLayer;
       gl.useProgram(P.p);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D_ARRAY, E.arrs[cur]);
       gl.uniform1i(P.u.yOff, y0);
       gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.outFbos[slot]);
-      gl.viewport(0, y0, gw, h);
-      draw(this.wOut, P);
+      gl.viewport(c0, y0, gw, h);
+      draw(E.wOut, P);
     }
     this.stopTiming();
   }
@@ -579,14 +679,14 @@ export class RelightEngine extends RelightBase {
   // fences get watched every ms or so. checking once a frame made every eval read as at least
   // a frame long and iphones (no timer queries) ran way coarser than they needed to
 
-  startTiming(stride, r0, r1) {
+  startTiming(stride, r0, r1, c0, c1) {
     const gl = this.gl;
-    if (!this.timeable(stride, r0, r1)) {
+    if (!this.timeable(stride, r0, r1, c0, c1)) {
       this.timing.skip = true;
       return;
     }
     this.timing.skip = false;
-    const pending = { stride, share: (r1 - r0) / this.rows(stride), start: performance.now() };
+    const pending = { stride, share: this.share(stride, r0, r1, c0, c1), start: performance.now() };
     if (this.timer) {
       pending.query = gl.createQuery();
       gl.beginQuery(this.timer.TIME_ELAPSED_EXT, pending.query);

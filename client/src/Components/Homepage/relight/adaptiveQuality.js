@@ -38,6 +38,7 @@ export class AdaptiveQuality {
     this.failedDpr = failedDpr;
     this.lateRate = { work: 0, idle: 0 };
     this.window = { frames: 0, late: 0, good: 0, settle: 0 };
+    this.stats = { frames: 0, seconds: 0, late: 0 };
   }
 
   // Once a frame, before any work, with the frame's delta (s). `judgeDpr`
@@ -51,6 +52,9 @@ export class AdaptiveQuality {
     }
     const recent = this.frameNo - this.lastWork <= WORK_FRAMES;
     const late = delta * 1000 > this.lateMs;
+    this.stats.frames += 1;
+    this.stats.seconds += delta;
+    this.stats.late += late ? 1 : 0;
     const rates = this.lateRate;
     const kind = recent ? 'work' : 'idle';
     rates[kind] += RATE_ALPHA * ((late ? 1 : 0) - rates[kind]);
@@ -156,6 +160,37 @@ function nextVisitTier(engine, budget) {
   return i > 0 && cost !== null && cost > budget * REFINE_FRAMES ? TIERS[i - 1] : engine.W;
 }
 
+// small network is ~3.3x faster but ~2dB worse vs path traced refs (perf/relight-bench.mjs).
+// big one wins down to every 4th pixel, so small is for gpus that can't refine past that
+
+export const NETWORKS = ['128x4', '64x4'];
+const SMALL_SPEEDUP = 3.3;
+
+export function firstNetwork(profile) {
+  return NETWORKS.includes(profile?.network) ? profile.network : NETWORKS[0];
+}
+
+export function tunedKernel(profile, network) {
+  return profile?.network === network ? profile.kernel ?? null : null;
+}
+
+// hysteresis so a gpu near the line doesn't flip back and forth
+export function switchNetwork(engine, budget) {
+  const cost = engine.evalCost(1);
+  const i = NETWORKS.indexOf(networkKey(engine));
+  if (cost === null || engine.timing.seeded || i < 0) {
+    return null;
+  }
+  const refines = (full, room) => full / 16 <= budget * REFINE_FRAMES * room;
+  if (i === 0 && !refines(cost, 1)) {
+    return NETWORKS[1];
+  }
+  if (i === 1 && refines(cost * SMALL_SPEEDUP, 0.5)) {
+    return NETWORKS[0];
+  }
+  return null;
+}
+
 function slowConnection() {
   const c = navigator.connection;
   return !!c && (c.saveData || /(^|-)[23]g$/.test(c.effectiveType || ''));
@@ -221,6 +256,7 @@ export function profileFor(gpu, fps, engine, quality) {
     dpr: quality.dpr,
     failedDpr: Number.isFinite(quality.failedDpr) ? quality.failedDpr : null,
     tier: nextVisitTier(engine, quality.budget),
+    kernel: engine.tuned ? engine.kernelName : null,
   };
 }
 

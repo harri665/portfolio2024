@@ -68,6 +68,18 @@ function Summary({ status }) {
 
 const ordinal = (n) => `${n}${n === 2 ? 'nd' : n === 3 ? 'rd' : 'th'}`;
 const every = (stride) => (stride <= 1 ? 'every pixel' : `every ${ordinal(stride)} pixel`);
+// webgpu: '<threads>x<pixels>', webgl: 'o<outputs per pass>'
+const kernelText = (name) => {
+  const [kernel, note] = name.split(', ');
+  const gpu = /^(\d+)x(\d+)$/.exec(kernel);
+  const gl = /^o(\d+)$/.exec(kernel);
+  const text = gpu
+    ? `${gpu[1]} threads a workgroup, ${gpu[2]} pixels each`
+    : gl
+      ? `${gl[1]} output group${gl[1] === '1' ? '' : 's'} a pass`
+      : kernel;
+  return note ? `${text} (${note})` : text;
+};
 
 function Config({ status: s }) {
   const rows = [
@@ -80,8 +92,15 @@ function Config({ status: s }) {
           : '32-bit floats'
         : '32-bit maths, 16-bit activations',
     ],
-    ['Image', `${s.size} × ${s.size} px${s.upgrading ? ', loading a larger one' : ''}`],
+    [
+      'Network',
+      !s.network || s.network === '128x4'
+        ? '128 wide, 4 layers'
+        : `${s.network.replace('x', ' wide, ')} layers (the lighter one, for this GPU)`,
+    ],
+    ['Image', `${s.size} × ${s.size} px${s.upgrading ? ', loading another' : ''}`],
     ['GPU', s.gpu],
+    ...(s.kernel ? [['Kernel', kernelText(s.kernel)]] : []),
     [
       'One light, every pixel',
       s.cost === null ? 'measuring…' : `${s.cost} ms${s.seeded ? ' (from your last visit)' : ''}`,

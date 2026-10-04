@@ -75,7 +75,12 @@ normalisation and a Reinhard tonemap.
 
     node relight-bench.mjs                      # desktop, WebGPU and WebGL
     node relight-bench.mjs --profiles low-end --strides 4,8,16 --no-quality
+    node relight-bench.mjs --networks 128x4,64x4 --tune
     node relight-bench.mjs --save-reference     # keep these images to compare with
+
+`--networks` picks the room's networks to measure (`client/public/relight/
+cornell-<network>`), and `--tune` tunes how each engine runs the network
+first, as a visit does (WebGPU's kernel shape, WebGL's outputs a pass).
 
 `--save-reference` keeps each image in `relight-reference/` (not committed,
 as GPUs round differently); later runs report how far they moved from them,
@@ -92,3 +97,13 @@ beside each file for nginx's `gzip_static`. The 512 px pixels go from
 3.4 MB gzipped to 0.7 MB, the 768 px ones from 7.4 to 1.4 MB.
 
     node relight-pack.mjs --in ../relight-data/cornell-original --out ../client/public/relight/cornell-128x4
+
+The room also ships with a smaller network (64 wide, 4 layers: ~3.3x faster,
+41.9 dB against the relight project's 1024-spp references where the 128-wide
+one scores 44.0), for GPUs too slow to refine the larger past every 4th
+pixel. It was trained and exported in the relight project (`train.py --geo
+--head mul --width 64 --hidden 4 --iters 100000 --name cornell_geo_64x4`,
+then `export.py --run cornell_geo_64x4 --name cornell-lite`, also at `--res
+384` and `768`), and shares the larger network's pixels:
+
+    node relight-pack.mjs --in <relight>/web/scenes/cornell-lite --out ../client/public/relight/cornell-64x4 --share-pixels cornell-128x4

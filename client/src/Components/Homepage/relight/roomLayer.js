@@ -82,7 +82,20 @@ const VERTEX = `
   }
 `;
 
-const UNIFORMS = ['texSize', 'dpr', 'viewport', 'box', 'ready', 'dim', 'saturation', 'hotKeep', 'glowAt', 'glowColor'];
+const UNIFORMS = [
+  ['texSize', 2],
+  ['dpr', 1],
+  ['viewport', 2],
+  ['box', 4],
+  ['ready', 1],
+  ['dim', 1],
+  ['saturation', 1],
+  ['hotKeep', 1],
+  ['glowAt', 3],
+  ['glowColor', 3],
+];
+const FLOATS = UNIFORMS.reduce((n, [, size]) => n + size, 0);
+const COMPONENTS = ['x', 'y', 'z', 'w'];
 
 export class RoomLayer {
   constructor(before) {
@@ -126,7 +139,7 @@ export class RoomLayer {
     gl.deleteShader(vs);
     gl.deleteShader(fs);
     gl.useProgram(program);
-    this.locations = Object.fromEntries(UNIFORMS.map((name) => [name, gl.getUniformLocation(program, name)]));
+    this.locations = UNIFORMS.map(([name]) => gl.getUniformLocation(program, name));
     gl.uniform1i(gl.getUniformLocation(program, 'tRelight'), 0);
 
     gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
@@ -146,14 +159,16 @@ export class RoomLayer {
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
 
-    this.drawn = null;
+    this.values = new Float32Array(FLOATS);
+    this.drawnValues = new Float32Array(FLOATS);
+    this.drawn = false;
     before.parentNode.insertBefore(canvas, before);
   }
 
   setImage(source) {
     const gl = this.gl;
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
-    this.drawn = null;
+    this.drawn = false;
   }
 
   // skipped if nothing changed, the canvas keeps its last frame
@@ -164,24 +179,43 @@ export class RoomLayer {
     if (this.canvas.width !== w || this.canvas.height !== h) {
       this.canvas.width = w;
       this.canvas.height = h;
-      this.drawn = null;
+      this.drawn = false;
     }
-    const values = UNIFORMS.map((name) => {
-      const v = name === 'dpr' ? dpr : name === 'viewport' ? [width, height] : uniforms[name].value;
-      return typeof v === 'number' ? v : Array.isArray(v) ? v : v.toArray();
+    const { values, drawnValues } = this;
+    let o = 0;
+    UNIFORMS.forEach(([name, size]) => {
+      const v = name === 'dpr' ? dpr : name === 'viewport' ? null : uniforms[name].value;
+      if (name === 'viewport') {
+        values[o] = width;
+        values[o + 1] = height;
+      } else if (size === 1) {
+        values[o] = v;
+      } else {
+        for (let c = 0; c < size; c += 1) {
+          values[o + c] = v[COMPONENTS[c]];
+        }
+      }
+      o += size;
     });
-    const key = JSON.stringify(values);
-    if (key === this.drawn) {
+    let same = this.drawn;
+    for (let i = 0; same && i < FLOATS; i += 1) {
+      same = values[i] === drawnValues[i];
+    }
+    if (same) {
       return;
     }
-    this.drawn = key;
-    values.forEach((v, i) => {
-      const at = this.locations[UNIFORMS[i]];
-      if (typeof v === 'number') {
-        gl.uniform1f(at, v);
+    this.drawn = true;
+    drawnValues.set(values);
+    o = 0;
+    UNIFORMS.forEach(([, size], i) => {
+      const at = this.locations[i];
+      const v = values.subarray(o, o + size);
+      if (size === 1) {
+        gl.uniform1f(at, v[0]);
       } else {
-        gl[`uniform${v.length}fv`](at, v);
+        gl[`uniform${size}fv`](at, v);
       }
+      o += size;
     });
     gl.viewport(0, 0, w, h);
     gl.drawArrays(gl.TRIANGLES, 0, 3);

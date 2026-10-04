@@ -1,39 +1,27 @@
-// Gets the relit room ready while the CS home page still shows its still.
-// The live scene waits for the visitor to move, or 3.5 s after load
-// (sceneStart), so parsing three.js doesn't hold up the page. The room's
-// network doesn't need three.js: it runs on a WebGPU device or a WebGL2
-// context of its own. So in that wait, from 2 s after load (Prism.js):
-// - the WebGPU device is asked for, the room fetched at the size this
-//   device starts at, and the network built, its shaders compiled
-// - a light is evaluated a few times to time the network on this GPU, at
-//   the finest stride that holds the GPU no longer than BENCH_MAX_MS
-// - with those costs, a GPU with room to spare fetches the next size up and
-//   is timed there too, so the room starts at the size it would have swapped
-//   up to a few seconds in
-// The backdrop takes it when it mounts (takePreparedRelight), however far it
-// got: for a visitor who moves straight away it's still the room loading, and
-// a larger size on its way carries on in the backdrop. What it measured
-// stands in for the backdrop's own first measurements, so the first frames
-// show the room at the strides this GPU can afford instead of at a guess.
-// Nothing here is drawn, and no frame waits on it: it yields to the page
-// between steps and polls the GPU once a frame.
+// gets the relit room ready while the CS page still shows the poster: device, fetch, build,
+// and time the network on this gpu so the backdrop starts where it would've settled.
+// doesn't need three.js, and yields to the page between steps
 
 import {
   MIN_FPS,
+  NETWORKS,
   firstBudget,
+  firstNetwork,
   firstTier,
+  tunedKernel,
   gpuName,
   loadProfile,
   measuredCosts,
   seedCosts,
+  switchNetwork,
   upgradeTier,
 } from './adaptiveQuality';
 import { RelightEngine } from './RelightEngine';
 import { RelightGPUEngine, requestRelightDevice } from './RelightGPU';
 import { loadRelightScene } from './scene';
 
-// The room, packed by perf/relight-pack.mjs, by its network
-const SCENE_URL = `${process.env.PUBLIC_URL}/relight/cornell-128x4`;
+// packed by perf/relight-pack.mjs
+const roomUrl = (network) => `${process.env.PUBLIC_URL}/relight/cornell-${network}`;
 export const NATIVE = 512;
 const tierSuffix = (tier) => (tier === NATIVE ? '' : `-${tier}`);
 
@@ -48,19 +36,15 @@ const BENCH_MAX_MS = 30;
 const BENCH_LIMIT = 16;
 const ROOM_MAX_DPR = 2;
 
-// The room at `tier` px; a missing size falls back to the one every device has
-export function loadRoom(tier, signal, priority) {
-  return loadRelightScene(SCENE_URL, signal, tierSuffix(tier), priority);
+export function loadRoom(tier, signal, priority, network = NETWORKS[0]) {
+  return loadRelightScene(roomUrl(network), signal, tierSuffix(tier), priority);
 }
 
-// The network for a loaded scene: on `device` (WebGPU) if there is one and
-// it can run it, else on WebGL. Returns { engine, notGPU }: why the device
-// couldn't run it, if it couldn't.
-export async function createRelightEngine(data, device, bandBytes, signal) {
+export async function createRelightEngine(data, device, bandBytes, signal, kernel = null) {
   let notGPU = null;
   if (device) {
     try {
-      return { engine: await RelightGPUEngine.create(device, data), notGPU };
+      return { engine: await RelightGPUEngine.create(device, data, { kernel }), notGPU };
     } catch (error) {
       if (signal.aborted) {
         throw error;
@@ -69,7 +53,7 @@ export async function createRelightEngine(data, device, bandBytes, signal) {
       notGPU = `WebGPU couldn't build the network (${error.message})`;
     }
   }
-  return { engine: new RelightEngine(data, { bandBytes }), notGPU };
+  return { engine: new RelightEngine(data, { bandBytes, kernel }), notGPU };
 }
 
 let current = null;
@@ -106,13 +90,6 @@ export function prepareRelight() {
   current = prep;
 }
 
-// For the backdrop: a promise of what was prepared, as soon as it has an
-// engine; null if nothing was. It owns the engine and the device from then
-// on. Resolves to { engine, notGPU, device, tier, timed, upgrade,
-// upgradeFailed } or { error }. `device` is the WebGPU device request (a
-// promise, which rejects saying why there's none) or null; `upgrade` a
-// larger size still on its way ({ tier, controller, data }), for the
-// backdrop to swap in.
 export function takePreparedRelight() {
   taken = true;
   const prep = current;
@@ -161,54 +138,75 @@ async function run(prep) {
     prep.device.catch(() => {});
   }
   let tier = firstTier(profile, compact);
+  let network = firstNetwork(profile);
   const [device, data] = await Promise.all([
     prep.device?.catch(() => null) ?? null,
-    loadRoom(tier, signal, 'low').catch((error) => {
-      if (error?.name === 'AbortError' || tier === NATIVE) {
+    loadRoom(tier, signal, 'low', network).catch((error) => {
+      if (error?.name === 'AbortError' || (tier === NATIVE && network === NETWORKS[0])) {
         throw error;
       }
       tier = NATIVE;
+      network = NETWORKS[0];
       return loadRoom(NATIVE, signal, 'low');
     }),
   ]);
-  const built = await createRelightEngine(data, device, bandBytes, signal);
+  const kernel = tunedKernel(profile, network);
+  const built = await createRelightEngine(data, device, bandBytes, signal, kernel);
   prep.engine = built.engine;
   throwIfAborted(signal);
   let { engine } = built;
+  engine.tuned = !!kernel && engine.kernelName === kernel;
   seedCosts(engine, profile);
   const result = {
     engine,
     notGPU: built.notGPU,
     device: prep.device,
     tier,
+    network,
     timed: false,
     upgrade: null,
     upgradeFailed: false,
   };
 
   result.timed = await benchmark(engine, prep);
+  await tune(engine, prep);
 
-  // A size up, while the GPU has room for it and the backdrop hasn't started
   const budget = firstBudget(profile, compact);
-  let next = result.timed ? upgradeTier(engine, budget, shownPx()) : null;
+  const change = () => {
+    const other = switchNetwork(engine, budget);
+    if (other) {
+      return { tier, network: other };
+    }
+    const larger = upgradeTier(engine, budget, shownPx());
+    return larger ? { tier: larger, network } : null;
+  };
+  let next = result.timed ? change() : null;
   while (next && !prep.claimed) {
     const controller = new AbortController();
     prep.upgrade = controller;
-    const pending = loadRoom(next, controller.signal, 'low');
+    const pending = loadRoom(next.tier, controller.signal, 'low', next.network);
     pending.catch(() => {});
     const arrived = await Promise.race([pending.then(() => true, () => true), prep.claim.then(() => false)]);
     throwIfAborted(signal);
     if (!arrived) {
-      result.upgrade = { tier: next, controller, data: pending };
+      result.upgrade = { ...next, controller, data: pending };
       break;
     }
     prep.upgrade = null;
     let larger;
     try {
-      larger = await createRelightEngine(await pending, engine.backend === 'webgpu' ? device : null, bandBytes, signal);
+      const kernel = next.network === network && engine.tuned ? engine.kernelName : null;
+      larger = await createRelightEngine(
+        await pending,
+        engine.backend === 'webgpu' ? device : null,
+        bandBytes,
+        signal,
+        kernel
+      );
+      larger.engine.tuned = !!kernel;
     } catch (error) {
       throwIfAborted(signal);
-      console.warn(`Relight backdrop staying at ${tier} px:`, error);
+      console.warn(`Relight backdrop staying at ${tier} px (${network}):`, error);
       result.upgradeFailed = true;
       break;
     }
@@ -217,13 +215,38 @@ async function run(prep) {
     engine = larger.engine;
     prep.engine = engine;
     throwIfAborted(signal);
-    tier = next;
-    Object.assign(result, { engine, tier });
-    // taken before it's timed, it runs on the smaller size's costs
+    ({ tier, network } = next);
+    Object.assign(result, { engine, tier, network });
     const timed = await benchmark(engine, prep);
-    next = timed ? upgradeTier(engine, budget, shownPx()) : null;
+    await tune(engine, prep);
+    next = timed ? change() : null;
   }
   return result;
+}
+
+// tuning on a 3080: ~15% faster on webgpu, 2x on webgl
+const TUNE_MS = 24;
+
+async function tune(engine, prep) {
+  if (!prep.claimed) {
+    await tuneEngine(engine, prep.controller.signal);
+    throwIfAborted(prep.controller.signal);
+  }
+}
+
+export async function tuneEngine(engine, signal = null, slot = 0) {
+  const cost = engine.evalCost(1);
+  if (engine.tuned || cost === null) {
+    return;
+  }
+  const stride = [1, 2, 4].find((s) => engine.evalCost(s) <= BENCH_MAX_MS) ?? 8;
+  const runs = Math.min(8, Math.max(2, Math.ceil(TUNE_MS / engine.evalCost(stride))));
+  const { lo, hi, rmin, rmax } = engine;
+  const light = { pos: lo.map((v, i) => (v + hi[i]) / 2), radius: (rmin + rmax) / 2 };
+  await engine.tune(light, stride, runs, signal, slot);
+  if (!signal?.aborted) {
+    engine.tuned = true;
+  }
 }
 
 async function benchmark(engine, prep) {

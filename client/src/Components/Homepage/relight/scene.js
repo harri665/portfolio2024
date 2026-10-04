@@ -67,7 +67,7 @@ export async function loadRelightScene(base, signal, suffix = '', priority = 'au
     throw new Error('light_grid models are not supported');
   }
   const [model, pixels] = await Promise.all(
-    ['model.bin', `pixels${suffix}.bin`].map(async (file) => (await get(file)).arrayBuffer())
+    ['model.bin', scene.pixels.file ?? `pixels${suffix}.bin`].map(async (file) => (await get(file)).arrayBuffer())
   );
   throwIfAborted(signal);
 

@@ -153,7 +153,7 @@ function Scene({ poster, immediate = false, className, ...props }) {
       return undefined;
     }
     if (RELIGHT_BENCH) {
-      import(/* webpackChunkName: "relight" */ './relight/bench').then((m) => m.installBench());
+      import(/* webpackChunkName: "relight-bench" */ './relight/bench').then((m) => m.installBench());
       return undefined;
     }
     let prepare = null;
