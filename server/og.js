@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import matter from 'gray-matter';
 import { prettyRepoName } from './repoMeta.js';
+import { PREVIEW_SIZE, sitePreviewTarget, sitePreviewImageUrl } from './sitePreview.js';
 
 // broad on purpose, no real browser UA has any of these words
 const CRAWLER_UA =
@@ -141,6 +142,7 @@ function renderOgHtml(meta) {
     description,
     image,
     imageAlt,
+    imageSize,
     url,
     siteName,
     type = 'website',
@@ -187,6 +189,9 @@ ${links
 <meta property="og:url" content="${escapeHtml(url)}" />
 ${image ? `<meta property="og:image" content="${escapeHtml(image)}" />
 <meta property="og:image:secure_url" content="${escapeHtml(image)}" />
+${imageSize ? `<meta property="og:image:type" content="image/jpeg" />
+<meta property="og:image:width" content="${imageSize.width}" />
+<meta property="og:image:height" content="${imageSize.height}" />` : ''}
 <meta property="og:image:alt" content="${escapeHtml(imageAlt || title)}" />` : ''}
 ${publishedTime ? `<meta property="article:published_time" content="${escapeHtml(publishedTime)}" />
 <meta property="article:author" content="Harrison Martin" />` : ''}
@@ -453,20 +458,6 @@ function withTimeout(promise, ms) {
   ]);
 }
 
-/**
- * Builds the Express handler that renders preview HTML.
- *
- * deps:
- *   blogPostsDir     — directory holding the blog markdown files
- *   blogImagesDir    — directory holding the blog images
- *   getArtProject    — async (identifier) => ArtStation project JSON | null
- *   getCsRepo        — async ("owner/repo") => GitHub repo JSON | null
- *   getCsReadme      — async ("owner/repo") => { title, media } from its README
- *   getCsRepoFullName— (repoName) => "owner/repo"
- *   listBlogPosts    — async () => [{ slug, title, description, cover, date }]
- *   listArtProjects  — async () => [{ identifier, title, description, image }]
- *   listCsRepos      — async () => [{ name, description }]
- */
 export function createOgHandler(deps) {
   return async function ogHandler(req, res, requestedPath) {
     const origin = originFor(req);
@@ -522,7 +513,11 @@ export function createOgHandler(deps) {
       }
     }
 
-    const realImage = resolved?.image || home.image || null;
+    const previewTarget = (isHome || resolved) && sitePreviewTarget(req.headers['x-forwarded-host'] || req.headers.host, pathname);
+    if (previewTarget && deps.warmSitePreview) {
+      void deps.warmSitePreview(previewTarget).catch((err) => console.error('[preview]', err.message));
+    }
+    const realImage = previewTarget ? sitePreviewImageUrl(previewTarget) : resolved?.image || home.image || null;
     const image = realImage || `${origin}/logo.png`;
     const url = `${origin}${pathname}`;
     const title = resolved?.title || site.title;
@@ -532,7 +527,8 @@ export function createOgHandler(deps) {
       title,
       description,
       image,
-      imageAlt: resolved?.title || site.name,
+      imageAlt: previewTarget ? `Screenshot of ${title}` : resolved?.title || site.name,
+      imageSize: previewTarget ? PREVIEW_SIZE : null,
       url,
       siteName: site.name,
       type: resolved?.type || 'website',

@@ -155,7 +155,7 @@ export default function CSProjectDetails() {
   ].filter((fact) => fact && fact[1]);
 
   return (
-    <PageShell>
+    <PageShell ready>
       <PageHeader back={BACK} title={title}>
         {summary && (
           <p className="mt-5 max-w-[60ch] text-lg leading-relaxed text-ink-2">{summary}</p>
@@ -365,9 +365,9 @@ function Contents({ sections }) {
 }
 
 // same shell loading + loaded so the backdrop canvas isn't rebuilt
-function PageShell({ children }) {
+function PageShell({ children, ready = false }) {
   return (
-    <div className="relative min-h-screen text-ink">
+    <div className="relative min-h-screen text-ink" data-preview-ready={ready ? '' : undefined}>
       <PrismBackdrop lens="cs" tone="detail" />
       <SubdomainNav currentMode={SITE_MODES.CS} />
       <Container as="main" className="relative z-[1] pb-24 pt-28 sm:pt-32">

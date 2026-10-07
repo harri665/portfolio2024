@@ -96,7 +96,7 @@ export default function BlogPost() {
   const color = nodeColor(meta.tags[0]);
 
   return (
-    <div className="network-grid min-h-screen text-ink">
+    <div className="network-grid min-h-screen text-ink" data-preview-ready="">
       <SubdomainNav currentMode={SITE_MODES.BLOG} />
 
       <Container as="main" className="pb-24 pt-28 sm:pt-32">

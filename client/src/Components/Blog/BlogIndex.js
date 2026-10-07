@@ -31,7 +31,7 @@ export default function BlogIndex() {
     : posts;
 
   return (
-    <div className="network-grid relative min-h-screen text-ink">
+    <div className="network-grid relative min-h-screen text-ink" data-preview-ready={!loading && !error ? '' : undefined}>
       <SubdomainNav currentMode={SITE_MODES.BLOG} />
       <SectionIntro title="Blog" />
 

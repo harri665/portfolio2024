@@ -14,6 +14,7 @@ services:
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - GITHUB_CACHE_TTL_MS=${GITHUB_CACHE_TTL_MS:-1800000}
+      - SITE_PREVIEW_ORIGIN=http://client
     networks:
       - portfolio-network
     restart: unless-stopped

@@ -235,7 +235,7 @@ export default function CSHomePage() {
   }, [repos]);
 
   return (
-    <div className="relative min-h-screen bg-bg text-ink">
+    <div className="relative min-h-screen bg-bg text-ink" data-preview-ready={!loading && !error ? '' : undefined}>
       <PrismBackdrop lens="cs" tone="page" />
       <SubdomainNav currentMode={SITE_MODES.CS} />
       <PrismHero

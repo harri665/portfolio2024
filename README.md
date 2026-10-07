@@ -46,6 +46,24 @@ npm run build
 
 - `client/` — Frontend application
 
+## Link preview images
+
+CS and blog links use a 1200 × 630 JPEG screenshot of the shared page in their
+Open Graph and Twitter metadata. Only `cs.harrison-martin.com` and
+`blog.harrison-martin.com` use screenshots; other hosts keep their existing images.
+Homepages, published posts and CS project pages are supported.
+
+The backend renders with its existing Puppeteer installation and stores captures
+in `data/site-previews/` (the persistent server data volume). Captures refresh
+after six hours; a previous successful image stays available during refresh.
+Visitor logging is suppressed for these renders. Run `node --test sitePreview.test.js`
+from `server/` to check domain scoping, metadata and caching.
+
+Docker uses `SITE_PREVIEW_ORIGIN=http://client` to render the React app through
+nginx on the private network. Outside Docker, leave that variable unset to use
+the public sites, or set it to the local frontend origin. Rebuild both containers
+to deploy the backend endpoint and client readiness markers.
+
 ---
 
 **Author:** Harrison (`harri665`)

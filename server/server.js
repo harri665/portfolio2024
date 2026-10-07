@@ -12,6 +12,7 @@ import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
 import multer from 'multer';
 import { createOgHandler, isCrawler, detectSiteMode, siteOrigin } from './og.js';
+import { createSitePreviews, renderSitePreview, sitePreviewTarget } from './sitePreview.js';
 import { prettyRepoName, readmeMedia, readmeTitle } from './repoMeta.js';
 import { createProjectPages, isProjectPageName, projectPageMedia } from './projectPages.js';
 import { seedVolumes } from './seedVolumes.js';
@@ -1661,7 +1662,23 @@ async function listCsRepos() {
     .map((repo) => ({ name: repo.name, description: repo.description || '' }));
 }
 
+const sitePreviews = createSitePreviews({
+  cacheDir: path.join(DATA_DIR, 'site-previews'),
+  render: (target) => renderSitePreview(target, { renderOrigin: process.env.SITE_PREVIEW_ORIGIN }),
+  isPublicPage: async ({ mode, pathname }) => {
+    if (pathname === '/') return true;
+    const slug = pathname.slice(1);
+    if (mode === 'blog') return loadBlogPosts().some((post) => post.slug === slug);
+    const fullName = resolveCsRepoFullName(slug);
+    if (!fullName) return false;
+    return Boolean((await getCsRepo(fullName).catch(() => null))?.name);
+  },
+});
+
+app.get('/api/site-preview.jpg', sitePreviews.handler);
+
 const ogHandler = createOgHandler({
+  warmSitePreview: sitePreviews.warm,
   blogPostsDir: BLOG_POSTS_DIR,
   blogImagesDir: BLOG_IMAGES_DIR,
   getArtProject: getArtProjectByIdentifier,
@@ -1695,6 +1712,7 @@ app.get('/robots.txt', (req, res) => {
       'Disallow: /blog-admin',
       'Disallow: /pages-admin',
       'Disallow: /api/',
+      ...(sitePreviewTarget(req.headers['x-forwarded-host'] || req.headers.host) ? ['Allow: /api/site-preview.jpg'] : []),
       '',
       `Sitemap: ${origin}/sitemap.xml`,
       '',

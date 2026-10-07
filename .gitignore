@@ -29,3 +29,4 @@ yarn-error.log*
 # perf: per-machine results and relight bench images
 /perf/results
 /perf/relight-reference
+/server/data/site-previews/
