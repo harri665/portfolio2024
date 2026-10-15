@@ -68,13 +68,13 @@ function Summary({ status }) {
 
 const ordinal = (n) => `${n}${n === 2 ? 'nd' : n === 3 ? 'rd' : 'th'}`;
 const every = (stride) => (stride <= 1 ? 'every pixel' : `every ${ordinal(stride)} pixel`);
-// webgpu: '<threads>x<pixels>', webgl: 'o<outputs per pass>'
+// webgpu: '<threads>x<pixels>[c<channel groups>]', webgl: 'o<outputs per pass>'
 const kernelText = (name) => {
   const [kernel, note] = name.split(', ');
-  const gpu = /^(\d+)x(\d+)$/.exec(kernel);
+  const gpu = /^(\d+)x(\d+)(?:c(\d+))?$/.exec(kernel);
   const gl = /^o(\d+)$/.exec(kernel);
   const text = gpu
-    ? `${gpu[1]} threads a workgroup, ${gpu[2]} pixels each`
+    ? `${gpu[1]} threads a workgroup, ${gpu[2]} pixels${gpu[3] ? ` by ${4 * gpu[3]} channels` : ''} each`
     : gl
       ? `${gl[1]} output group${gl[1] === '1' ? '' : 's'} a pass`
       : kernel;
