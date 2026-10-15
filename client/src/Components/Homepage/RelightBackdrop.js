@@ -32,7 +32,7 @@ import {
   tuneEngine,
 } from './relight/prepare';
 import { requestRelightDevice } from './relight/RelightGPU';
-import { phaseOrder } from './relight/RelightBase';
+import { NO_PHASE, phaseOrder } from './relight/RelightBase';
 import { ROOM_FRAGMENT, RoomLayer } from './relight/roomLayer';
 import { reportRelight } from './relight/report';
 import { setRelightStatus } from './relight/status';
@@ -68,8 +68,9 @@ const REST = [0.42, 0.76, 0.15];
 const INTRO_FROM = [0.1, 0.84, -0.1];
 
 const KEY = { radius: 0.1, color: [1, 0.83, 0.64], intensity: 26 };
-// hidden fill light so the room is never fully black
-const FILL = { pos: [0.64, 0.72, -0.64], radius: 0.07, color: [0.55, 0.7, 1], intensity: 9, hidden: true };
+// hidden fill light so the room is never fully black. it never moves, so it's evaluated once
+const FILL = { pos: [0.64, 0.72, -0.64], radius: 0.07, color: [0.55, 0.7, 1], intensity: 9, hidden: true, fixed: true };
+const WHOLE = [0, 1, 0, 1];
 
 const MAX_DPR = { compact: 1.5, full: 2 };
 const SAVE_EVERY = 5;
@@ -524,15 +525,18 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
 
     const view = visibleRect(state.box, vw, vh);
     state.view = view;
-    let dirty = false;
-    const passes = [];
+    // key light first and the fill gets what it leaves, but half each until the fill has an image
+    let worked = false;
+    let left = budget;
     if (needsWork(key, scrolling, view)) {
-      passes.push(key);
+      left -= step(engine, key, now, fill.evalPos ? budget : budget / 2, view);
+      worked = true;
     }
-    if (needsWork(fill, scrolling, view) && (!passes.length || !fill.evalPos)) {
-      passes.push(fill);
+    if (needsWork(fill, scrolling, view) && fillStep(engine, fill, left, !worked) > 0) {
+      worked = true;
     }
 
+    let dirty = worked;
     const keyLevel = reduceMotion ? clamp01(age / 0.6) : strike(age);
     const fillLevel = easeOutCubic(clamp01((age - 0.2) / 1.4));
     const levels = `${keyLevel.toFixed(3)} ${fillLevel.toFixed(3)}`;
@@ -541,19 +545,12 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
       dirty = true;
     }
 
-    if (passes.length) {
+    if (worked) {
       quality.worked();
     }
-    if (passes.length || dirty) {
-      passes.forEach((light) => {
-        if (step(engine, light, now, budget / passes.length, view)) {
-          dirty = true;
-        }
-      });
-      if (dirty) {
-        engine.composite([shown(key, KEY.intensity * keyLevel), shown(fill, FILL.intensity * fillLevel)]);
-        state.built.present(state.layer);
-      }
+    if (dirty) {
+      engine.composite([shown(key, KEY.intensity * keyLevel), shown(fill, FILL.intensity * fillLevel)]);
+      state.built.present(state.layer);
     }
 
     // soft bloom, the tonemap flattens the key light otherwise
@@ -714,18 +711,19 @@ function install(state, built, uniforms) {
   uniforms.tRelight.value = built.texture;
   uniforms.texSize.value.set(built.engine.W, built.engine.H);
   [state.key, state.fill].forEach((light) =>
-    Object.assign(light, { evalPos: null, rect: null, kept: null, stride: 0, phase: 0, done: 0 })
+    Object.assign(light, { evalPos: null, rect: null, kept: null, stride: 0, phase: 0, done: 0, next: 0 })
   );
   state.lastLevels = null;
 }
 
 // slot is where the network writes, image the light's full res image the evaluations build up
-function makeLight(pos, { radius, color, hidden = false }, index) {
+function makeLight(pos, { radius, color, hidden = false, fixed = false }, index) {
   return {
     pos: [...pos],
     radius,
     color,
     hidden,
+    fixed,
     slot: index,
     image: index,
     evalPos: null,
@@ -737,6 +735,8 @@ function makeLight(pos, { radius, color, hidden = false }, index) {
     phase: 0,
     // evaluations at this stride since the light last moved
     done: 0,
+    // first row a fixed light hasn't evaluated at every pixel yet
+    next: 0,
     still: 0,
   };
 }
@@ -746,6 +746,9 @@ function converged(light) {
 }
 
 function needsWork(light, scrolling, view) {
+  if (light.fixed) {
+    return !light.evalPos || !converged(light);
+  }
   return (
     !light.evalPos ||
     distance(light.pos, light.evalPos) > MOVE_EPS ||
@@ -781,7 +784,46 @@ function step(engine, light, now, budget, view) {
   engine.evaluate({ pos: light.evalPos, radius: light.radius }, light.slot, stride, ...items, phase);
   light.kept = engine.resolve(light.slot, light.image, stride, phase, items, alpha, light.kept);
   light.rect = rect;
-  return true;
+  const cost = engine.evalCost(stride);
+  return cost === null ? budget : cost * areaOf(rect);
+}
+
+// every pixel once, a band of rows a frame out of what the key light leaves. scrolling used to
+// move it off its rect and start it over. a coarse pass first so there's a fill while they come in
+function fillStep(engine, light, budget, idle) {
+  const cost = engine.evalCost(1);
+  if (!light.evalPos && (cost === null || cost > budget)) {
+    const stride = previewStride(engine, budget);
+    const items = [0, engine.rows(stride), 0, engine.cols(stride)];
+    engine.evaluate(light, light.slot, stride, ...items, NO_PHASE);
+    engine.resolve(light.slot, light.image, stride, NO_PHASE, items, 1);
+    Object.assign(light, { evalPos: [...light.pos], rect: WHOLE, stride: 1, done: 0, next: 0 });
+    return cost === null ? budget : engine.evalCost(stride);
+  }
+  if (cost === null) {
+    return 0;
+  }
+  // on a gpu too slow for a row in the budget it still takes one when nothing else is running
+  const spent = evaluateRows(engine, light, WHOLE, budget, idle ? 1 : 0);
+  if (spent > 0) {
+    Object.assign(light, { evalPos: [...light.pos], rect: WHOLE, stride: 1, done: light.next >= engine.H ? 1 : 0 });
+  }
+  return spent;
+}
+
+// every pixel of rect's rows from job.next on, as many rows as the budget takes. returns their ms
+function evaluateRows(engine, job, rect, budget, least = 0) {
+  const [r0, r1, c0, c1] = itemRect(engine, rect, 1);
+  const row = (engine.evalCost(1) * (c1 - c0)) / (engine.W * engine.H);
+  const from = Math.max(r0, job.next);
+  const to = Math.min(r1, from + Math.max(least, Math.floor(budget / row)));
+  if (to <= from) {
+    return 0;
+  }
+  engine.evaluate(job, job.slot, 1, from, to, c0, c1, NO_PHASE);
+  engine.resolve(job.slot, job.image, 1, NO_PHASE, [from, to, c0, c1], 1);
+  job.next = to;
+  return row * (to - from);
 }
 
 function previewStride(engine, budget, area = 1) {
