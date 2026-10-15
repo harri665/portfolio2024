@@ -27,16 +27,19 @@ export const KERNELS = [
   { threads: 128, pixels: 4, channels: 2 },
   { threads: 32, pixels: 8 },
   { threads: 32, pixels: 8, channels: 2 },
+  { threads: 64, pixels: 8, double: true },
+  { threads: 128, pixels: 4, double: true },
+  { threads: 64, pixels: 16, double: true },
 ];
 // saved profiles hold these, one channel group keeps the old name
-export const kernelKey = (k) => `${k.threads}x${k.pixels}${k.channels > 1 ? `c${k.channels}` : ''}`;
+export const kernelKey = (k) => `${k.threads}x${k.pixels}${k.channels > 1 ? `c${k.channels}` : ''}${k.double ? 'd' : ''}`;
 
 // pixels a workgroup takes, CG / channels threads share each pixel
 const tileOf = (k, CG) => ((k.threads * (k.channels ?? 1)) / CG) * k.pixels;
 
 function workgroupBytes(k, width, half, outputs) {
   const tile = tileOf(k, width / 4);
-  return tile * width * (half ? 2 : 4) + tile * 32 + tile * outputs * 4;
+  return tile * width * (half ? 2 : 4) * (k.double ? 2 : 1) + tile * 32 + tile * outputs * 4;
 }
 
 const outputsOf = (mul) => (mul ? 6 : 3);
@@ -193,8 +196,9 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
 
 // activations are vec4s so a thread loads 4 inputs at once. one at a time, the workgroup
 // memory loads outnumbered the FMAs, which is what phone gpus are worst at. a thread with
-// C channel groups loads 4C weights and P activations a step for 16CP FMAs
-function forwardWGSL({ W, H, WD, NH, PIXIN, XW, geo, mul, threads, pixels: P, channels: C = 1, off, half }) {
+// C channel groups loads 4C weights and P activations a step for 16CP FMAs.
+// double writes each layer into the other half of act, so it needs no barrier before the writes
+function forwardWGSL({ W, H, WD, NH, PIXIN, XW, geo, mul, threads, pixels: P, channels: C = 1, double: DB, off, half }) {
   const CG = WD / 4;
   // threads a pixel, a thread's channel groups are CGC apart so neighbours read neighbouring weights
   const CGC = CG / C;
@@ -205,6 +209,9 @@ function forwardWGSL({ W, H, WD, NH, PIXIN, XW, geo, mul, threads, pixels: P, ch
   const Q = [...Array(P).keys()];
   const CS = [...Array(C).keys()];
   const HSTRIDE = WD * CG + CG;
+  const A = TP * CG;
+  // the half the last layer wrote
+  const LAST = DB ? ((NH + 1) % 2) * A : 0;
   const X4 = Math.ceil(XW / 2);
   const PIN4 = Math.ceil(PIXIN / 4);
   const V = half ? 'vec4h' : 'vec4f';
@@ -233,7 +240,7 @@ struct Fwd {
 @group(0) @binding(3) var<uniform> fu: Fwd;
 @group(0) @binding(4) var<storage, read_write> outB: array<u32>;
 @group(0) @binding(5) var<storage, read> pnrm: array<vec2u>;
-var<workgroup> act: array<${V}, ${TP * CG}>;
+var<workgroup> act: array<${V}, ${DB ? 2 * A : A}>;
 var<workgroup> pf: array<vec4f, ${2 * TP}>;
 var<workgroup> res: array<f32, ${TP * NO}>;
 ${GEO_WGSL}
@@ -255,7 +262,7 @@ fn outRow(o: u32, pl: u32) -> f32 {
   var acc = f32(Wv[${u(off.BO)} + o / 4u][o % 4u]);
   let row = ${u(off.WO)} + o * ${u(CG)};
   for (var k = 0u; k < ${u(CG)}; k++) {
-    acc += f32(dot(Wv[row + k], act[pl * ${u(CG)} + k]));
+    acc += f32(dot(Wv[row + k], act[${LAST ? `${u(LAST)} + ` : ''}pl * ${u(CG)} + k]));
   }
   return acc;
 }
@@ -303,11 +310,12 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) t: u3
           + ${g(4)} * f1.x + ${g(5)} * f1.y;`;
     }).join('\n    ')}
   }` : ''}
-  workgroupBarrier();
+  ${DB ? '' : 'workgroupBarrier();'}
   for (var q = 0u; q < ${u(P)}; q++) {
     let live = base + pg * ${u(P)} + q < fu.i1;
     ${CS.map(
-      (c) => `act[r0 + q * ${u(CG)} + cg + ${u(c * CGC)}] = select(${V}(0.0), max(${hq(c, 'q')}, ${V}(0.0)), live);`
+      (c) =>
+        `act[${DB ? `${u(A)} + ` : ''}r0 + q * ${u(CG)} + cg + ${u(c * CGC)}] = select(${V}(0.0), max(${hq(c, 'q')}, ${V}(0.0)), live);`
     ).join('\n    ')}
   }
   workgroupBarrier();
@@ -316,13 +324,14 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) t: u3
     let wo = ${u(off.HID)} + l * ${u(HSTRIDE)};
     ${CS.map((c) => `let bias${c} = Wv[wo + ${u(WD * CG + c * CGC)} + cg];`).join(' ')}
     ${CS.map((c) => Q.map((q) => `var a${c}_${q} = bias${c};`).join(' ')).join('\n    ')}
+    ${DB ? `let src = select(0u, ${u(A)}, (l & 1u) == 0u); let dst = ${u(A)} - src;` : ''}
     for (var k = 0u; k < ${u(CG)}; k++) {
       ${rows4(`wo + k * ${u(4 * CG)} + cg`)}
-      ${acts((q) => `r0 + ${u(q * CG)} + k`)}
+      ${acts((q) => `${DB ? 'src + ' : ''}r0 + ${u(q * CG)} + k`)}
       ${fma((c, q) => `a${c}_${q}`, (q) => `x${q}`)}
     }
-    workgroupBarrier();
-    ${CS.map((c) => Q.map((q) => `act[r0 + ${u(q * CG + c * CGC)} + cg] = max(a${c}_${q}, ${V}(0.0));`).join('\n    ')).join(
+    ${DB ? '' : 'workgroupBarrier();'}
+    ${CS.map((c) => Q.map((q) => `act[${DB ? 'dst + ' : ''}r0 + ${u(q * CG + c * CGC)} + cg] = max(a${c}_${q}, ${V}(0.0));`).join('\n    ')).join(
       '\n    '
     )}
     workgroupBarrier();
