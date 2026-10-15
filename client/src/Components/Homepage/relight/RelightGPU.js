@@ -6,7 +6,7 @@
 //
 // f16 where available: ~1/3 faster on the 3080, image moves by 3/255 at most
 
-/* global GPUBufferUsage, GPUMapMode, GPUShaderStage, BigUint64Array */
+/* global GPUBufferUsage, GPUMapMode, GPUShaderStage, GPUTextureUsage, BigUint64Array */
 import { NO_PHASE, RESOLVED, RelightBase, SLOTS } from './RelightBase';
 
 // which one's fastest depends on the gpu, tune() times them. first that fits is the default
@@ -57,6 +57,8 @@ const u = (x) => `${x >>> 0}u`;
 
 // ms, closer completions get reported together
 const QUEUE_GRAIN = 0.1;
+// the composited image. halves so it isn't quantised before the room's upscale and grade
+const IMAGE_FORMAT = 'rgba16float';
 // passes a frame's uniforms have room for, past that it submits early and starts over
 const RING = 64;
 
@@ -424,6 +426,21 @@ fn srgb(c: vec3f) -> vec3f {
 `;
 }
 
+// copies the composited image onto a canvas, the same size (snapshots) or half (the glass's copy,
+// each pixel the average of 4)
+const BLIT_WGSL = /* wgsl */ `
+@group(0) @binding(0) var image: texture_2d<f32>;
+@group(0) @binding(1) var smp: sampler;
+struct Out { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
+@vertex fn vs(@builtin(vertex_index) i: u32) -> Out {
+  let p = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0))[i];
+  return Out(vec4f(p, 0.0, 1.0), vec2f(0.5 + 0.5 * p.x, 0.5 - 0.5 * p.y));
+}
+@fragment fn fs(o: Out) -> @location(0) vec4f {
+  return vec4f(textureSampleLevel(image, smp, o.uv, 0.0).rgb, 1.0);
+}
+`;
+
 // folds one evaluation into a light's full res image. pixels it evaluated are copied, the rest
 // move toward the evaluation upsampled by alpha, so at rest every pixel ends up evaluated and a
 // moving light keeps what it evaluated recently. pixels outside keep have nothing to keep yet
@@ -519,6 +536,7 @@ export class RelightGPUEngine extends RelightBase {
     this.backend = 'webgpu';
     this.buffers = [];
     this.canvas = new OffscreenCanvas(this.W, this.H);
+    this.halfCanvas = new OffscreenCanvas(this.W >> 1, this.H >> 1);
   }
 
   async build({ scene, layers, grid, gridOff, aux, pos }, { kernel = null, images = RESOLVED } = {}) {
@@ -603,6 +621,7 @@ export class RelightGPUEngine extends RelightBase {
     this.shapes = { W, H, WD, NH, PIXIN, XW, geo, mul, off, half };
     const module = (code, label) => dev.createShaderModule({ code, label });
     const compositeModule = module(compositeWGSL({ W, H, mul }), 'relight composite');
+    const blitModule = module(BLIT_WGSL, 'relight blit');
     this.format = navigator.gpu.getPreferredCanvasFormat();
     // uniforms sit in a ring at dynamic offsets so a frame's passes don't overwrite each other's
     const S = GPUShaderStage;
@@ -622,7 +641,7 @@ export class RelightGPUEngine extends RelightBase {
     this.fwdLayout = layout(S.COMPUTE, [R, R, R, 'ring', 'storage', R]);
     const compositeLayout = layout(S.FRAGMENT, ['ring', R, R, ...(mul ? [R] : [])]);
     const resolveLayout = layout(S.COMPUTE, ['ring', 'storage', R]);
-    const [pre, forward, composite, resolve] = await Promise.all([
+    const [pre, forward, composite, resolve, blit] = await Promise.all([
       dev.createComputePipelineAsync({
         layout: 'auto',
         compute: {
@@ -648,12 +667,18 @@ export class RelightGPUEngine extends RelightBase {
       dev.createRenderPipelineAsync({
         layout: compositeLayout,
         vertex: { module: compositeModule, entryPoint: 'vs' },
-        fragment: { module: compositeModule, entryPoint: 'fs', targets: [{ format: this.format }] },
+        fragment: { module: compositeModule, entryPoint: 'fs', targets: [{ format: IMAGE_FORMAT }] },
         primitive: { topology: 'triangle-list' },
       }),
       dev.createComputePipelineAsync({
         layout: resolveLayout,
         compute: { module: module(resolveWGSL({ W, H, mul }), 'relight resolve'), entryPoint: 'main' },
+      }),
+      dev.createRenderPipelineAsync({
+        layout: 'auto',
+        vertex: { module: blitModule, entryPoint: 'vs' },
+        fragment: { module: blitModule, entryPoint: 'fs', targets: [{ format: this.format }] },
+        primitive: { topology: 'triangle-list' },
       }),
     ]);
 
@@ -699,6 +724,22 @@ export class RelightGPUEngine extends RelightBase {
     this.resF32 = new Float32Array(this.resU32.buffer);
     this.resolvePipeline = resolve;
     this.resolveGroup = bind(resolve, [ring(80), outBuf, posBuf]);
+    // the composite lands here, the room layer draws from it on this device. pixels outside the
+    // view keep an older composite, the backdrop composites again before they show
+    this.image = dev.createTexture({
+      size: [W, H],
+      format: IMAGE_FORMAT,
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+    });
+    this.imageView = this.image.createView();
+    this.blitPipeline = blit;
+    this.blitGroup = dev.createBindGroup({
+      layout: blit.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: this.imageView },
+        { binding: 1, resource: dev.createSampler({ magFilter: 'linear', minFilter: 'linear' }) },
+      ],
+    });
 
     if (dev.features.has('timestamp-query')) {
       this.querySet = dev.createQuerySet({ type: 'timestamp', count: 2 });
@@ -724,6 +765,7 @@ export class RelightGPUEngine extends RelightBase {
     inputs.forEach((b) => b.destroy());
 
     this.context = this.canvas.getContext('webgpu');
+    this.halfContext = this.halfCanvas.getContext('webgpu');
     this.configure();
   }
 
@@ -786,16 +828,18 @@ export class RelightGPUEngine extends RelightBase {
   }
 
   configure() {
-    this.context.configure({ device: this.device, format: this.format, alphaMode: 'opaque' });
+    [this.context, this.halfContext].forEach((c) =>
+      c.configure({ device: this.device, format: this.format, alphaMode: 'opaque' })
+    );
   }
 
   // firefox forgets the canvas config every snapshot so reconfigure each time
-  currentTexture() {
+  currentTexture(context = this.context) {
     try {
-      return this.context.getCurrentTexture();
+      return context.getCurrentTexture();
     } catch (error) {
       this.configure();
-      return this.context.getCurrentTexture();
+      return context.getCurrentTexture();
     }
   }
 
@@ -1008,9 +1052,7 @@ export class RelightGPUEngine extends RelightBase {
     }
     const at = this.stage(F);
     const pass = this.encoder().beginRenderPass({
-      colorAttachments: [
-        { view: this.currentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] },
-      ],
+      colorAttachments: [{ view: this.imageView, loadOp: 'load', storeOp: 'store' }],
     });
     // rows are bottom first here, the rect's are from the top
     const [x0, x1, y0, y1] = this.drawRect(view);
@@ -1022,14 +1064,36 @@ export class RelightGPUEngine extends RelightBase {
     this.commit();
   }
 
+  copyImage(context) {
+    const pass = this.encoder().beginRenderPass({
+      colorAttachments: [{ view: this.currentTexture(context).createView(), loadOp: 'clear', storeOp: 'store' }],
+    });
+    pass.setPipeline(this.blitPipeline);
+    pass.setBindGroup(0, this.blitGroup);
+    pass.draw(3);
+    pass.end();
+  }
+
   snapshot() {
+    this.copyImage(this.context);
     this.flush();
     return this.canvas.transferToImageBitmap();
+  }
+
+  // half size for the three.js copy the glass bends, it's blurred there anyway. handed over once
+  // the frame's submitted
+  halfImage(done) {
+    this.copyImage(this.halfContext);
+    this.afterSubmit.push(() => done(this.halfCanvas.transferToImageBitmap()));
+    this.commit();
   }
 
   dispose() {
     this.enc = null;
     this.afterSubmit = [];
+    this.image?.destroy();
+    this.image = null;
+    this.halfContext?.unconfigure();
     this.context?.unconfigure();
     this.querySet?.destroy();
     this.buffers.forEach((b) => b.destroy());

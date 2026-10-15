@@ -198,7 +198,10 @@ for (const profileName of list(args.profiles)) {
           console.log(
             `  frame s${stride}: ${f.total.toFixed(2)} ms = network ${f.evaluate.toFixed(2)} + resolve ${f.resolve.toFixed(2)}` +
               ` + composite ${f.composite.toFixed(2)} + present ${f.present.toFixed(2)} (snapshot ${f.snapshot.toFixed(2)}, upload ${f.upload.toFixed(2)})` +
-              (f.oneSubmit != null ? `; network + resolve + composite in one submit ${f.oneSubmit.toFixed(2)}` : '')
+              (f.oneSubmit != null ? `; network + resolve + composite in one submit ${f.oneSubmit.toFixed(2)}` : '') +
+              (f.direct != null
+                ? `\n    presented on the engine's device: ${f.direct.toFixed(2)} ms (glass copy ${f.glass.toFixed(2)}, room ${f.room.toFixed(2)})`
+                : '')
           );
         }
       }

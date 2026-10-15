@@ -4,6 +4,7 @@
 import { createRelightEngine, loadRoom } from './prepare';
 import { phaseOrder } from './RelightBase';
 import { requestRelightDevice } from './RelightGPU';
+import { GPURoomLayer } from './roomLayer';
 
 const BAND_BYTES = 32 << 20;
 // ms a frame stage's batch should take at least, and the most runs one gets
@@ -14,6 +15,8 @@ let engine = null;
 let device = null;
 // stands in for the room layer, which takes each image into its own webgl context
 let presenter = null;
+// the webgpu engine's own room layer, drawn on this page like the backdrop's
+let room = null;
 
 function finish() {
   if (engine.backend === 'webgpu') {
@@ -42,6 +45,8 @@ function fence(gl) {
 }
 
 function close() {
+  room?.dispose();
+  room = null;
   engine?.dispose();
   engine = null;
 }
@@ -127,7 +132,10 @@ async function accumulate({ from, to, frames = 16, stride = 8, trust = 0.06, acc
 // a frame the way the backdrop runs a moving light, a stage at a time: the network, folding it
 // into the light's image, the composite, and handing the image to another webgl context.
 // snapshot and present are timed with a composite in front (they need a new image), taken off after.
-// composites the view of the walked-in box on this screen like the backdrop, null for the whole image
+// composites the view of the walked-in box on this screen like the backdrop, null for the whole image.
+// webgpu presents differently now: glass is the half size copy three.js takes for the glass (one
+// every 50ms at most, not every frame), room the room layer drawing from the engine's image on its
+// own device. direct totals that way, with a glass copy every frame
 async function frame({ stride = 4, n = 4, batches = 3, light = midLight(), view = walkedIn() } = {}) {
   const all = [0, engine.rows(stride), 0, engine.cols(stride)];
   const order = phaseOrder(stride);
@@ -151,6 +159,16 @@ async function frame({ stride = 4, n = 4, batches = 3, light = midLight(), view 
       engine.composite(shown, 1, view);
       engine.snapshot().close?.();
     },
+    ...(engine.backend === 'webgpu' && {
+      glass: () => {
+        engine.composite(shown, 1, view);
+        engine.halfImage(present);
+      },
+      room: () => {
+        engine.composite(shown, 1, view);
+        drawRoom();
+      },
+    }),
     present: () => {
       engine.composite(shown, 1, view);
       present(engine.snapshot());
@@ -183,7 +201,7 @@ async function frame({ stride = 4, n = 4, batches = 3, light = midLight(), view 
   const idle = { engine: await batch(() => {}, false, 0), both: await batch(() => {}, true, 0) };
   const ms = {};
   for (const [name, run] of Object.entries(stages)) {
-    const other = name === 'present';
+    const other = name === 'present' || name === 'glass';
     const empty = idle[other ? 'both' : 'engine'];
     let count = n;
     let took = await batch(run, other, count);
@@ -198,7 +216,36 @@ async function frame({ stride = 4, n = 4, batches = 3, light = midLight(), view 
   ms.snapshot = Math.max(0, ms.snapshot - ms.composite);
   ms.present = ms.snapshot + ms.upload;
   ms.total = ms.evaluate + ms.resolve + ms.composite + ms.present;
+  if (ms.glass != null) {
+    ms.glass = Math.max(0, ms.glass - ms.composite);
+    ms.room = Math.max(0, ms.room - ms.composite);
+    ms.direct = ms.evaluate + ms.resolve + ms.composite + ms.glass + ms.room;
+  }
   return ms;
+}
+
+// the walked-in room at this page's size and dpr
+function drawRoom() {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  if (!room) {
+    const host = document.body.appendChild(document.createElement('div'));
+    room = new GPURoomLayer(host, engine);
+    const size = Math.max(vw, vh) * 1.04;
+    const value = (x, y = 0, z = 0, w = 0) => ({ value: { x, y, z, w } });
+    room.uniforms = {
+      texSize: value(1, 1),
+      box: value(vw / 2 - size / 2, vh / 2 - size / 2, size, 0.03),
+      ready: { value: 1 },
+      dim: { value: 0.4 },
+      saturation: { value: 0.55 },
+      hotKeep: { value: 0.35 },
+      glowAt: value(vw * 0.4, vh * 0.4, 30),
+      glowColor: value(0.4, 0.3, 0.2),
+    };
+  }
+  room.setImage();
+  room.draw(room.uniforms, vw, vh, Math.min(window.devicePixelRatio || 1, 2));
 }
 
 // RelightBackdrop's box once walked in (max side * 1.04, centred) and its view margin

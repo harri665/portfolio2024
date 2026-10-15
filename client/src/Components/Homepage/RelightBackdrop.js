@@ -33,7 +33,7 @@ import {
 } from './relight/prepare';
 import { requestRelightDevice } from './relight/RelightGPU';
 import { NO_PHASE, RESOLVED, phaseOrder } from './relight/RelightBase';
-import { ROOM_FRAGMENT, RoomLayer } from './relight/roomLayer';
+import { GPURoomLayer, ROOM_FRAGMENT, RoomLayer } from './relight/roomLayer';
 import { reportRelight } from './relight/report';
 import { setRelightStatus } from './relight/status';
 import useCardLights, { CARD_SELECTOR } from './useCardLights';
@@ -82,6 +82,9 @@ const REPORT_AFTER = 10;
 // drawn at the canvas's dpr (1 on phones) it got upscaled twice and looked
 // a third of its resolution on a 3x phone
 const ROOM_MAX_DPR = 2;
+// s between the copies three.js takes for the glass on webgpu. a copy crosses contexts and cost
+// about as much as the whole frame's network at stride 8, and the glass blurs it anyway
+const GLASS_EVERY = 0.05;
 
 export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
   const renderer = useThree((state) => state.gl);
@@ -111,6 +114,11 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
       engine: null,
       built: null,
       layer: null,
+      host: null,
+      gpuLayerFailed: false,
+      // the glass's copy is behind the room since this time
+      glassStale: false,
+      glassAt: -Infinity,
       device: null,
       notGPU: null,
       publishedAt: -Infinity,
@@ -232,6 +240,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
     if (!host) {
       return undefined;
     }
+    state.host = host;
     try {
       state.layer = new RoomLayer(host);
     } catch (error) {
@@ -241,6 +250,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
     return () => {
       state.layer?.dispose();
       state.layer = null;
+      state.host = null;
     };
   }, [renderer]);
 
@@ -441,6 +451,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
       return;
     }
     engine.pollTiming();
+    fitLayer(state);
     if (!engine.timing.pending) {
       state.benching = false;
     }
@@ -566,7 +577,12 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
     if (dirty || !covers(state.drawn, view)) {
       state.drawn = grow(view, dirty ? VIEW_MARGIN : VIEW_GROW);
       engine.composite([shown(key, KEY.intensity * keyLevel), shown(fill, FILL.intensity * fillLevel)], 1, state.drawn);
-      state.built.present(state.layer);
+      state.glassStale = state.built.present(state.layer, uniforms.texSize.value);
+    }
+    if (state.glassStale && now - state.glassAt >= GLASS_EVERY) {
+      state.glassStale = false;
+      state.glassAt = now;
+      state.built.copyGlass(uniforms.texSize.value);
     }
 
     // soft bloom, the tonemap flattens the key light otherwise
@@ -685,6 +701,34 @@ async function buildEngine(data, device, bandBytes, signal, kernel) {
   return withTexture(await createRelightEngine(data, device, bandBytes, signal, kernel));
 }
 
+// on webgpu the room layer draws on the engine's device straight from its image, so nothing
+// crosses contexts. the webgl engine still hands over an ImageBitmap
+function fitLayer(state) {
+  const { engine, layer, host } = state;
+  if (!layer || !host) {
+    return;
+  }
+  const gpu = engine.backend === 'webgpu' && !state.gpuLayerFailed;
+  if (gpu && layer.device === engine.device) {
+    layer.use(engine);
+    return;
+  }
+  if (!gpu && !layer.device) {
+    return;
+  }
+  let next;
+  try {
+    next = gpu ? new GPURoomLayer(host, engine) : new RoomLayer(host);
+  } catch (error) {
+    console.warn('Relight backdrop keeps its room layer:', error);
+    state.gpuLayerFailed = true;
+    return;
+  }
+  // swapped in the frame it draws, so there's no frame without a room
+  layer.dispose();
+  state.layer = next;
+}
+
 function withTexture({ engine, notGPU }) {
   // images come bottom row first so don't flip
   const texture = new THREE.Texture();
@@ -697,20 +741,33 @@ function withTexture({ engine, notGPU }) {
       image.close();
     }
   };
+  const take = (image, texSize) => {
+    const previous = texture.image;
+    texture.image = image;
+    texture.needsUpdate = true;
+    texSize.set(image.width, image.height);
+    if (previous !== image) {
+      release(previous);
+    }
+  };
   return {
     engine,
     notGPU,
     texture,
-    present: (layer) => {
-      const previous = texture.image;
-      const image = engine.snapshot();
-      texture.image = image;
-      texture.needsUpdate = true;
-      layer?.setImage(image);
-      if (previous !== image) {
-        release(previous);
+    // true if the three.js copy still needs taking (copyGlass), the webgpu layer draws from the
+    // engine's own image
+    present: (layer, texSize) => {
+      if (layer?.device && layer.device === engine.device) {
+        layer.setImage();
+        return true;
       }
+      const image = engine.snapshot();
+      take(image, texSize);
+      layer?.setImage(image);
+      return false;
     },
+    // the three.js copy only shows through the glass, blurred, so half size and at a lower rate
+    copyGlass: (texSize) => engine.halfImage((image) => take(image, texSize)),
     dispose: () => {
       release(texture.image);
       engine.dispose();
@@ -745,6 +802,7 @@ function install(state, built, uniforms) {
   }));
   state.targetsAt = -Infinity;
   state.lastLevels = null;
+  state.glassStale = false;
   state.drawn = null;
 }
 

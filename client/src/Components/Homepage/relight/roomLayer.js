@@ -1,3 +1,5 @@
+/* global GPUBufferUsage */
+
 // the room on its own fixed canvas. in the three.js canvas it rode up with every scroll
 // and snapped back (browser scrolls on its own thread), so that canvas only draws the glass now
 
@@ -75,6 +77,87 @@ export const ROOM_FRAGMENT = `
   }
 `;
 
+// ROOM_FRAGMENT for the webgpu layer, which draws straight from the engine's image on its own
+// device. uniforms come in UNIFORMS order, then the canvas height
+const ROOM_WGSL = /* wgsl */ `
+@group(0) @binding(0) var<uniform> room: array<vec4f, 5>;
+@group(0) @binding(1) var tRelight: texture_2d<f32>;
+@group(0) @binding(2) var smp: sampler;
+fn at(i: u32) -> f32 { return room[i / 4u][i % 4u]; }
+fn tex(uv: vec2f) -> vec3f { return textureSampleLevel(tRelight, smp, uv, 0.0).rgb; }
+
+fn sharpSample(uv: vec2f, texSize: vec2f) -> vec3f {
+  let pos = uv * texSize;
+  let c = floor(pos - 0.5) + 0.5;
+  let f = pos - c;
+  let w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+  let w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+  let w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+  let w3 = f * f * (-0.5 + 0.5 * f);
+  let w12 = w1 + w2;
+  let t0 = (c - 1.0) / texSize;
+  let t3 = (c + 2.0) / texSize;
+  let t12 = (c + w2 / w12) / texSize;
+  let sum = tex(vec2f(t12.x, t0.y)) * (w12.x * w0.y)
+    + tex(vec2f(t0.x, t12.y)) * (w0.x * w12.y)
+    + tex(t12) * (w12.x * w12.y)
+    + tex(vec2f(t3.x, t12.y)) * (w3.x * w12.y)
+    + tex(vec2f(t12.x, t3.y)) * (w12.x * w3.y);
+  let weight = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;
+  let a = c / texSize;
+  let b = (c + 1.0) / texSize;
+  let p00 = tex(a);
+  let p10 = tex(vec2f(b.x, a.y));
+  let p01 = tex(vec2f(a.x, b.y));
+  let p11 = tex(b);
+  return clamp(sum / weight, min(min(p00, p10), min(p01, p11)), max(max(p00, p10), max(p01, p11)));
+}
+
+fn sdRoundBox(p: vec2f, halfSize: vec2f, r: f32) -> f32 {
+  let q = abs(p) - halfSize + r;
+  return length(max(q, vec2f(0.0))) + min(max(q.x, q.y), 0.0) - r;
+}
+
+@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
+  let p = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));
+  return vec4f(p[i], 0.0, 1.0);
+}
+@fragment fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+  let texSize = vec2f(at(0u), at(1u));
+  let dpr = at(2u);
+  let viewport = vec2f(at(3u), at(4u));
+  let box = vec4f(at(5u), at(6u), at(7u), at(8u));
+  let ready = at(9u);
+  let glowAt = vec3f(at(13u), at(14u), at(15u));
+  let glowColor = vec3f(at(16u), at(17u), at(18u));
+  // gl_FragCoord, rows bottom up
+  let frag = vec2f(pos.x, at(19u) - pos.y);
+  let px = vec2f(frag.x, viewport.y * dpr - frag.y) / dpr;
+  let base = vec3f(0.031, 0.035, 0.047);
+  var color = base;
+
+  if (ready > 0.0) {
+    let uv = (px - box.xy) / box.z;
+    let d = sdRoundBox(uv - 0.5, vec2f(0.5), 0.05);
+    let mask = 1.0 - smoothstep(-box.w, 0.0, d);
+    if (mask > 0.0) {
+      var image = sharpSample(vec2f(uv.x, 1.0 - uv.y), texSize);
+      let luma = dot(image, vec3f(0.2126, 0.7152, 0.0722));
+      let hot = smoothstep(0.82, 0.97, luma) * at(12u);
+      image = mix(mix(vec3f(luma), image, at(11u)) * at(10u), image, hot);
+      color = mix(base, max(image, base), mask * ready);
+    }
+
+    let r = length(px - glowAt.xy);
+    let reach = glowAt.z * 2.5 + 26.0;
+    color += glowColor * exp(-r / reach) * smoothstep(glowAt.z * 0.6, glowAt.z * 1.6, r) * ready;
+  }
+
+  color += (fract(sin(dot(frag, vec2f(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
+  return vec4f(color, 1.0);
+}
+`;
+
 const VERTEX = `
   attribute vec2 position;
   void main() {
@@ -97,21 +180,61 @@ const UNIFORMS = [
 const FLOATS = UNIFORMS.reduce((n, [, size]) => n + size, 0);
 const COMPONENTS = ['x', 'y', 'z', 'w'];
 
+function layerCanvas() {
+  const canvas = document.createElement('canvas');
+  canvas.setAttribute('aria-hidden', 'true');
+  Object.assign(canvas.style, {
+    position: 'fixed',
+    left: '0',
+    top: '0',
+    width: '100%',
+    // large viewport on phones so it doesn't resize when the toolbar collapses
+    height: '100vh',
+    pointerEvents: 'none',
+    zIndex: '0',
+  });
+  canvas.style.height = '100lvh';
+  return canvas;
+}
+
+// the uniforms in UNIFORMS order
+function gather(values, uniforms, width, height, dpr) {
+  let o = 0;
+  UNIFORMS.forEach(([name, size]) => {
+    const v = name === 'dpr' ? dpr : name === 'viewport' ? null : uniforms[name].value;
+    if (name === 'viewport') {
+      values[o] = width;
+      values[o + 1] = height;
+    } else if (size === 1) {
+      values[o] = v;
+    } else {
+      for (let c = 0; c < size; c += 1) {
+        values[o + c] = v[COMPONENTS[c]];
+      }
+    }
+    o += size;
+  });
+}
+
+function same(a, b) {
+  return a.every((v, i) => v === b[i]);
+}
+
+// canvas size for the layer, true if it changed
+function fit(canvas, width, height, dpr) {
+  const w = Math.max(1, Math.round(width * dpr));
+  const h = Math.max(1, Math.round(height * dpr));
+  if (canvas.width === w && canvas.height === h) {
+    return false;
+  }
+  canvas.width = w;
+  canvas.height = h;
+  return true;
+}
+
 export class RoomLayer {
   constructor(before) {
-    const canvas = document.createElement('canvas');
-    canvas.setAttribute('aria-hidden', 'true');
-    Object.assign(canvas.style, {
-      position: 'fixed',
-      left: '0',
-      top: '0',
-      width: '100%',
-      // large viewport on phones so it doesn't resize when the toolbar collapses
-      height: '100vh',
-      pointerEvents: 'none',
-      zIndex: '0',
-    });
-    canvas.style.height = '100lvh';
+    const canvas = layerCanvas();
     const options = { alpha: false, antialias: false, depth: false, stencil: false };
     const gl = canvas.getContext('webgl2', options) || canvas.getContext('webgl', options);
     if (!gl) {
@@ -174,39 +297,17 @@ export class RoomLayer {
   // skipped if nothing changed, the canvas keeps its last frame
   draw(uniforms, width, height, dpr) {
     const gl = this.gl;
-    const w = Math.max(1, Math.round(width * dpr));
-    const h = Math.max(1, Math.round(height * dpr));
-    if (this.canvas.width !== w || this.canvas.height !== h) {
-      this.canvas.width = w;
-      this.canvas.height = h;
+    if (fit(this.canvas, width, height, dpr)) {
       this.drawn = false;
     }
     const { values, drawnValues } = this;
-    let o = 0;
-    UNIFORMS.forEach(([name, size]) => {
-      const v = name === 'dpr' ? dpr : name === 'viewport' ? null : uniforms[name].value;
-      if (name === 'viewport') {
-        values[o] = width;
-        values[o + 1] = height;
-      } else if (size === 1) {
-        values[o] = v;
-      } else {
-        for (let c = 0; c < size; c += 1) {
-          values[o + c] = v[COMPONENTS[c]];
-        }
-      }
-      o += size;
-    });
-    let same = this.drawn;
-    for (let i = 0; same && i < FLOATS; i += 1) {
-      same = values[i] === drawnValues[i];
-    }
-    if (same) {
+    gather(values, uniforms, width, height, dpr);
+    if (this.drawn && same(values, drawnValues)) {
       return;
     }
     this.drawn = true;
     drawnValues.set(values);
-    o = 0;
+    let o = 0;
     UNIFORMS.forEach(([, size], i) => {
       const at = this.locations[i];
       const v = values.subarray(o, o + size);
@@ -217,12 +318,116 @@ export class RoomLayer {
       }
       o += size;
     });
-    gl.viewport(0, 0, w, h);
+    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
   dispose() {
     this.gl.getExtension('WEBGL_lose_context')?.loseContext();
+    this.canvas.remove();
+  }
+}
+
+// the room on a webgpu canvas on the engine's device. it upscales the engine's image in the same
+// submit as the composite. the webgl layer takes an ImageBitmap of it into another context each
+// frame, which took longer than the network at the strides phones run
+export class GPURoomLayer {
+  constructor(before, engine) {
+    const canvas = layerCanvas();
+    const context = canvas.getContext('webgpu');
+    if (!context) {
+      throw new Error('no WebGPU canvas');
+    }
+    const dev = engine.device;
+    this.canvas = canvas;
+    this.context = context;
+    this.device = dev;
+    this.format = navigator.gpu.getPreferredCanvasFormat();
+    this.configure();
+    const module = dev.createShaderModule({ code: ROOM_WGSL, label: 'relight room' });
+    this.pipeline = dev.createRenderPipeline({
+      layout: 'auto',
+      vertex: { module, entryPoint: 'vs' },
+      fragment: { module, entryPoint: 'fs', targets: [{ format: this.format }] },
+      primitive: { topology: 'triangle-list' },
+    });
+    this.uniformBuf = dev.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.sampler = dev.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+    this.values = new Float32Array(20);
+    this.drawnValues = new Float32Array(20);
+    this.drawn = false;
+    this.engine = null;
+    this.image = null;
+    this.use(engine);
+    before.parentNode.insertBefore(canvas, before);
+  }
+
+  configure() {
+    this.context.configure({ device: this.device, format: this.format, alphaMode: 'opaque' });
+  }
+
+  // an upgrade brings a new engine on the same device
+  use(engine) {
+    if (engine.image === this.image) {
+      return;
+    }
+    this.engine = engine;
+    this.image = engine.image;
+    this.group = this.device.createBindGroup({
+      layout: this.pipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: this.uniformBuf } },
+        { binding: 1, resource: engine.imageView },
+        { binding: 2, resource: this.sampler },
+      ],
+    });
+    this.drawn = false;
+  }
+
+  setImage() {
+    this.drawn = false;
+  }
+
+  // skipped if nothing changed, the canvas keeps its last frame. goes in the engine's frame
+  draw(uniforms, width, height, dpr) {
+    const { engine, values, drawnValues } = this;
+    // its engine was disposed
+    if (!this.image || engine.image !== this.image) {
+      return;
+    }
+    if (fit(this.canvas, width, height, dpr)) {
+      this.drawn = false;
+    }
+    gather(values, uniforms, width, height, dpr);
+    values[0] = engine.W;
+    values[1] = engine.H;
+    values[19] = this.canvas.height;
+    if (this.drawn && same(values, drawnValues)) {
+      return;
+    }
+    this.drawn = true;
+    drawnValues.set(values);
+    this.device.queue.writeBuffer(this.uniformBuf, 0, values);
+    let texture;
+    try {
+      texture = this.context.getCurrentTexture();
+    } catch (error) {
+      this.configure();
+      texture = this.context.getCurrentTexture();
+    }
+    const pass = engine.encoder().beginRenderPass({
+      colorAttachments: [{ view: texture.createView(), loadOp: 'clear', storeOp: 'store' }],
+    });
+    pass.setPipeline(this.pipeline);
+    pass.setBindGroup(0, this.group);
+    pass.draw(3);
+    pass.end();
+    engine.commit();
+  }
+
+  dispose() {
+    this.context.unconfigure();
+    this.uniformBuf.destroy();
     this.canvas.remove();
   }
 }
