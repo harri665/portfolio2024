@@ -105,6 +105,14 @@ fn geoFeatures(x: vec4f, n: vec3f, lc: vec4f) -> Geo {
 }
 `;
 
+// pixel positions (+ camera distance) and normals in separate arrays of halves, so the
+// bilateral taps, which only want positions, read 8 bytes a pixel instead of 16 of every 32.
+// halved positions move the image by 1/255 at most and don't change the PSNR
+const POS_WGSL = /* wgsl */ `
+fn posAt(p: u32) -> vec4f { let q = ppos[p]; return vec4f(unpack2x16float(q.x), unpack2x16float(q.y)); }`;
+const NRM_WGSL = /* wgsl */ `
+fn nrmAt(p: u32) -> vec3f { let n = pnrm[p]; return vec3f(unpack2x16float(n.x), unpack2x16float(n.y).x); }`;
+
 function precomputeWGSL({ W, H, levels, feats, gridRes, gridOff, auxDim, XW, posRange, camO }) {
   const arr = (a) => `array<u32, ${a.length}>(${a.map(u).join(', ')})`;
   const f = (x) => `${x}`.includes('.') || `${x}`.includes('e') ? `${x}` : `${x}.0`;
@@ -113,7 +121,8 @@ function precomputeWGSL({ W, H, levels, feats, gridRes, gridOff, auxDim, XW, pos
 @group(0) @binding(1) var<storage, read> auxB: array<u32>;
 @group(0) @binding(2) var<storage, read> posB: array<u32>;
 @group(0) @binding(3) var<storage, read_write> X: array<u32>;
-@group(0) @binding(4) var<storage, read_write> pgeo: array<vec4f>;
+@group(0) @binding(4) var<storage, read_write> ppos: array<vec2u>;
+@group(0) @binding(5) var<storage, read_write> pnrm: array<vec2u>;
 var<private> RES: array<u32, ${levels}> = ${arr(gridRes)};
 var<private> GOFF: array<u32, ${levels}> = ${arr(gridOff)};
 const W = ${u(W)}; const H = ${u(H)}; const F = ${u(feats)}; const NP = ${u(W * H)};
@@ -158,8 +167,8 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     let w = POS_LO + (vec3f(f32(q0 & 0xffffu), f32(q0 >> 16u), f32(q1 & 0xffffu)) - 1.0) * POS_STEP;
     g = vec4f(w, length(w - CAM_O));
   }
-  pgeo[2u * p] = g;
-  pgeo[2u * p + 1u] = vec4f(auxAt(p, 3u), auxAt(p, 4u), auxAt(p, 5u), 0.0);
+  ppos[p] = vec2u(pack2x16float(g.xy), pack2x16float(g.zw));
+  pnrm[p] = vec2u(pack2x16float(vec2f(auxAt(p, 3u), auxAt(p, 4u))), pack2x16float(vec2f(auxAt(p, 5u), 0.0)));
 }
 `;
 }
@@ -191,13 +200,16 @@ struct Fwd {
 };
 @group(0) @binding(0) var<storage, read> Wv: array<${V}>;
 @group(0) @binding(1) var<storage, read> X: array<u32>;
-@group(0) @binding(2) var<storage, read> pgeo: array<vec4f>;
+@group(0) @binding(2) var<storage, read> ppos: array<vec2u>;
 @group(0) @binding(3) var<uniform> fu: Fwd;
 @group(0) @binding(4) var<storage, read_write> outB: array<u32>;
+@group(0) @binding(5) var<storage, read> pnrm: array<vec2u>;
 var<workgroup> act: array<${V}, ${TP * CG}>;
 var<workgroup> pf: array<vec4f, ${2 * TP}>;
 var<workgroup> res: array<f32, ${TP * NO}>;
 ${GEO_WGSL}
+${POS_WGSL}
+${NRM_WGSL}
 // px, py offset the grid so each frame can take different pixels. the last row/column can land
 // off the image, they're read clamped and the resolve doesn't use them
 fn pixelOf(i: u32) -> u32 {
@@ -239,7 +251,7 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) t: u3
     var g: Geo;
     if (base + t < fu.i1) {
       let p = pixelOf(base + t);
-      g = geoFeatures(pgeo[2u * p], pgeo[2u * p + 1u].xyz, fu.lc);
+      g = geoFeatures(posAt(p), nrmAt(p), fu.lc);
     }
     pf[2u * t] = g.f0; pf[2u * t + 1u] = g.f1;
   }
@@ -308,9 +320,12 @@ struct Frame {
 };
 @group(0) @binding(0) var<uniform> frame: Frame;
 @group(0) @binding(1) var<storage, read> outB: array<u32>;
-@group(0) @binding(2) var<storage, read> pgeo: array<vec4f>;
+@group(0) @binding(2) var<storage, read> ppos: array<vec2u>;
+${mul ? '@group(0) @binding(3) var<storage, read> pnrm: array<vec2u>;' : ''}
 const W = ${u(W)}; const H = ${u(H)}; const NP = ${u(W * H)};
 ${GEO_WGSL}
+${POS_WGSL}
+${mul ? NRM_WGSL : ''}
 struct Net { a: vec3f, b: vec3f };
 
 fn camDir(uv: vec2f) -> vec3f {
@@ -321,7 +336,7 @@ fn camDir(uv: vec2f) -> vec3f {
 fn directCov(p: u32, l: u32) -> f32 {
   let L = frame.lights[l];
   let c = L.pr.xyz; let r = L.pr.w;
-  let g = pgeo[2u * p];
+  let g = posAt(p);
   let surf = select(1e9, g.w, g.w > 0.0);
   let oc = frame.camO.xyz - c;
   let px = f32(p % W); let py = f32(p / W);
@@ -356,7 +371,7 @@ fn outAt(i: u32) -> Net {
 // computed per pixel so a preview keeps the light's shape, not just its colour
 fn lit(n: Net, p: u32, light: vec4f) -> vec3f {
   ${mul
-    ? `let G = geoFeatures(pgeo[2u * p], pgeo[2u * p + 1u].xyz, light).f1.z;
+    ? `let G = geoFeatures(posAt(p), nrmAt(p), light).f1.z;
   return max(n.a * G + n.b, vec3f(0.0));`
     : 'return max(n.a, vec3f(0.0));'}
 }
@@ -368,13 +383,13 @@ fn netAt(slot: u32, s: u32, p: u32) -> Net {
   let x0 = min(u32(fx), cw - 1u); let y0 = min(u32(fy), ch - 1u);
   let x1 = min(x0 + 1u, cw - 1u); let y1 = min(y0 + 1u, ch - 1u);
   let tx = fx - f32(x0); let ty = fy - f32(y0);
-  let g = pgeo[2u * p];
+  let g = posAt(p);
   let sig = 1.5 * f32(s) * 2.0 * frame.tanxy.x / f32(W) * max(g.w, 1e-3);
   var acc = Net(vec3f(0.0), vec3f(0.0)); var ws = 0.0;
   for (var k = 0u; k < 4u; k++) {
     let cx = select(x0, x1, (k & 1u) == 1u); let cy = select(y0, y1, k >= 2u);
     let wb = select(1.0 - tx, tx, (k & 1u) == 1u) * select(1.0 - ty, ty, k >= 2u);
-    let q = pgeo[2u * (cy * s * W + cx * s)];
+    let q = posAt(cy * s * W + cx * s);
     let dq = q.xyz - g.xyz;
     var wgt = exp(-dot(dq, dq) / (2.0 * sig * sig));
     if ((q.w > 0.0) != (g.w > 0.0)) { wgt = 0.0; }
@@ -420,8 +435,9 @@ struct Res {
 };
 @group(0) @binding(0) var<uniform> ru: Res;
 @group(0) @binding(1) var<storage, read_write> outB: array<u32>;
-@group(0) @binding(2) var<storage, read> pgeo: array<vec4f>;
+@group(0) @binding(2) var<storage, read> ppos: array<vec2u>;
 const W = ${u(W)}; const H = ${u(H)}; const NP = ${u(W * H)};
+${POS_WGSL}
 
 fn load(i: u32, w: ptr<function, array<vec2f, ${NW}>>) {
   for (var k = 0u; k < ${u(NW)}; k++) { (*w)[k] = unpack2x16float(outB[${u(NW)} * i + k]); }
@@ -461,14 +477,14 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   let x0 = clamp(u32(fx), ru.c0, hx); let y0 = clamp(u32(fy), ru.r0, hy);
   let x1 = min(x0 + 1u, hx); let y1 = min(y0 + 1u, hy);
   let tx = clamp(fx - f32(x0), 0.0, 1.0); let ty = clamp(fy - f32(y0), 0.0, 1.0);
-  let g = pgeo[2u * p];
+  let g = posAt(p);
   let sig = ru.sig * f32(s) * max(g.w, 1e-3);
   var acc: array<vec2f, ${NW}>;
   var ws = 0.0;
   for (var k = 0u; k < 4u; k++) {
     let cx = select(x0, x1, (k & 1u) == 1u); let cy = select(y0, y1, k >= 2u);
     let wb = select(1.0 - tx, tx, (k & 1u) == 1u) * select(1.0 - ty, ty, k >= 2u);
-    let q = pgeo[2u * ((cy * s + ru.py) * W + cx * s + ru.px)];
+    let q = posAt((cy * s + ru.py) * W + cx * s + ru.px);
     let dq = q.xyz - g.xyz;
     var wgt = exp(-dot(dq, dq) / (2.0 * sig * sig));
     if ((q.w > 0.0) != (g.w > 0.0)) { wgt = 0.0; }
@@ -633,7 +649,8 @@ export class RelightGPUEngine extends RelightBase {
     };
     const wBuf = half ? buffer(P.byteLength / 2, U.STORAGE, toHalf(P)) : buffer(P.byteLength, U.STORAGE, P);
     const xBuf = buffer(NP * XW * 4, U.STORAGE);
-    const pgeoBuf = buffer(NP * 32, U.STORAGE);
+    const posBuf = buffer(NP * 8, U.STORAGE);
+    const nrmBuf = buffer(NP * 8, U.STORAGE);
     // network slots, then the full res images
     const outBuf = buffer((SLOTS - RESOLVED + images) * NP * wordsOf(mul) * 4, U.STORAGE);
     this.fwdBuf = buffer(48 + CG * 16, U.UNIFORM | U.COPY_DST);
@@ -646,14 +663,14 @@ export class RelightGPUEngine extends RelightBase {
         entries: list.map((b, i) => ({ binding: i, resource: { buffer: b } })),
       });
     this.compositePipeline = composite;
-    this.fwdBuffers = [wBuf, xBuf, pgeoBuf, this.fwdBuf, outBuf];
+    this.fwdBuffers = [wBuf, xBuf, posBuf, this.fwdBuf, outBuf, nrmBuf];
     this.setKernel(first, forward);
-    this.compositeGroup = bind(composite, [this.frameBuf, outBuf, pgeoBuf]);
+    this.compositeGroup = bind(composite, [this.frameBuf, outBuf, posBuf, ...(mul ? [nrmBuf] : [])]);
     this.resBuf = buffer(80, U.UNIFORM | U.COPY_DST);
     this.resU32 = new Uint32Array(20);
     this.resF32 = new Float32Array(this.resU32.buffer);
     this.resolvePipeline = resolve;
-    this.resolveGroup = bind(resolve, [this.resBuf, outBuf, pgeoBuf]);
+    this.resolveGroup = bind(resolve, [this.resBuf, outBuf, posBuf]);
 
     if (dev.features.has('timestamp-query')) {
       this.querySet = dev.createQuerySet({ type: 'timestamp', count: 2 });
@@ -671,7 +688,7 @@ export class RelightGPUEngine extends RelightBase {
     const enc = dev.createCommandEncoder();
     const pass = enc.beginComputePass();
     pass.setPipeline(pre);
-    pass.setBindGroup(0, bind(pre, [...inputs, xBuf, pgeoBuf]));
+    pass.setBindGroup(0, bind(pre, [...inputs, xBuf, posBuf, nrmBuf]));
     pass.dispatchWorkgroups(Math.ceil(NP / 64));
     pass.end();
     dev.queue.submit([enc.finish()]);
