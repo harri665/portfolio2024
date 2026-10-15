@@ -30,9 +30,13 @@ export const KERNELS = [
   { threads: 64, pixels: 8, double: true },
   { threads: 128, pixels: 4, double: true },
   { threads: 64, pixels: 16, double: true },
+  { threads: 64, pixels: 8, subgroup: true },
+  { threads: 64, pixels: 8, channels: 2, subgroup: true },
+  { threads: 32, pixels: 8, channels: 2, subgroup: true },
 ];
 // saved profiles hold these, one channel group keeps the old name
-export const kernelKey = (k) => `${k.threads}x${k.pixels}${k.channels > 1 ? `c${k.channels}` : ''}${k.double ? 'd' : ''}`;
+export const kernelKey = (k) =>
+  `${k.threads}x${k.pixels}${k.channels > 1 ? `c${k.channels}` : ''}${k.double ? 'd' : ''}${k.subgroup ? 's' : ''}`;
 
 // pixels a workgroup takes, CG / channels threads share each pixel
 const tileOf = (k, CG) => ((k.threads * (k.channels ?? 1)) / CG) * k.pixels;
@@ -59,7 +63,7 @@ export async function requestRelightDevice() {
     throw new Error('the browser offers no WebGPU adapter for this GPU');
   }
   const L = adapter.limits;
-  const features = ['timestamp-query', 'shader-f16'].filter((f) => adapter.features.has(f));
+  const features = ['timestamp-query', 'shader-f16', 'subgroups'].filter((f) => adapter.features.has(f));
   return adapter.requestDevice({
     requiredFeatures: features,
     requiredLimits: {
@@ -197,8 +201,10 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
 // activations are vec4s so a thread loads 4 inputs at once. one at a time, the workgroup
 // memory loads outnumbered the FMAs, which is what phone gpus are worst at. a thread with
 // C channel groups loads 4C weights and P activations a step for 16CP FMAs.
-// double writes each layer into the other half of act, so it needs no barrier before the writes
-function forwardWGSL({ W, H, WD, NH, PIXIN, XW, geo, mul, threads, pixels: P, channels: C = 1, double: DB, off, half }) {
+// double writes each layer into the other half of act, so it needs no barrier before the writes.
+// subgroup keeps a pixel's activations in its threads' registers between hidden layers and
+// shuffles them across, so those need no barriers or workgroup memory
+function forwardWGSL({ W, H, WD, NH, PIXIN, XW, geo, mul, threads, pixels: P, channels: C = 1, double: DB, subgroup: SG, off, half }) {
   const CG = WD / 4;
   // threads a pixel, a thread's channel groups are CGC apart so neighbours read neighbouring weights
   const CGC = CG / C;
@@ -230,6 +236,7 @@ function forwardWGSL({ W, H, WD, NH, PIXIN, XW, geo, mul, threads, pixels: P, ch
   const hq = (c, q) => (typeof q === 'number' ? `h[${c * P + q}]` : `h[${c ? `${u(c * P)} + ` : ''}${q}]`);
   return /* wgsl */ `
 ${half ? 'enable f16;' : ''}
+${SG ? 'enable subgroups;\nrequires subgroup_id;' : ''}
 struct Fwd {
   i0: u32, i1: u32, stride: u32, slot: u32, x0: u32, xw: u32, px: u32, py: u32,
   lc: vec4f, add: array<vec4f, ${CG}>,
@@ -268,10 +275,21 @@ fn outRow(o: u32, pl: u32) -> f32 {
 }
 
 @compute @workgroup_size(${threads})
-fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) t: u32) {
+fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) t: u32${
+    SG
+      ? `,
+    @builtin(subgroup_id) sgi: u32, @builtin(subgroup_size) sgs: u32, @builtin(subgroup_invocation_id) lane: u32`
+      : ''
+  }) {
   let base = fu.i0 + wg.x * ${u(TP)};
-  let pg = t / ${u(CGC)};
-  let cg = t % ${u(CGC)};
+  ${SG
+    ? `// a pixel's threads are lanes lane0.. of one subgroup, whichever threads the gpu put in it
+  let tt = sgi * sgs + lane;
+  let pg = tt / ${u(CGC)};
+  let cg = tt % ${u(CGC)};
+  let lane0 = lane - cg;`
+    : `let pg = t / ${u(CGC)};
+  let cg = t % ${u(CGC)};`}
 
   for (var e = t; e < ${u(TP * X4)}; e += ${u(threads)}) {
     let pl = e / ${u(X4)}; let q = e % ${u(X4)};
@@ -310,21 +328,37 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) t: u3
           + ${g(4)} * f1.x + ${g(5)} * f1.y;`;
     }).join('\n    ')}
   }` : ''}
-  ${DB ? '' : 'workgroupBarrier();'}
+  ${DB || SG ? '' : 'workgroupBarrier();'}
   for (var q = 0u; q < ${u(P)}; q++) {
     let live = base + pg * ${u(P)} + q < fu.i1;
-    ${CS.map(
-      (c) =>
-        `act[${DB ? `${u(A)} + ` : ''}r0 + q * ${u(CG)} + cg + ${u(c * CGC)}] = select(${V}(0.0), max(${hq(c, 'q')}, ${V}(0.0)), live);`
+    ${CS.map((c) =>
+      SG
+        ? `${hq(c, 'q')} = select(${V}(0.0), max(${hq(c, 'q')}, ${V}(0.0)), live);`
+        : `act[${DB ? `${u(A)} + ` : ''}r0 + q * ${u(CG)} + cg + ${u(c * CGC)}] = select(${V}(0.0), max(${hq(c, 'q')}, ${V}(0.0)), live);`
     ).join('\n    ')}
   }
-  workgroupBarrier();
+  ${SG ? '' : 'workgroupBarrier();'}
 
   for (var l = 0u; l < ${u(NH)}; l++) {
     let wo = ${u(off.HID)} + l * ${u(HSTRIDE)};
     ${CS.map((c) => `let bias${c} = Wv[wo + ${u(WD * CG + c * CGC)} + cg];`).join(' ')}
     ${CS.map((c) => Q.map((q) => `var a${c}_${q} = bias${c};`).join(' ')).join('\n    ')}
-    ${DB ? `let src = select(0u, ${u(A)}, (l & 1u) == 0u); let dst = ${u(A)} - src;` : ''}
+    ${SG
+      ? `${CS.map(
+          (s) => `for (var j = 0u; j < ${u(CGC)}; j++) {
+      let k = ${s ? `${u(s * CGC)} + ` : ''}j;
+      ${rows4(`wo + k * ${u(4 * CG)} + cg`)}
+      ${Q.map((q) => `let x${q} = subgroupShuffle(${hq(s, q)}, lane0 + j);`).join(' ')}
+      ${fma((c, q) => `a${c}_${q}`, (q) => `x${q}`)}
+    }`
+        ).join('\n    ')}
+    ${CS.map((c) => Q.map((q) => `${hq(c, q)} = max(a${c}_${q}, ${V}(0.0));`).join(' ')).join('\n    ')}
+  }
+  // the output rows take every channel of a pixel, they go through workgroup memory
+  workgroupBarrier();
+  ${CS.map((c) => Q.map((q) => `act[r0 + ${u(q * CG + c * CGC)} + cg] = ${hq(c, q)};`).join(' ')).join('\n  ')}
+  workgroupBarrier();`
+      : `${DB ? `let src = select(0u, ${u(A)}, (l & 1u) == 0u); let dst = ${u(A)} - src;` : ''}
     for (var k = 0u; k < ${u(CG)}; k++) {
       ${rows4(`wo + k * ${u(4 * CG)} + cg`)}
       ${acts((q) => `${DB ? 'src + ' : ''}r0 + ${u(q * CG)} + k`)}
@@ -335,7 +369,7 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) t: u3
       '\n    '
     )}
     workgroupBarrier();
-  }
+  }`}
 
   for (var e = t; e < ${u(TP * NO)}; e += ${u(threads)}) {
     res[e] = outRow(e % ${u(NO)}, e / ${u(NO)});
@@ -607,9 +641,16 @@ export class RelightGPUEngine extends RelightBase {
     const half = dev.features.has('shader-f16');
     this.half = half;
     const limits = dev.limits;
+    // a pixel's threads have to share a subgroup, whatever size the gpu picks
+    const info = dev.adapterInfo;
+    const shuffles = (k) =>
+      dev.features.has('subgroups') &&
+      navigator.gpu.wgslLanguageFeatures?.has('subgroup_id') &&
+      info?.subgroupMinSize % (CG / (k.channels ?? 1)) === 0;
     // the geometry and output stages take a pixel a thread, so a tile can't outnumber the threads
     this.kernels = KERNELS.filter(
       (k) =>
+        (!k.subgroup || shuffles(k)) &&
         CG % (k.channels ?? 1) === 0 &&
         k.threads % (CG / (k.channels ?? 1)) === 0 &&
         tileOf(k, CG) <= k.threads &&
