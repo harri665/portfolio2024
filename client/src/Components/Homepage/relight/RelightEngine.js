@@ -759,7 +759,8 @@ export class RelightEngine extends RelightBase {
     return [x0, x1, y0, y1];
   }
 
-  composite(lights, exposure = 1) {
+  // view is the part of the image that's shown, the rest isn't drawn (see RelightBase drawRect)
+  composite(lights, exposure = 1, view = null) {
     const gl = this.gl;
     const { u, p } = this.pComp;
     const { X, Y, Z, O, tx, ty } = this.cam;
@@ -795,7 +796,11 @@ export class RelightEngine extends RelightBase {
     gl.bindVertexArray(this.vao);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
     gl.viewport(0, 0, this.W, this.H);
+    const [x0, x1, y0, y1] = this.drawRect(view);
+    gl.enable(gl.SCISSOR_TEST);
+    gl.scissor(x0, y0, x1 - x0, y1 - y0);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.disable(gl.SCISSOR_TEST);
   }
 
   // fences get watched every ms or so. checking once a frame made every eval read as at least

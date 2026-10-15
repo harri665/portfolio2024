@@ -126,8 +126,9 @@ async function accumulate({ from, to, frames = 16, stride = 8, trust = 0.06, acc
 
 // a frame the way the backdrop runs a moving light, a stage at a time: the network, folding it
 // into the light's image, the composite, and handing the image to another webgl context.
-// snapshot and present are timed with a composite in front (they need a new image), taken off after
-async function frame({ stride = 4, n = 4, batches = 3, light = midLight() } = {}) {
+// snapshot and present are timed with a composite in front (they need a new image), taken off after.
+// composites the view of the walked-in box on this screen like the backdrop, null for the whole image
+async function frame({ stride = 4, n = 4, batches = 3, light = midLight(), view = walkedIn() } = {}) {
   const all = [0, engine.rows(stride), 0, engine.cols(stride)];
   const order = phaseOrder(stride);
   const whole = [0, engine.W, 0, engine.H];
@@ -137,13 +138,13 @@ async function frame({ stride = 4, n = 4, batches = 3, light = midLight() } = {}
   const stages = {
     evaluate: (i) => engine.evaluate(light, 0, stride, ...all, order[i % order.length]),
     resolve: (i) => engine.resolve(0, 0, stride, order[i % order.length], all, 0.5, whole),
-    composite: () => engine.composite(shown),
+    composite: () => engine.composite(shown, 1, view),
     snapshot: () => {
-      engine.composite(shown);
+      engine.composite(shown, 1, view);
       engine.snapshot().close?.();
     },
     present: () => {
-      engine.composite(shown);
+      engine.composite(shown, 1, view);
       present(engine.snapshot());
     },
   };
@@ -190,6 +191,16 @@ async function frame({ stride = 4, n = 4, batches = 3, light = midLight() } = {}
   ms.present = ms.snapshot + ms.upload;
   ms.total = ms.evaluate + ms.resolve + ms.composite + ms.present;
   return ms;
+}
+
+// RelightBackdrop's box once walked in (max side * 1.04, centred) and its view margin
+function walkedIn() {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const size = Math.max(vw, vh) * 1.04;
+  const m = 0.03;
+  const clamp = (x) => Math.max(0, Math.min(1, x));
+  return [(size - vw) / 2 / size - m, (size + vw) / 2 / size + m, (size - vh) / 2 / size - m, (size + vh) / 2 / size + m].map(clamp);
 }
 
 function present(image) {

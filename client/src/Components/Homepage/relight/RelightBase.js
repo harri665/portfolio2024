@@ -64,6 +64,22 @@ export class RelightBase {
     return [c0 * stride, Math.min(this.W, c1 * stride), r0 * stride, Math.min(this.H, r1 * stride)];
   }
 
+  // pixels a composite of view (image uv u0, u1, v0, v1) draws: x0, x1, y0, y1 from the top.
+  // 2 over so the room's catmull-rom taps at the edge land on drawn pixels
+  drawRect(view) {
+    if (!view) {
+      return [0, this.W, 0, this.H];
+    }
+    const [u0, u1, v0, v1] = view;
+    const { W, H } = this;
+    return [
+      Math.max(0, Math.floor(u0 * W) - 2),
+      Math.min(W, Math.ceil(u1 * W) + 2),
+      Math.max(0, Math.floor(v0 * H) - 2),
+      Math.min(H, Math.ceil(v1 * H) + 2),
+    ];
+  }
+
   timeable(stride, r0, r1, c0, c1) {
     const rows = this.rows(stride);
     const least = Math.min(1, Math.max(MIN_BAND_ROWS / rows, MIN_TIMED_SHARE));

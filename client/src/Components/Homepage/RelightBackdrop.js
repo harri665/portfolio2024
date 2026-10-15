@@ -119,6 +119,8 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
       progress: 0,
       box: { left: 0, top: 0, size: 1 },
       view: [0, 1, 0, 1],
+      // image uv the last composite drew
+      drawn: null,
       pointer: null,
       card: { el: null, uv: null },
       key: makeLight(INTRO_FROM, KEY, 0),
@@ -557,8 +559,11 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
     if (worked) {
       quality.worked();
     }
-    if (dirty) {
-      engine.composite([shown(key, KEY.intensity * keyLevel), shown(fill, FILL.intensity * fillLevel)]);
+    // only the view gets drawn (a landscape screen shows ~55% of the walked-in box), so it's
+    // drawn again once the view leaves that, wider while scrolling so it isn't every frame
+    if (dirty || !covers(state.drawn, view)) {
+      state.drawn = grow(view, dirty ? VIEW_MARGIN : VIEW_GROW);
+      engine.composite([shown(key, KEY.intensity * keyLevel), shown(fill, FILL.intensity * fillLevel)], 1, state.drawn);
       state.built.present(state.layer);
     }
 
@@ -737,6 +742,7 @@ function install(state, built, uniforms) {
   }));
   state.targetsAt = -Infinity;
   state.lastLevels = null;
+  state.drawn = null;
 }
 
 // slot is where the network writes, image the light's full res image the evaluations build up

@@ -869,7 +869,8 @@ export class RelightGPUEngine extends RelightBase {
     }
   }
 
-  composite(lights, exposure = 1) {
+  // view is the part of the image that's shown, the rest isn't drawn (see RelightBase drawRect)
+  composite(lights, exposure = 1, view = null) {
     const dev = this.device;
     if (!this.frame) {
       this.frame = new Float32Array(24 + SLOTS * 12);
@@ -906,6 +907,9 @@ export class RelightGPUEngine extends RelightBase {
         { view: this.currentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] },
       ],
     });
+    // rows are bottom first here, the rect's are from the top
+    const [x0, x1, y0, y1] = this.drawRect(view);
+    pass.setScissorRect(x0, this.H - y1, x1 - x0, y1 - y0);
     pass.setPipeline(this.compositePipeline);
     pass.setBindGroup(0, this.compositeGroup);
     pass.draw(3);
