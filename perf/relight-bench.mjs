@@ -1,7 +1,7 @@
 // times the relight network and scores it against the path traced refs (PSNR after reinhard,
 // same as the relight repo's evaluate.py). uses ?relight=bench
 //
-//     node relight-bench.mjs                       desktop, WebGPU and WebGL
+//     node relight-bench.mjs                       desktop and a weak phone, WebGPU and WebGL
 //     node relight-bench.mjs --profiles desktop,low-end --tiers 384,512,768
 //     node relight-bench.mjs --save-reference      keep these images to compare with
 import fs from 'node:fs';
@@ -19,7 +19,7 @@ const REFERENCE = path.join(HERE, 'relight-reference');
 
 const { values: args } = parseArgs({
   options: {
-    profiles: { type: 'string', default: 'desktop' },
+    profiles: { type: 'string', default: 'desktop,mobile-weak' },
     backends: { type: 'string', default: 'webgpu,webgl' },
     tiers: { type: 'string', default: '512' },
     strides: { type: 'string', default: '1,2,4,8' },
@@ -185,6 +185,21 @@ for (const profileName of list(args.profiles)) {
           .map(([s, v]) => `s${s} ${v.ms.toFixed(2)} ms`)
           .join('  ');
         console.log(`${profileName} ${info.backend}${info.half ? ' f16' : ''} ${tier}px ${info.network} ${info.kernel}: ${line}`);
+
+        // the whole frame a moving light costs, not just the network
+        row.frames = {};
+        for (const [stride, timed] of Object.entries(row.strides)) {
+          if (timed.probeOnly) {
+            continue;
+          }
+          // frame() grows its own batches until waiting on the gpu stops mattering
+          row.frames[stride] = await page.evaluate((s) => window.__relightBench.frame({ stride: s }), Number(stride));
+          const f = row.frames[stride];
+          console.log(
+            `  frame s${stride}: ${f.total.toFixed(2)} ms = network ${f.evaluate.toFixed(2)} + resolve ${f.resolve.toFixed(2)}` +
+              ` + composite ${f.composite.toFixed(2)} + present ${f.present.toFixed(2)} (snapshot ${f.snapshot.toFixed(2)}, upload ${f.upload.toFixed(2)})`
+          );
+        }
       }
 
       if (refs && !entry.errors.some((e) => e.startsWith(`${refs[0].W}:`))) {

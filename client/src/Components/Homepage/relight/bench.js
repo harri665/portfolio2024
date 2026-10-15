@@ -1,21 +1,29 @@
 // ?relight=bench, used by perf/relight-bench.mjs. exposes window.__relightBench
-// with open / time / render / accumulate / tune / close. never runs on a normal visit
+// with open / time / frame / render / accumulate / tune / close. never runs on a normal visit
 
 import { createRelightEngine, loadRoom } from './prepare';
 import { phaseOrder } from './RelightBase';
 import { requestRelightDevice } from './RelightGPU';
 
 const BAND_BYTES = 32 << 20;
+// ms a frame stage's batch should take at least, and the most runs one gets
+const FRAME_BATCH_MS = 100;
+const MAX_FRAME_RUNS = 256;
 
 let engine = null;
 let device = null;
+// stands in for the room layer, which takes each image into its own webgl context
+let presenter = null;
 
 function finish() {
   if (engine.backend === 'webgpu') {
     return engine.device.queue.onSubmittedWorkDone();
   }
-  // webgl fences only change between tasks, poll across them
-  const gl = engine.gl;
+  return fence(engine.gl);
+}
+
+// webgl fences only change between tasks, poll across them
+function fence(gl) {
   const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
   gl.flush();
   return new Promise((resolve) => {
@@ -116,6 +124,87 @@ async function accumulate({ from, to, frames = 16, stride = 8, trust = 0.06, acc
   return { psnr: psnr(got.rgba, ref.rgba) };
 }
 
+// a frame the way the backdrop runs a moving light, a stage at a time: the network, folding it
+// into the light's image, the composite, and handing the image to another webgl context.
+// snapshot and present are timed with a composite in front (they need a new image), taken off after
+async function frame({ stride = 4, n = 4, batches = 3, light = midLight() } = {}) {
+  const all = [0, engine.rows(stride), 0, engine.cols(stride)];
+  const order = phaseOrder(stride);
+  const whole = [0, engine.W, 0, engine.H];
+  const shown = [{ ...light, color: [1, 1, 1], intensity: 1, resolved: 0, hidden: false }];
+  engine.evaluate(light, 0, stride, ...all);
+  engine.resolve(0, 0, stride, order[0], all, 1);
+  const stages = {
+    evaluate: (i) => engine.evaluate(light, 0, stride, ...all, order[i % order.length]),
+    resolve: (i) => engine.resolve(0, 0, stride, order[i % order.length], all, 0.5, whole),
+    composite: () => engine.composite(shown),
+    snapshot: () => {
+      engine.composite(shown);
+      engine.snapshot().close?.();
+    },
+    present: () => {
+      engine.composite(shown);
+      present(engine.snapshot());
+    },
+  };
+  // waiting on the gpu has a fixed latency (tens of ms for the other context's fence, and noisy
+  // on webgl), so each stage runs in batches long enough to bury it, less the latency of an empty one
+  const wait = async (other) => {
+    await finish();
+    if (other) {
+      await fence(presenter.gl);
+    }
+  };
+  const batch = async (run, other, count) => {
+    const runs = [];
+    for (let b = 0; b < batches; b += 1) {
+      await wait(other);
+      const t0 = performance.now();
+      for (let i = 0; i < count; i += 1) {
+        run(i);
+      }
+      await wait(other);
+      runs.push(performance.now() - t0);
+      engine.pollTiming();
+    }
+    runs.sort((a, b) => a - b);
+    return runs[runs.length >> 1];
+  };
+  present(engine.snapshot());
+  const idle = { engine: await batch(() => {}, false, 0), both: await batch(() => {}, true, 0) };
+  const ms = {};
+  for (const [name, run] of Object.entries(stages)) {
+    const other = name === 'present';
+    const empty = idle[other ? 'both' : 'engine'];
+    let count = n;
+    let took = await batch(run, other, count);
+    while (took < Math.max(FRAME_BATCH_MS, 10 * empty) && count < MAX_FRAME_RUNS) {
+      count *= 2;
+      took = await batch(run, other, count);
+    }
+    ms[name] = Math.max(0, took - empty) / count;
+  }
+  // snapshot is taking the image off the canvas, upload is the other context taking it in
+  ms.upload = Math.max(0, ms.present - ms.snapshot);
+  ms.snapshot = Math.max(0, ms.snapshot - ms.composite);
+  ms.present = ms.snapshot + ms.upload;
+  ms.total = ms.evaluate + ms.resolve + ms.composite + ms.present;
+  return ms;
+}
+
+function present(image) {
+  if (!presenter) {
+    // a page canvas like the room layer's, an offscreen one takes another path in chrome
+    const gl = document.createElement('canvas').getContext('webgl2', { alpha: false, antialias: false, depth: false });
+    const texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    presenter = { gl };
+  }
+  const { gl } = presenter;
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+  image.close?.();
+}
+
 function distance(a, b) {
   return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
 }
@@ -156,5 +245,5 @@ function tune({ stride = 1, runs = 4 } = {}) {
 }
 
 export function installBench() {
-  window.__relightBench = { open, time, render, accumulate, tune, close };
+  window.__relightBench = { open, time, frame, render, accumulate, tune, close };
 }
