@@ -308,8 +308,12 @@ function packLayer(layer, nIn, kin, out, inCol) {
 }
 
 export class RelightEngine extends RelightBase {
-  constructor({ scene, layers, grid, gridOff, aux, pos }, { bandBytes = BAND_BYTES, kernel = null } = {}) {
+  constructor(
+    { scene, layers, grid, gridOff, aux, pos },
+    { bandBytes = BAND_BYTES, kernel = null, images = RESOLVED } = {}
+  ) {
     super(scene, pos);
+    this.images = images;
     // offscreen so we can hand over an ImageBitmap. without OffscreenCanvas the canvas has
     // to be read the same frame it's drawn
     this.canvas =
@@ -375,8 +379,8 @@ export class RelightEngine extends RelightBase {
     this.outFbos = Array.from({ length: SLOTS }, (_, s) =>
       this.framebuffer(Array.from({ length: per }, (__, j) => [this.outTex, s * per + j]))
     );
-    this.resTex = this.texture(A2, gl.RGBA16F, W, H, RESOLVED * per);
-    this.resFbos = Array.from({ length: RESOLVED }, (_, s) =>
+    this.resTex = this.texture(A2, gl.RGBA16F, W, H, images * per);
+    this.resFbos = Array.from({ length: images }, (_, s) =>
       this.framebuffer(Array.from({ length: per }, (__, j) => [this.resTex, s * per + j]))
     );
     this.pComp = this.program(compositeFS(W, H, mul), 'composite');

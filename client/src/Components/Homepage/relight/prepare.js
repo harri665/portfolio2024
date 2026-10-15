@@ -16,6 +16,7 @@ import {
   switchNetwork,
   upgradeTier,
 } from './adaptiveQuality';
+import { RESOLVED } from './RelightBase';
 import { RelightEngine } from './RelightEngine';
 import { RelightGPUEngine, requestRelightDevice } from './RelightGPU';
 import { loadRelightScene } from './scene';
@@ -29,6 +30,10 @@ export const COMPACT_QUERY = '(max-width: 768px), (pointer: coarse)';
 // 32MB is ~20% faster than 8MB but phones don't have the memory
 const BAND_BYTES = { compact: 16 << 20, full: 32 << 20 };
 export const bandBytesFor = (compact) => (compact ? BAND_BYTES.compact : BAND_BYTES.full);
+// full res images kept for where the key light is likely to go next, ~12 bytes a pixel each
+// (3MB at 512, 7MB at 768)
+const SPARE_BYTES = { compact: 8 << 20, full: 32 << 20 };
+const MAX_SPARES = 6;
 
 const BENCH_RUNS = 3;
 // ms, the page is showing and might be scrolling
@@ -42,9 +47,12 @@ export function loadRoom(tier, signal, priority, network = NETWORKS[0]) {
 
 export async function createRelightEngine(data, device, bandBytes, signal, kernel = null) {
   let notGPU = null;
+  const compact = window.matchMedia?.(COMPACT_QUERY).matches ?? false;
+  const spares = (compact ? SPARE_BYTES.compact : SPARE_BYTES.full) / (data.scene.width * data.scene.height * 12);
+  const images = RESOLVED + Math.min(MAX_SPARES, Math.floor(spares));
   if (device) {
     try {
-      return { engine: await RelightGPUEngine.create(device, data, { kernel }), notGPU };
+      return { engine: await RelightGPUEngine.create(device, data, { kernel, images }), notGPU };
     } catch (error) {
       if (signal.aborted) {
         throw error;
@@ -53,7 +61,7 @@ export async function createRelightEngine(data, device, bandBytes, signal, kerne
       notGPU = `WebGPU couldn't build the network (${error.message})`;
     }
   }
-  return { engine: new RelightEngine(data, { bandBytes, kernel }), notGPU };
+  return { engine: new RelightEngine(data, { bandBytes, kernel, images }), notGPU };
 }
 
 let current = null;

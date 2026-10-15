@@ -2,7 +2,8 @@
 
 // network outputs, one a light plus spares for the bench
 export const SLOTS = 4;
-// full res images the backdrop builds up a light at a time, one per light
+// full res images the backdrop builds up a light at a time, one per light. an engine can be
+// built with more (options.images) to keep images for where a light is likely to go
 export const RESOLVED = 2;
 // where in each stride x stride block an evaluation takes its pixel
 export const NO_PHASE = [0, 0];

@@ -503,8 +503,9 @@ export class RelightGPUEngine extends RelightBase {
     this.canvas = new OffscreenCanvas(this.W, this.H);
   }
 
-  async build({ scene, layers, grid, gridOff, aux, pos }, { kernel = null } = {}) {
+  async build({ scene, layers, grid, gridOff, aux, pos }, { kernel = null, images = RESOLVED } = {}) {
     const dev = this.device;
+    this.images = images;
     const { W, H } = this;
     const NP = W * H;
     const net = scene.network;
@@ -633,7 +634,8 @@ export class RelightGPUEngine extends RelightBase {
     const wBuf = half ? buffer(P.byteLength / 2, U.STORAGE, toHalf(P)) : buffer(P.byteLength, U.STORAGE, P);
     const xBuf = buffer(NP * XW * 4, U.STORAGE);
     const pgeoBuf = buffer(NP * 32, U.STORAGE);
-    const outBuf = buffer(SLOTS * NP * wordsOf(mul) * 4, U.STORAGE);
+    // network slots, then the full res images
+    const outBuf = buffer((SLOTS - RESOLVED + images) * NP * wordsOf(mul) * 4, U.STORAGE);
     this.fwdBuf = buffer(48 + CG * 16, U.UNIFORM | U.COPY_DST);
     this.fwdF32 = new Float32Array(12 + WD);
     this.fwdU32 = new Uint32Array(this.fwdF32.buffer, 0, 8);

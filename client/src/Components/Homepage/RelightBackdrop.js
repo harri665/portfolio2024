@@ -32,7 +32,7 @@ import {
   tuneEngine,
 } from './relight/prepare';
 import { requestRelightDevice } from './relight/RelightGPU';
-import { NO_PHASE, phaseOrder } from './relight/RelightBase';
+import { NO_PHASE, RESOLVED, phaseOrder } from './relight/RelightBase';
 import { ROOM_FRAGMENT, RoomLayer } from './relight/roomLayer';
 import { reportRelight } from './relight/report';
 import { setRelightStatus } from './relight/status';
@@ -56,6 +56,8 @@ const MOVE_EPS = 0.004;
 const TRUST_DIST = 0.06;
 const BENCH_TRIES = 6;
 const SCROLL_REST = 0.15;
+// s between looking for where the cards are while the light rests
+const TARGETS_EVERY = 0.5;
 // margin so the glass has something to bend at the edge. widened when you scroll
 // back out so it doesn't re-evaluate every frame
 const VIEW_MARGIN = 0.03;
@@ -121,6 +123,8 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
       card: { el: null, uv: null },
       key: makeLight(INTRO_FROM, KEY, 0),
       fill: makeLight(FILL.pos, FILL, 1),
+      spares: [],
+      targetsAt: -Infinity,
       lastLevels: null,
       panel: null,
       hero: null,
@@ -529,6 +533,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
     let worked = false;
     let left = budget;
     if (needsWork(key, scrolling, view)) {
+      adopt(key, state.spares, aim);
       left -= step(engine, key, now, fill.evalPos ? budget : budget / 2, view);
       worked = true;
     }
@@ -537,6 +542,10 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
     }
 
     let dirty = worked;
+    // nothing to show changed, so get ready for where the key light goes next
+    if (!worked && !scrolling && progress > 0.3 && state.panel && state.spares.length) {
+      worked = precompute(state, engine, budget, now, view, vw, vh, canHover) > 0;
+    }
     const keyLevel = reduceMotion ? clamp01(age / 0.6) : strike(age);
     const fillLevel = easeOutCubic(clamp01((age - 0.2) / 1.4));
     const levels = `${keyLevel.toFixed(3)} ${fillLevel.toFixed(3)}`;
@@ -710,9 +719,23 @@ function install(state, built, uniforms) {
   state.engine = built.engine;
   uniforms.tRelight.value = built.texture;
   uniforms.texSize.value.set(built.engine.W, built.engine.H);
-  [state.key, state.fill].forEach((light) =>
-    Object.assign(light, { evalPos: null, rect: null, kept: null, stride: 0, phase: 0, done: 0, next: 0 })
+  [state.key, state.fill].forEach((light, i) =>
+    Object.assign(light, { image: i, evalPos: null, rect: null, kept: null, stride: 0, phase: 0, done: 0, next: 0 })
   );
+  // the rest of the engine's images, evaluated ahead at where the key light might go. the fill is
+  // done by then so they borrow its slot
+  state.spares = Array.from({ length: (built.engine.images ?? RESOLVED) - RESOLVED }, (_, i) => ({
+    image: RESOLVED + i,
+    slot: state.fill.slot,
+    radius: KEY.radius,
+    pos: null,
+    rect: null,
+    kept: null,
+    next: 0,
+    ready: false,
+    rank: Infinity,
+  }));
+  state.targetsAt = -Infinity;
   state.lastLevels = null;
 }
 
@@ -828,9 +851,110 @@ function evaluateRows(engine, job, rect, budget, least = 0) {
     return 0;
   }
   engine.evaluate(job, job.slot, 1, from, to, c0, c1, NO_PHASE);
-  engine.resolve(job.slot, job.image, 1, NO_PHASE, [from, to, c0, c1], 1);
+  const span = engine.resolve(job.slot, job.image, 1, NO_PHASE, [from, to, c0, c1], 1);
+  // same columns all the way down, so this is every pixel so far
+  job.kept = job.kept && span ? [span[0], span[1], job.kept[2], span[3]] : span;
   job.next = to;
   return row * (to - from);
+}
+
+// a light that comes within TRUST_DIST of an image evaluated ahead for where it's going starts from
+// that instead of what it brought from further away. only where it's going, or a light resting
+// next to one would trade its own image for it on the first nudge. swapped, so nothing's copied
+function adopt(light, spares, aim) {
+  if (light.evalPos && distance(light.pos, light.evalPos) <= MOVE_EPS) {
+    return;
+  }
+  let best = null;
+  spares.forEach((spare) => {
+    const d = spare.ready && distance(aim, spare.pos) <= TRUST_DIST ? distance(light.pos, spare.pos) : Infinity;
+    if (d <= TRUST_DIST && (!best || d < distance(light.pos, best.pos))) {
+      best = spare;
+    }
+  });
+  if (!best) {
+    return;
+  }
+  [light.image, best.image] = [best.image, light.image];
+  Object.assign(light, { evalPos: best.pos, rect: best.rect, kept: best.kept, done: 0 });
+  Object.assign(best, { pos: null, rect: null, kept: null, next: 0, ready: false, rank: Infinity });
+}
+
+// only on frames nothing else needs, a band of rows at a time into the likeliest spare not done yet
+function precompute(state, engine, budget, now, view, vw, vh, canHover) {
+  if (engine.evalCost(1) === null) {
+    return 0;
+  }
+  if (now - state.targetsAt > TARGETS_EVERY) {
+    state.targetsAt = now;
+    aimSpares(state.spares, likelyTargets(state, engine, vw, vh, canHover), grow(view, VIEW_MARGIN));
+  }
+  const spare = state.spares.find((s) => s.rank < Infinity && !s.ready);
+  if (!spare) {
+    return 0;
+  }
+  const spent = evaluateRows(engine, spare, spare.rect, budget, 1);
+  spare.ready = spare.next >= itemRect(engine, spare.rect, 1)[1];
+  return spent;
+}
+
+// keeps spares already at a target, gives the rest to new ones, likeliest first
+function aimSpares(spares, targets, rect) {
+  const at = (spare, pos) => !!spare.pos && distance(spare.pos, pos) <= MOVE_EPS;
+  const wanted = targets.slice(0, spares.length);
+  const free = spares.filter((s) => !wanted.some((pos) => at(s, pos)));
+  spares.forEach((s) => {
+    s.rank = Infinity;
+  });
+  wanted.forEach((pos, rank) => {
+    const spare = spares.find((s) => s.rank === Infinity && at(s, pos)) || free.shift();
+    if (!spare) {
+      return;
+    }
+    if (!at(spare, pos)) {
+      Object.assign(spare, { pos, rect, kept: null, next: 0, ready: false });
+    }
+    spare.rank = rank;
+  });
+  spares.sort((a, b) => a.rank - b.rank);
+}
+
+// where the key light would end up for the cards it could go to next, likeliest first
+function likelyTargets(state, engine, vw, vh, canHover) {
+  const { left, top, size } = state.box;
+  const cards = [...state.panel.querySelectorAll(CARD_SELECTOR)].map((el) => {
+    const r = el.getBoundingClientRect();
+    return { el, x: (r.left + r.right) / 2, y: (r.top + r.bottom) / 2 };
+  });
+  let picks = [];
+  if (canHover) {
+    // whichever the pointer's nearest gets hovered next
+    const [px, py] = state.pointer ? [left + state.pointer[0] * size, top + state.pointer[1] * size] : [vw / 2, vh / 2];
+    picks = cards
+      .filter((c) => c.x > 0 && c.x < vw && c.y > 0 && c.y < vh)
+      .sort((a, b) => Math.hypot(a.x - px, a.y - py) - Math.hypot(b.x - px, b.y - py));
+  } else {
+    // touch focuses the card nearest the middle (the first of a row), and the light goes where it
+    // was the moment it took over: halfway between it and the card before it at the middle.
+    // so that's the same place whatever the scroll
+    const rows = cards.filter((c, i) => !cards.slice(0, i).some((d) => Math.abs(d.y - c.y) < 1));
+    const at = rows.findIndex((c) => c.el === state.card.el);
+    for (let k = 1; at >= 0 && k < rows.length; k += 1) {
+      [at + k, at - k].forEach((i) => {
+        const before = rows[i + (i > at ? -1 : 1)];
+        if (rows[i]) {
+          picks.push({ x: rows[i].x, y: rows[i].y + vh / 2 - (rows[i].y + before.y) / 2 });
+        }
+      });
+    }
+  }
+  return picks
+    .map(({ x, y }) => {
+      const pos = [...atDepth(engine, [(x - left) / size, (y - top) / size], CARD_DEPTH)];
+      keepInRoom(engine, pos, KEY.radius);
+      return pos;
+    })
+    .filter((pos) => !state.key.evalPos || distance(pos, state.key.evalPos) > TRUST_DIST);
 }
 
 function previewStride(engine, budget, area = 1) {
