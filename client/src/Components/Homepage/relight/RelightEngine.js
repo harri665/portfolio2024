@@ -895,6 +895,13 @@ export class RelightEngine extends RelightBase {
     this.recordTiming(pending.stride, pending.share, ms);
   }
 
+  // the webgpu engine batches a frame's passes into one submit, webgl already does
+  beginFrame() {}
+
+  endFrame() {}
+
+  flush() {}
+
   snapshot() {
     return this.canvas.transferToImageBitmap ? this.canvas.transferToImageBitmap() : this.canvas;
   }

@@ -139,6 +139,14 @@ async function frame({ stride = 4, n = 4, batches = 3, light = midLight(), view 
     evaluate: (i) => engine.evaluate(light, 0, stride, ...all, order[i % order.length]),
     resolve: (i) => engine.resolve(0, 0, stride, order[i % order.length], all, 0.5, whole),
     composite: () => engine.composite(shown, 1, view),
+    // the three above in one submit, the way a frame of the backdrop runs them
+    oneSubmit: (i) => {
+      engine.beginFrame();
+      stages.evaluate(i);
+      stages.resolve(i);
+      stages.composite();
+      engine.endFrame();
+    },
     snapshot: () => {
       engine.composite(shown, 1, view);
       engine.snapshot().close?.();

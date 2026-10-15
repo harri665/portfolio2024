@@ -6,7 +6,7 @@
 //
 // f16 where available: ~1/3 faster on the 3080, image moves by 3/255 at most
 
-/* global GPUBufferUsage, GPUMapMode, BigUint64Array */
+/* global GPUBufferUsage, GPUMapMode, GPUShaderStage, BigUint64Array */
 import { NO_PHASE, RESOLVED, RelightBase, SLOTS } from './RelightBase';
 
 // which one's fastest depends on the gpu, tune() times them. first that fits is the default
@@ -57,6 +57,8 @@ const u = (x) => `${x >>> 0}u`;
 
 // ms, closer completions get reported together
 const QUEUE_GRAIN = 0.1;
+// passes a frame's uniforms have room for, past that it submits early and starts over
+const RING = 64;
 
 // f32 -> f16 bits, round to nearest even
 function toHalf(values) {
@@ -602,6 +604,24 @@ export class RelightGPUEngine extends RelightBase {
     const module = (code, label) => dev.createShaderModule({ code, label });
     const compositeModule = module(compositeWGSL({ W, H, mul }), 'relight composite');
     this.format = navigator.gpu.getPreferredCanvasFormat();
+    // uniforms sit in a ring at dynamic offsets so a frame's passes don't overwrite each other's
+    const S = GPUShaderStage;
+    const layout = (visibility, types) =>
+      dev.createPipelineLayout({
+        bindGroupLayouts: [
+          dev.createBindGroupLayout({
+            entries: types.map((type, binding) => ({
+              binding,
+              visibility,
+              buffer: type === 'ring' ? { type: 'uniform', hasDynamicOffset: true } : { type },
+            })),
+          }),
+        ],
+      });
+    const R = 'read-only-storage';
+    this.fwdLayout = layout(S.COMPUTE, [R, R, R, 'ring', 'storage', R]);
+    const compositeLayout = layout(S.FRAGMENT, ['ring', R, R, ...(mul ? [R] : [])]);
+    const resolveLayout = layout(S.COMPUTE, ['ring', 'storage', R]);
     const [pre, forward, composite, resolve] = await Promise.all([
       dev.createComputePipelineAsync({
         layout: 'auto',
@@ -626,13 +646,13 @@ export class RelightGPUEngine extends RelightBase {
       }),
       this.forwardPipeline(first),
       dev.createRenderPipelineAsync({
-        layout: 'auto',
+        layout: compositeLayout,
         vertex: { module: compositeModule, entryPoint: 'vs' },
         fragment: { module: compositeModule, entryPoint: 'fs', targets: [{ format: this.format }] },
         primitive: { topology: 'triangle-list' },
       }),
       dev.createComputePipelineAsync({
-        layout: 'auto',
+        layout: resolveLayout,
         compute: { module: module(resolveWGSL({ W, H, mul }), 'relight resolve'), entryPoint: 'main' },
       }),
     ]);
@@ -653,24 +673,32 @@ export class RelightGPUEngine extends RelightBase {
     const nrmBuf = buffer(NP * 8, U.STORAGE);
     // network slots, then the full res images
     const outBuf = buffer((SLOTS - RESOLVED + images) * NP * wordsOf(mul) * 4, U.STORAGE);
-    this.fwdBuf = buffer(48 + CG * 16, U.UNIFORM | U.COPY_DST);
+    const fwdBytes = 48 + CG * 16;
+    const frameBytes = 96 + SLOTS * 48;
+    const align = limits.minUniformBufferOffsetAlignment;
+    this.ringStride = Math.ceil(Math.max(fwdBytes, frameBytes, 80) / align) * align;
+    this.ringBuf = buffer(RING * this.ringStride, U.UNIFORM | U.COPY_DST);
+    this.ring = new Uint8Array(RING * this.ringStride);
+    this.ringUsed = 0;
+    this.enc = null;
+    this.framing = false;
+    this.afterSubmit = [];
+    const ring = (size) => ({ buffer: this.ringBuf, size });
     this.fwdF32 = new Float32Array(12 + WD);
     this.fwdU32 = new Uint32Array(this.fwdF32.buffer, 0, 8);
-    this.frameBuf = buffer(96 + SLOTS * 48, U.UNIFORM | U.COPY_DST);
     const bind = (pipeline, list) =>
       dev.createBindGroup({
         layout: pipeline.getBindGroupLayout(0),
-        entries: list.map((b, i) => ({ binding: i, resource: { buffer: b } })),
+        entries: list.map((b, i) => ({ binding: i, resource: b.buffer ? b : { buffer: b } })),
       });
     this.compositePipeline = composite;
-    this.fwdBuffers = [wBuf, xBuf, posBuf, this.fwdBuf, outBuf, nrmBuf];
+    this.fwdBuffers = [wBuf, xBuf, posBuf, ring(fwdBytes), outBuf, nrmBuf];
     this.setKernel(first, forward);
-    this.compositeGroup = bind(composite, [this.frameBuf, outBuf, posBuf, ...(mul ? [nrmBuf] : [])]);
-    this.resBuf = buffer(80, U.UNIFORM | U.COPY_DST);
+    this.compositeGroup = bind(composite, [ring(frameBytes), outBuf, posBuf, ...(mul ? [nrmBuf] : [])]);
     this.resU32 = new Uint32Array(20);
     this.resF32 = new Float32Array(this.resU32.buffer);
     this.resolvePipeline = resolve;
-    this.resolveGroup = bind(resolve, [this.resBuf, outBuf, posBuf]);
+    this.resolveGroup = bind(resolve, [ring(80), outBuf, posBuf]);
 
     if (dev.features.has('timestamp-query')) {
       this.querySet = dev.createQuerySet({ type: 'timestamp', count: 2 });
@@ -706,7 +734,7 @@ export class RelightGPUEngine extends RelightBase {
   forwardPipeline(k) {
     const code = forwardWGSL({ ...this.shapes, threads: k.threads, pixels: k.pixels });
     return this.device.createComputePipelineAsync({
-      layout: 'auto',
+      layout: this.fwdLayout,
       compute: { module: this.device.createShaderModule({ code, label: 'relight network' }), entryPoint: 'main' },
     });
   }
@@ -716,7 +744,7 @@ export class RelightGPUEngine extends RelightBase {
     this.forward = pipeline;
     this.fwdGroup = this.device.createBindGroup({
       layout: pipeline.getBindGroupLayout(0),
-      entries: this.fwdBuffers.map((b, i) => ({ binding: i, resource: { buffer: b } })),
+      entries: this.fwdBuffers.map((b, i) => ({ binding: i, resource: b.buffer ? b : { buffer: b } })),
     });
     this.tile = (k.threads / (this.shapes.WD / 4)) * k.pixels;
   }
@@ -771,8 +799,59 @@ export class RelightGPUEngine extends RelightBase {
     }
   }
 
-  evaluate(light, slot, stride = 1, r0 = 0, r1 = this.rows(stride), c0 = 0, c1 = this.cols(stride), phase = NO_PHASE) {
+  // a frame's passes go in one encoder and one submit: beginFrame, then evaluate / resolve /
+  // composite as often as it likes, then endFrame. the fixed cost of a submit was most of a
+  // pass at the strides phones run. outside a frame every pass submits on its own
+  beginFrame() {
+    this.framing = true;
+  }
+
+  endFrame() {
+    this.framing = false;
+    this.flush();
+  }
+
+  encoder() {
+    if (!this.enc) {
+      this.enc = this.device.createCommandEncoder();
+    }
+    return this.enc;
+  }
+
+  commit() {
+    if (!this.framing) {
+      this.flush();
+    }
+  }
+
+  flush() {
+    if (!this.enc) {
+      return;
+    }
     const dev = this.device;
+    if (this.ringUsed) {
+      dev.queue.writeBuffer(this.ringBuf, 0, this.ring, 0, this.ringUsed * this.ringStride);
+    }
+    dev.queue.submit([this.enc.finish()]);
+    this.enc = null;
+    this.ringUsed = 0;
+    const after = this.afterSubmit;
+    this.afterSubmit = [];
+    after.forEach((f) => f());
+  }
+
+  // a pass's uniforms, returns their offset in the ring. a full ring submits what's queued
+  stage(data) {
+    if (this.ringUsed === RING) {
+      this.flush();
+    }
+    const at = this.ringUsed * this.ringStride;
+    this.ring.set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength), at);
+    this.ringUsed += 1;
+    return at;
+  }
+
+  evaluate(light, slot, stride = 1, r0 = 0, r1 = this.rows(stride), c0 = 0, c1 = this.cols(stride), phase = NO_PHASE) {
     r1 = Math.min(r1, this.rows(stride));
     c1 = Math.min(c1, this.cols(stride));
     const xw = c1 - c0;
@@ -791,28 +870,37 @@ export class RelightGPUEngine extends RelightBase {
       fwdF32[12 + c] =
         this.b0[c] + w[c * 4] * ln[0] + w[c * 4 + 1] * ln[1] + w[c * 4 + 2] * ln[2] + w[c * 4 + 3] * ln[3];
     }
-    dev.queue.writeBuffer(this.fwdBuf, 0, fwdF32);
 
     const timed = this.timeable(stride, r0, r1, c0, c1);
     const stamped = timed && this.querySet && this.readBuf.mapState === 'unmapped';
-    const enc = dev.createCommandEncoder();
+    // without timestamps the queue emptying times it, so it goes in a submit of its own
+    const alone = timed && !stamped;
+    if (alone) {
+      this.flush();
+    }
+    const queued = alone ? this.queueDone() : null;
+    const at = this.stage(fwdF32);
+    const enc = this.encoder();
     const pass = enc.beginComputePass(
       stamped
         ? { timestampWrites: { querySet: this.querySet, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } }
         : undefined
     );
     pass.setPipeline(this.forward);
-    pass.setBindGroup(0, this.fwdGroup);
+    pass.setBindGroup(0, this.fwdGroup, [at]);
     pass.dispatchWorkgroups(Math.ceil((i1 - i0) / this.tile));
     pass.end();
     if (stamped) {
       enc.resolveQuerySet(this.querySet, 0, 2, this.queryBuf, 0);
       enc.copyBufferToBuffer(this.queryBuf, 0, this.readBuf, 0, 16);
     }
-    const queued = timed && !stamped ? this.queueDone() : null;
-    dev.queue.submit([enc.finish()]);
     if (timed) {
       this.time(stride, this.share(stride, r0, r1, c0, c1), stamped, queued);
+    }
+    if (alone) {
+      this.flush();
+    } else {
+      this.commit();
     }
   }
 
@@ -831,15 +919,13 @@ export class RelightGPUEngine extends RelightBase {
     R.set([k[0], k[2], k[1], k[3]], 13);
     this.resF32[17] = alpha;
     this.resF32[18] = (1.5 * 2 * this.cam.tx) / this.W;
-    const dev = this.device;
-    dev.queue.writeBuffer(this.resBuf, 0, R);
-    const enc = dev.createCommandEncoder();
-    const pass = enc.beginComputePass();
+    const at = this.stage(R);
+    const pass = this.encoder().beginComputePass();
     pass.setPipeline(this.resolvePipeline);
-    pass.setBindGroup(0, this.resolveGroup);
+    pass.setBindGroup(0, this.resolveGroup, [at]);
     pass.dispatchWorkgroups(Math.ceil(((x1 - x0) * (y1 - y0)) / 64));
     pass.end();
-    dev.queue.submit([enc.finish()]);
+    this.commit();
     return [x0, x1, y0, y1];
   }
 
@@ -852,11 +938,16 @@ export class RelightGPUEngine extends RelightBase {
   time(stride, share, stamped, queued) {
     const pending = { stride, share, done: false, ms: null };
     this.timing.pending = pending;
-    const start = performance.now();
     const settle = (ms) => {
       pending.ms = ms > 0 ? ms : null;
       pending.done = true;
     };
+    // the readback can only start once its pass is submitted
+    this.afterSubmit.push(() => this.readTiming(stamped, queued, settle));
+  }
+
+  readTiming(stamped, queued, settle) {
+    const start = performance.now();
     if (stamped) {
       this.readBuf
         .mapAsync(GPUMapMode.READ)
@@ -888,7 +979,6 @@ export class RelightGPUEngine extends RelightBase {
 
   // view is the part of the image that's shown, the rest isn't drawn (see RelightBase drawRect)
   composite(lights, exposure = 1, view = null) {
-    const dev = this.device;
     if (!this.frame) {
       this.frame = new Float32Array(24 + SLOTS * 12);
       const { X, Y, Z, O, tx, ty } = this.cam;
@@ -916,10 +1006,8 @@ export class RelightGPUEngine extends RelightBase {
       U32[o + 9] = resolved ? 1 : l.stride || 1;
       U32[o + 10] = l.hidden ? 0 : 1;
     }
-    dev.queue.writeBuffer(this.frameBuf, 0, F);
-
-    const enc = dev.createCommandEncoder();
-    const pass = enc.beginRenderPass({
+    const at = this.stage(F);
+    const pass = this.encoder().beginRenderPass({
       colorAttachments: [
         { view: this.currentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] },
       ],
@@ -928,17 +1016,20 @@ export class RelightGPUEngine extends RelightBase {
     const [x0, x1, y0, y1] = this.drawRect(view);
     pass.setScissorRect(x0, this.H - y1, x1 - x0, y1 - y0);
     pass.setPipeline(this.compositePipeline);
-    pass.setBindGroup(0, this.compositeGroup);
+    pass.setBindGroup(0, this.compositeGroup, [at]);
     pass.draw(3);
     pass.end();
-    dev.queue.submit([enc.finish()]);
+    this.commit();
   }
 
   snapshot() {
+    this.flush();
     return this.canvas.transferToImageBitmap();
   }
 
   dispose() {
+    this.enc = null;
+    this.afterSubmit = [];
     this.context?.unconfigure();
     this.querySet?.destroy();
     this.buffers.forEach((b) => b.destroy());

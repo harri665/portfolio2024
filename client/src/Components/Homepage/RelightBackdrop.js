@@ -531,6 +531,8 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
 
     const view = visibleRect(state.box, vw, vh);
     state.view = view;
+    // everything from here to endFrame goes to the gpu in one submit
+    engine.beginFrame();
     // key light first and the fill gets what it leaves, but half each until the fill has an image
     let worked = false;
     let left = budget;
@@ -577,6 +579,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
     }
     uniforms.ready.value = clamp01(age / 0.5);
     state.layer?.draw(uniforms, vw, vh, roomDpr);
+    engine.endFrame();
 
     if (now - state.publishedAt > PUBLISH_EVERY) {
       state.publishedAt = now;
