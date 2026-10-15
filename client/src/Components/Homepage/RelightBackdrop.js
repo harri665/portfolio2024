@@ -757,8 +757,8 @@ function needsWork(light, scrolling, view) {
   );
 }
 
-// each frame evaluates every stride-th pixel from a different place in the stride x stride block
-// and folds it into the light's image. at rest that's every pixel after stride^2 frames, moving
+// each evaluation takes every stride-th pixel from a different place in the stride x stride block
+// and folds it into the light's image. at rest that's every pixel after stride^2 of them, moving
 // it keeps pixels evaluated while the light was close to where it is now
 function step(engine, light, now, budget, view) {
   const moved = light.evalPos ? distance(light.pos, light.evalPos) : Infinity;
@@ -776,16 +776,23 @@ function step(engine, light, now, budget, view) {
     light.evalPos = [...light.pos];
     light.still = now;
   }
-  const order = phaseOrder(stride);
-  const phase = order[light.phase % order.length];
-  light.phase += 1;
-  light.done += 1;
-  const items = itemRect(engine, rect, stride);
-  engine.evaluate({ pos: light.evalPos, radius: light.radius }, light.slot, stride, ...items, phase);
-  light.kept = engine.resolve(light.slot, light.image, stride, phase, items, alpha, light.kept);
-  light.rect = rect;
   const cost = engine.evalCost(stride);
-  return cost === null ? budget : cost * areaOf(rect);
+  const each = cost === null ? budget : cost * areaOf(rect);
+  // strides are 4x apart in cost so one evaluation can leave up to 3/4 of the budget. the rest
+  // goes on more phases, never more than the cycle has left
+  const phases = Math.max(1, Math.min(Math.floor(budget / each), stride ** 2 - light.done));
+  const order = phaseOrder(stride);
+  const items = itemRect(engine, rect, stride);
+  for (let i = 0; i < phases; i += 1) {
+    const phase = order[light.phase % order.length];
+    light.phase += 1;
+    light.done += 1;
+    engine.evaluate({ pos: light.evalPos, radius: light.radius }, light.slot, stride, ...items, phase);
+    // the light only moved before the first, the rest are where it is now
+    light.kept = engine.resolve(light.slot, light.image, stride, phase, items, i ? 0 : alpha, light.kept);
+  }
+  light.rect = rect;
+  return each * phases;
 }
 
 // every pixel once, a band of rows a frame out of what the key light leaves. scrolling used to
