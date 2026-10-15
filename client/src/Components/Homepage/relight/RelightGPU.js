@@ -11,8 +11,9 @@ import { NO_PHASE, RESOLVED, RelightBase, SLOTS } from './RelightBase';
 
 // which one's fastest depends on the gpu, tune() times them. first that fits is the default.
 // a thread works out pixels x channels groups of 4 outputs. more pixels reuse each weight it
-// loads (what the 3080 wants), more channels each activation (phones, where workgroup memory is
-// just cache). 32 threads for gpus with small subgroups (mali, apple)
+// loads (what the 3080 is short of, 8 is enough there), more channels each activation (phones,
+// where workgroup memory is just cache). 32 threads for gpus with small subgroups (mali, apple).
+// on the 3080 the channel, double and subgroup kernels lose by 3-20%, they're for other gpus
 export const KERNELS = [
   { threads: 256, pixels: 4 },
   { threads: 128, pixels: 4 },
@@ -20,18 +21,14 @@ export const KERNELS = [
   { threads: 128, pixels: 8 },
   { threads: 64, pixels: 8 },
   { threads: 64, pixels: 4 },
-  { threads: 128, pixels: 16 },
   { threads: 64, pixels: 16 },
-  { threads: 128, pixels: 8, channels: 2 },
   { threads: 64, pixels: 8, channels: 2 },
   { threads: 128, pixels: 4, channels: 2 },
   { threads: 32, pixels: 8 },
   { threads: 32, pixels: 8, channels: 2 },
   { threads: 64, pixels: 8, double: true },
   { threads: 128, pixels: 4, double: true },
-  { threads: 64, pixels: 16, double: true },
   { threads: 64, pixels: 8, subgroup: true },
-  { threads: 64, pixels: 8, channels: 2, subgroup: true },
   { threads: 32, pixels: 8, channels: 2, subgroup: true },
 ];
 // saved profiles hold these, one channel group keeps the old name
