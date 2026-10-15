@@ -75,6 +75,9 @@ void main() {
 }`;
 }
 
+// the hidden matmuls run in mediump, which phones do at twice the rate (desktops run it as highp).
+// geometry stays highp (positions and the log of a distance don't survive f16), so does the output
+// layer, same as the webgpu kernel: it's hdr and only 6 wide
 function layerFS({ kin, out, relu, stage, xg = 0, geo = false }) {
   const J = [...Array(out).keys()];
   const acc = (x, b) =>
@@ -87,8 +90,6 @@ function layerFS({ kin, out, relu, stage, xg = 0, geo = false }) {
   const nTex = first ? xg : kin;
   return `${HEAD}
 uniform sampler2DArray src;
-layout(std140) uniform Wt { vec4 w[${kin * out * 4}]; };
-uniform vec4 bias[${out}];
 uniform int yOff;
 ${first ? 'uniform vec4 ln; uniform int stride; uniform ivec2 phase;' : ''}
 ${first && geo ? `${GEOM}
@@ -107,6 +108,9 @@ void geoFeatures(ivec2 px, vec4 L, out vec4 g0, out vec4 g1) {
   g0 = vec4(l, cosv) * valid;
   g1 = vec4(0.5 * log(d), 0.25 * log(omega + 1e-6), 0.0, 0.0) * valid;
 }` : ''}
+${stage === 'out' ? '' : 'precision mediump float;'}
+layout(std140) uniform Wt { vec4 w[${kin * out * 4}]; };
+uniform vec4 bias[${out}];
 ${J.map((j) => `layout(location = ${j}) out vec4 o${j};`).join('\n')}
 void main() {
   ivec2 q = ivec2(gl_FragCoord.xy);
@@ -121,7 +125,7 @@ void main() {
   }
   ${stage === 'l0' ? acc('L', xg * out * 4) : ''}
   ${stage === 'l0' && geo ? `vec4 g0, g1;
-  geoFeatures(px, L, g0, g1);
+  geoFeatures(px, ln, g0, g1);
   ${acc('g0', (xg + 1) * out * 4)}
   ${acc('g1', (xg + 2) * out * 4)}` : ''}
   ${J.map((j) => `o${j} = ${relu ? `max(a${j}, vec4(0.0))` : `a${j}`};`).join('\n  ')}
@@ -689,6 +693,9 @@ export class RelightEngine extends RelightBase {
           setLight(P);
         }
         gl.viewport(c0, 0, gw, h);
+        // no invalidateFramebuffer for tiled gpus: angle takes an array's layers as one image, so
+        // on d3d11 invalidating a pass's layers dropped the layers before it, and on vulkan
+        // (swiftshader) each one cleared the whole band, 1.7x slower at stride 8
         E.w[l].forEach((chunk, p) => {
           gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, E.fbos[dst][p]);
           draw(chunk, P);
