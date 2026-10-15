@@ -7,7 +7,7 @@
 // f16 where available: ~1/3 faster on the 3080, image moves by 3/255 at most
 
 /* global GPUBufferUsage, GPUMapMode, BigUint64Array */
-import { RelightBase, SLOTS } from './RelightBase';
+import { NO_PHASE, RESOLVED, RelightBase, SLOTS } from './RelightBase';
 
 // which one's fastest depends on the gpu, tune() times them. first that fits is the default
 export const KERNELS = [
@@ -186,7 +186,7 @@ function forwardWGSL({ W, H, WD, NH, PIXIN, XW, geo, mul, threads, pixels: P, of
   return /* wgsl */ `
 ${half ? 'enable f16;' : ''}
 struct Fwd {
-  i0: u32, i1: u32, stride: u32, slot: u32, x0: u32, xw: u32, _a: u32, _b: u32,
+  i0: u32, i1: u32, stride: u32, slot: u32, x0: u32, xw: u32, px: u32, py: u32,
   lc: vec4f, add: array<vec4f, ${CG}>,
 };
 @group(0) @binding(0) var<storage, read> Wv: array<${V}>;
@@ -198,9 +198,13 @@ var<workgroup> act: array<${V}, ${TP * CG}>;
 var<workgroup> pf: array<vec4f, ${2 * TP}>;
 var<workgroup> res: array<f32, ${TP * NO}>;
 ${GEO_WGSL}
+// px, py offset the grid so each frame can take different pixels. the last row/column can land
+// off the image, they're read clamped and the resolve doesn't use them
 fn pixelOf(i: u32) -> u32 {
   let s = fu.stride;
-  return (i / fu.xw) * s * ${u(W)} + (fu.x0 + i % fu.xw) * s;
+  let x = min((fu.x0 + i % fu.xw) * s + fu.px, ${u(W - 1)});
+  let y = min((i / fu.xw) * s + fu.py, ${u(H - 1)});
+  return y * ${u(W)} + x;
 }
 fn itemOf(i: u32) -> u32 {
   let cw = (${u(W)} + fu.stride - 1u) / fu.stride;
@@ -403,6 +407,87 @@ fn srgb(c: vec3f) -> vec3f {
 `;
 }
 
+// folds one evaluation into a light's full res image. pixels it evaluated are copied, the rest
+// move toward the evaluation upsampled by alpha, so at rest every pixel ends up evaluated and a
+// moving light keeps what it evaluated recently. pixels outside keep have nothing to keep yet
+function resolveWGSL({ W, H, mul }) {
+  const NW = wordsOf(mul);
+  return /* wgsl */ `
+struct Res {
+  s: u32, px: u32, py: u32, raw: u32, dst: u32, c0: u32, c1: u32, r0: u32,
+  r1: u32, x0: u32, y0: u32, xw: u32, yh: u32, k0x: u32, k0y: u32, k1x: u32,
+  k1y: u32, alpha: f32, sig: f32, _p: u32,
+};
+@group(0) @binding(0) var<uniform> ru: Res;
+@group(0) @binding(1) var<storage, read_write> outB: array<u32>;
+@group(0) @binding(2) var<storage, read> pgeo: array<vec4f>;
+const W = ${u(W)}; const H = ${u(H)}; const NP = ${u(W * H)};
+
+fn load(i: u32, w: ptr<function, array<vec2f, ${NW}>>) {
+  for (var k = 0u; k < ${u(NW)}; k++) { (*w)[k] = unpack2x16float(outB[${u(NW)} * i + k]); }
+}
+fn store(i: u32, w: array<vec2f, ${NW}>) {
+  for (var k = 0u; k < ${u(NW)}; k++) { outB[${u(NW)} * i + k] = pack2x16float(w[k]); }
+}
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3u) {
+  if (gid.x >= ru.xw * ru.yh) { return; }
+  let x = ru.x0 + gid.x % ru.xw; let y = ru.y0 + gid.x / ru.xw;
+  let p = y * W + x;
+  let s = ru.s;
+  let cw = (W + s - 1u) / s;
+  let raw = ru.raw * NP;
+  let dst = ru.dst * NP + p;
+  // last column/row whose pixel is on the image
+  let hx = max(min(ru.c1 - 1u, (W - 1u - ru.px) / s), ru.c0);
+  let hy = max(min(ru.r1 - 1u, (H - 1u - ru.py) / s), ru.r0);
+  var w: array<vec2f, ${NW}>;
+  if (x >= ru.px && y >= ru.py) {
+    let dx = x - ru.px; let dy = y - ru.py;
+    let cx = dx / s; let cy = dy / s;
+    if (dx % s == 0u && dy % s == 0u && cx >= ru.c0 && cx <= hx && cy >= ru.r0 && cy <= hy) {
+      load(raw + cy * cw + cx, &w);
+      store(dst, w);
+      return;
+    }
+  }
+  let kept = x >= ru.k0x && x < ru.k1x && y >= ru.k0y && y < ru.k1y;
+  let alpha = select(1.0, ru.alpha, kept);
+  if (alpha <= 0.0) { return; }
+
+  let fx = max(f32(x) - f32(ru.px), 0.0) / f32(s);
+  let fy = max(f32(y) - f32(ru.py), 0.0) / f32(s);
+  let x0 = clamp(u32(fx), ru.c0, hx); let y0 = clamp(u32(fy), ru.r0, hy);
+  let x1 = min(x0 + 1u, hx); let y1 = min(y0 + 1u, hy);
+  let tx = clamp(fx - f32(x0), 0.0, 1.0); let ty = clamp(fy - f32(y0), 0.0, 1.0);
+  let g = pgeo[2u * p];
+  let sig = ru.sig * f32(s) * max(g.w, 1e-3);
+  var acc: array<vec2f, ${NW}>;
+  var ws = 0.0;
+  for (var k = 0u; k < 4u; k++) {
+    let cx = select(x0, x1, (k & 1u) == 1u); let cy = select(y0, y1, k >= 2u);
+    let wb = select(1.0 - tx, tx, (k & 1u) == 1u) * select(1.0 - ty, ty, k >= 2u);
+    let q = pgeo[2u * ((cy * s + ru.py) * W + cx * s + ru.px)];
+    let dq = q.xyz - g.xyz;
+    var wgt = exp(-dot(dq, dq) / (2.0 * sig * sig));
+    if ((q.w > 0.0) != (g.w > 0.0)) { wgt = 0.0; }
+    let wt = wb * (wgt + 1e-4);
+    var n: array<vec2f, ${NW}>;
+    load(raw + cy * cw + cx, &n);
+    for (var j = 0u; j < ${u(NW)}; j++) { acc[j] += wt * n[j]; }
+    ws += wt;
+  }
+  let iw = 1.0 / max(ws, 1e-12);
+  if (alpha < 1.0) {
+    load(dst, &w);
+  }
+  for (var j = 0u; j < ${u(NW)}; j++) { w[j] = mix(w[j], acc[j] * iw, alpha); }
+  store(dst, w);
+}
+`;
+}
+
 export class RelightGPUEngine extends RelightBase {
   static async create(device, data, options = {}) {
     const engine = new RelightGPUEngine(device, data);
@@ -500,7 +585,7 @@ export class RelightGPUEngine extends RelightBase {
     const module = (code, label) => dev.createShaderModule({ code, label });
     const compositeModule = module(compositeWGSL({ W, H, mul }), 'relight composite');
     this.format = navigator.gpu.getPreferredCanvasFormat();
-    const [pre, forward, composite] = await Promise.all([
+    const [pre, forward, composite, resolve] = await Promise.all([
       dev.createComputePipelineAsync({
         layout: 'auto',
         compute: {
@@ -528,6 +613,10 @@ export class RelightGPUEngine extends RelightBase {
         vertex: { module: compositeModule, entryPoint: 'vs' },
         fragment: { module: compositeModule, entryPoint: 'fs', targets: [{ format: this.format }] },
         primitive: { topology: 'triangle-list' },
+      }),
+      dev.createComputePipelineAsync({
+        layout: 'auto',
+        compute: { module: module(resolveWGSL({ W, H, mul }), 'relight resolve'), entryPoint: 'main' },
       }),
     ]);
 
@@ -558,6 +647,11 @@ export class RelightGPUEngine extends RelightBase {
     this.fwdBuffers = [wBuf, xBuf, pgeoBuf, this.fwdBuf, outBuf];
     this.setKernel(first, forward);
     this.compositeGroup = bind(composite, [this.frameBuf, outBuf, pgeoBuf]);
+    this.resBuf = buffer(80, U.UNIFORM | U.COPY_DST);
+    this.resU32 = new Uint32Array(20);
+    this.resF32 = new Float32Array(this.resU32.buffer);
+    this.resolvePipeline = resolve;
+    this.resolveGroup = bind(resolve, [this.resBuf, outBuf, pgeoBuf]);
 
     if (dev.features.has('timestamp-query')) {
       this.querySet = dev.createQuerySet({ type: 'timestamp', count: 2 });
@@ -658,7 +752,7 @@ export class RelightGPUEngine extends RelightBase {
     }
   }
 
-  evaluate(light, slot, stride = 1, r0 = 0, r1 = this.rows(stride), c0 = 0, c1 = this.cols(stride)) {
+  evaluate(light, slot, stride = 1, r0 = 0, r1 = this.rows(stride), c0 = 0, c1 = this.cols(stride), phase = NO_PHASE) {
     const dev = this.device;
     r1 = Math.min(r1, this.rows(stride));
     c1 = Math.min(c1, this.cols(stride));
@@ -670,7 +764,7 @@ export class RelightGPUEngine extends RelightBase {
     }
     const ln = this.normLight(light);
     const { fwdU32, fwdF32 } = this;
-    fwdU32.set([i0, i1, stride, slot, c0, xw]);
+    fwdU32.set([i0, i1, stride, slot, c0, xw, phase[0], phase[1]]);
     fwdF32.set(light.pos, 8);
     fwdF32[11] = light.radius;
     const w = this.w0Light;
@@ -701,6 +795,33 @@ export class RelightGPUEngine extends RelightBase {
     if (timed) {
       this.time(stride, this.share(stride, r0, r1, c0, c1), stamped, queued);
     }
+  }
+
+  // slot is the evaluation, target the light's full res image. keep is the span that image
+  // already holds (x0, x1, y0, y1), outside it pixels are just upsampled
+  resolve(slot, target, stride, phase, [r0, r1, c0, c1], alpha, keep = null) {
+    r1 = Math.min(r1, this.rows(stride));
+    c1 = Math.min(c1, this.cols(stride));
+    const [x0, x1, y0, y1] = this.span(stride, r0, r1, c0, c1);
+    if (x1 <= x0 || y1 <= y0) {
+      return null;
+    }
+    const k = keep && alpha < 1 ? keep : [0, 0, 0, 0];
+    const R = this.resU32;
+    R.set([stride, phase[0], phase[1], slot, SLOTS - RESOLVED + target, c0, c1, r0, r1, x0, y0, x1 - x0, y1 - y0]);
+    R.set([k[0], k[2], k[1], k[3]], 13);
+    this.resF32[17] = alpha;
+    this.resF32[18] = (1.5 * 2 * this.cam.tx) / this.W;
+    const dev = this.device;
+    dev.queue.writeBuffer(this.resBuf, 0, R);
+    const enc = dev.createCommandEncoder();
+    const pass = enc.beginComputePass();
+    pass.setPipeline(this.resolvePipeline);
+    pass.setBindGroup(0, this.resolveGroup);
+    pass.dispatchWorkgroups(Math.ceil(((x1 - x0) * (y1 - y0)) / 64));
+    pass.end();
+    dev.queue.submit([enc.finish()]);
+    return [x0, x1, y0, y1];
   }
 
   queueDone() {
@@ -769,8 +890,10 @@ export class RelightGPUEngine extends RelightBase {
       for (let c = 0; c < 3; c += 1) {
         F[o + 4 + c] = l.color[c] * l.intensity;
       }
-      U32[o + 8] = l.slot;
-      U32[o + 9] = l.stride || 1;
+      // full res images sit in the last slots
+      const resolved = l.resolved != null;
+      U32[o + 8] = resolved ? SLOTS - RESOLVED + l.resolved : l.slot;
+      U32[o + 9] = resolved ? 1 : l.stride || 1;
       U32[o + 10] = l.hidden ? 0 : 1;
     }
     dev.queue.writeBuffer(this.frameBuf, 0, F);

@@ -8,7 +8,6 @@ import {
   AdaptiveQuality,
   MIN_FPS,
   NETWORKS,
-  REFINE_FRAMES,
   firstBudget,
   firstNetwork,
   firstTier,
@@ -22,7 +21,6 @@ import {
   tunedKernel,
   upgradeTier,
 } from './relight/adaptiveQuality';
-import { MIN_BAND_ROWS } from './relight/RelightBase';
 import {
   COMPACT_QUERY,
   NATIVE,
@@ -34,6 +32,7 @@ import {
   tuneEngine,
 } from './relight/prepare';
 import { requestRelightDevice } from './relight/RelightGPU';
+import { phaseOrder } from './relight/RelightBase';
 import { ROOM_FRAGMENT, RoomLayer } from './relight/roomLayer';
 import { reportRelight } from './relight/report';
 import { setRelightStatus } from './relight/status';
@@ -52,8 +51,9 @@ const END_TOP = 0.14;
 
 // ~1px in world units
 const MOVE_EPS = 0.004;
-// s at rest before it's refined
-const REFINE_DELAY = 0.12;
+// world units. a light that moved this far since a pixel was evaluated keeps ~37% of it,
+// further and the image falls back to the coarse evaluation upsampled
+const TRUST_DIST = 0.06;
 const BENCH_TRIES = 6;
 const SCROLL_REST = 0.15;
 // margin so the glass has something to bend at the edge. widened when you scroll
@@ -118,8 +118,8 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
       view: [0, 1, 0, 1],
       pointer: null,
       card: { el: null, uv: null },
-      key: makeLight(INTRO_FROM, KEY, [0, 1]),
-      fill: makeLight(FILL.pos, FILL, [2, 3]),
+      key: makeLight(INTRO_FROM, KEY, 0),
+      fill: makeLight(FILL.pos, FILL, 1),
       lastLevels: null,
       panel: null,
       hero: null,
@@ -494,20 +494,20 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
       state.layer?.draw(uniforms, vw, vh, roomDpr);
       return;
     }
-    const resting = (light) => light.evalPos && distance(light.pos, light.evalPos) <= MOVE_EPS && !light.refineRect;
+    const resting = (light) => light.evalPos && distance(light.pos, light.evalPos) <= MOVE_EPS && converged(light);
     const timed = engine.evalCost(1) !== null;
 
     const bench = timed && !engine.timing.pending && (engine.benchRuns ?? 0) < BENCH_TRIES ? benchStride(engine) : null;
     if (bench && age > 2 && !scrolling && resting(key) && resting(fill) && now - key.still > 0.5) {
       engine.benchRuns = (engine.benchRuns ?? 0) + 1;
       state.benching = true;
-      engine.evaluate({ pos: key.evalPos, radius: key.radius }, fill.slots[1 - fill.shown], bench);
+      engine.evaluate({ pos: key.evalPos, radius: key.radius }, fill.slot, bench);
       state.layer?.draw(uniforms, vw, vh, roomDpr);
       return;
     }
     if (!engine.tuned && timed && age > 3 && !scrolling && resting(key) && resting(fill) && now - key.still > 1) {
       state.tuning = true;
-      tuneEngine(engine, state.tuneController.signal, fill.slots[1 - fill.shown])
+      tuneEngine(engine, state.tuneController.signal, fill.slot)
         .catch((error) => {
           engine.tuned = true;
           console.warn('Relight backdrop tuning failed:', error);
@@ -524,13 +524,12 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
 
     const view = visibleRect(state.box, vw, vh);
     state.view = view;
-    const finest = refineStride(engine, budget, areaOf(grow(view, VIEW_MARGIN)));
     let dirty = false;
     const passes = [];
-    if (needsWork(key, now, finest, scrolling, view)) {
+    if (needsWork(key, scrolling, view)) {
       passes.push(key);
     }
-    if (needsWork(fill, now, finest, scrolling, view) && (!passes.length || !fill.evalPos)) {
+    if (needsWork(fill, scrolling, view) && (!passes.length || !fill.evalPos)) {
       passes.push(fill);
     }
 
@@ -547,7 +546,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
     }
     if (passes.length || dirty) {
       passes.forEach((light) => {
-        if (step(engine, light, now, budget / passes.length, finest, view)) {
+        if (step(engine, light, now, budget / passes.length, view)) {
           dirty = true;
         }
       });
@@ -651,7 +650,8 @@ function statusOf(state) {
     cost: round(engine.evalCost(1)),
     seeded: engine.timing.seeded,
     moving: previewStride(engine, quality.budget, areaOf(grow(state.view, VIEW_MARGIN))),
-    resting: refineStride(engine, quality.budget, areaOf(grow(state.view, VIEW_MARGIN))),
+    // every pixel gets evaluated once the light rests
+    resting: 1,
     fixedLayer: !!state.layer,
     roomDpr: state.roomDpr,
     fromProfile: state.fromProfile,
@@ -714,87 +714,74 @@ function install(state, built, uniforms) {
   uniforms.tRelight.value = built.texture;
   uniforms.texSize.value.set(built.engine.W, built.engine.H);
   [state.key, state.fill].forEach((light) =>
-    Object.assign(light, { evalPos: null, rect: null, shown: 0, stride: 0, refineStride: 0, refineRect: null })
+    Object.assign(light, { evalPos: null, rect: null, kept: null, stride: 0, phase: 0, done: 0 })
   );
   state.lastLevels = null;
 }
 
-function makeLight(pos, { radius, color, hidden = false }, slots) {
+// slot is where the network writes, image the light's full res image the evaluations build up
+function makeLight(pos, { radius, color, hidden = false }, index) {
   return {
     pos: [...pos],
     radius,
     color,
     hidden,
-    slots,
-    // rect is image uv: u0, u1, v0, v1
+    slot: index,
+    image: index,
     evalPos: null,
+    // image uv the evaluations cover: u0, u1, v0, v1
     rect: null,
-    shown: 0,
+    // pixels the image holds from earlier evaluations: x0, x1, y0, y1
+    kept: null,
     stride: 0,
+    phase: 0,
+    // evaluations at this stride since the light last moved
+    done: 0,
     still: 0,
-    refineStride: 0,
-    refineRect: null,
-    refineRow: 0,
   };
 }
 
-function needsWork(light, now, finest, scrolling, view) {
+function converged(light) {
+  return light.stride > 0 && light.done >= light.stride ** 2;
+}
+
+function needsWork(light, scrolling, view) {
   return (
     !light.evalPos ||
     distance(light.pos, light.evalPos) > MOVE_EPS ||
     !covers(light.rect, view) ||
-    (!scrolling && light.stride > finest && now - light.still > REFINE_DELAY)
+    (!scrolling && !converged(light))
   );
 }
 
-function step(engine, light, now, budget, finest, view) {
-  const moved = !light.evalPos || distance(light.pos, light.evalPos) > MOVE_EPS;
-  if (moved || !covers(light.rect, view)) {
-    const rect = grow(view, moved ? VIEW_MARGIN : VIEW_GROW);
-    const stride = previewStride(engine, budget, areaOf(rect));
-    if (moved) {
-      light.evalPos = [...light.pos];
-      light.still = now;
-    }
-    const at = { pos: light.evalPos, radius: light.radius };
-    engine.evaluate(at, light.slots[light.shown], stride, ...itemRect(engine, rect, stride));
-    light.rect = rect;
-    light.stride = stride;
-    light.refineRect = null;
-    return true;
+// each frame evaluates every stride-th pixel from a different place in the stride x stride block
+// and folds it into the light's image. at rest that's every pixel after stride^2 frames, moving
+// it keeps pixels evaluated while the light was close to where it is now
+function step(engine, light, now, budget, view) {
+  const moved = light.evalPos ? distance(light.pos, light.evalPos) : Infinity;
+  const fresh = moved > MOVE_EPS;
+  const rect = fresh || !covers(light.rect, view) ? grow(view, fresh ? VIEW_MARGIN : VIEW_GROW) : light.rect;
+  const stride = previewStride(engine, budget, areaOf(rect));
+  // newly covered pixels and a new stride need a whole cycle again
+  if (fresh || stride !== light.stride || !sameRect(rect, light.rect)) {
+    light.done = 0;
   }
-  if (light.stride > finest) {
-    if (light.refineStride !== finest || !light.refineRect) {
-      light.refineStride = finest;
-      light.refineRect = light.rect;
-      light.refineRow = 0;
-    }
-    const [r0, r1, c0, c1] = itemRect(engine, light.refineRect, finest);
-    const other = 1 - light.shown;
-    const cost = engine.evalCost(finest);
-    const rowCost = cost && cost * engine.share(finest, 0, 1, c0, c1);
-    const rows = rowCost ? Math.floor(budget / rowCost / 4) * 4 : MIN_BAND_ROWS;
-    const from = Math.max(r0, light.refineRow);
-    const to = Math.min(r1, from + THREE.MathUtils.clamp(rows, MIN_BAND_ROWS, r1 - r0));
-    engine.evaluate({ pos: light.evalPos, radius: light.radius }, light.slots[other], finest, from, to, c0, c1);
-    light.refineRow = to;
-    if (to >= r1) {
-      light.shown = other;
-      light.stride = finest;
-      light.rect = light.refineRect;
-      light.refineRect = null;
-      return true;
-    }
+  light.stride = stride;
+  let alpha = 0;
+  if (fresh) {
+    alpha = Number.isFinite(moved) ? 1 - Math.exp(-moved / TRUST_DIST) : 1;
+    light.evalPos = [...light.pos];
+    light.still = now;
   }
-  return false;
-}
-
-// ~40 frames of budget. slow gpus stop at a softer image instead of stalling for seconds
-function refineStride(engine, budget, area = 1) {
-  if (engine.evalCost(1) === null) {
-    return 4;
-  }
-  return [1, 2, 4].find((s) => engine.evalCost(s) * area <= budget * REFINE_FRAMES) ?? 8;
+  const order = phaseOrder(stride);
+  const phase = order[light.phase % order.length];
+  light.phase += 1;
+  light.done += 1;
+  const items = itemRect(engine, rect, stride);
+  engine.evaluate({ pos: light.evalPos, radius: light.radius }, light.slot, stride, ...items, phase);
+  light.kept = engine.resolve(light.slot, light.image, stride, phase, items, alpha, light.kept);
+  light.rect = rect;
+  return true;
 }
 
 function previewStride(engine, budget, area = 1) {
@@ -821,6 +808,10 @@ function covers(rect, view) {
   return !!rect && rect[0] <= view[0] && rect[1] >= view[1] && rect[2] <= view[2] && rect[3] >= view[3];
 }
 
+function sameRect(a, b) {
+  return !!a && !!b && a.every((v, i) => v === b[i]);
+}
+
 function areaOf([u0, u1, v0, v1]) {
   return Math.max(0, u1 - u0) * Math.max(0, v1 - v0);
 }
@@ -840,8 +831,7 @@ function shown(light, intensity) {
     radius: light.radius,
     color: light.color,
     intensity,
-    slot: light.slots[light.shown],
-    stride: light.stride,
+    resolved: light.image,
     hidden: light.hidden,
   };
 }

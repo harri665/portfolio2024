@@ -1,7 +1,8 @@
 // ?relight=bench, used by perf/relight-bench.mjs. exposes window.__relightBench
-// with open / time / render / tune / close. never runs on a normal visit
+// with open / time / render / accumulate / tune / close. never runs on a normal visit
 
 import { createRelightEngine, loadRoom } from './prepare';
+import { phaseOrder } from './RelightBase';
 import { requestRelightDevice } from './RelightGPU';
 
 const BAND_BYTES = 32 << 20;
@@ -87,6 +88,54 @@ async function render({ lights, stride = 1, exposure = 1, rect = [] }) {
     return { pos: l.pos, radius: l.radius, color: [1, 1, 1], intensity: 1, slot: i, stride, hidden: false };
   });
   engine.composite(shown, exposure);
+  return readImage();
+}
+
+// moves a light from `from` to `to` over `frames` frames the way the backdrop does, each frame a
+// different phase folded in by how far it moved. scored against every pixel at `to`.
+// accumulate false is one evaluation at phase 0 each frame, how the backdrop used to look
+async function accumulate({ from, to, frames = 16, stride = 8, trust = 0.06, accumulate = true, exposure = 1 }) {
+  const all = [0, engine.rows(stride), 0, engine.cols(stride)];
+  const order = phaseOrder(stride);
+  let kept = null;
+  let prev = null;
+  for (let i = 0; i < frames; i += 1) {
+    const t = frames > 1 ? i / (frames - 1) : 1;
+    const light = { pos: from.map((v, k) => v + (to[k] - v) * t), radius: engine.rmin };
+    const moved = prev ? distance(light.pos, prev) : Infinity;
+    const alpha = accumulate && prev ? 1 - Math.exp(-moved / trust) : 1;
+    const phase = accumulate ? order[i % order.length] : [0, 0];
+    engine.evaluate(light, 0, stride, ...all, phase);
+    kept = engine.resolve(0, 0, stride, phase, all, alpha, kept);
+    prev = light.pos;
+  }
+  const light = { pos: to, radius: engine.rmin, color: [1, 1, 1], intensity: 1, hidden: false };
+  engine.composite([{ ...light, resolved: 0 }], exposure);
+  const got = await readImage();
+  const ref = await render({ lights: [light], stride: 1, exposure });
+  return { psnr: psnr(got.rgba, ref.rgba) };
+}
+
+function distance(a, b) {
+  return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+}
+
+function psnr(a, b) {
+  const x = atob(a);
+  const y = atob(b);
+  let se = 0;
+  let n = 0;
+  for (let i = 0; i < x.length; i += 4) {
+    for (let c = 0; c < 3; c += 1) {
+      const d = x.charCodeAt(i + c) - y.charCodeAt(i + c);
+      se += d * d;
+      n += 1;
+    }
+  }
+  return se ? 10 * Math.log10((255 * 255 * n) / se) : Infinity;
+}
+
+async function readImage() {
   const image = engine.snapshot();
   const canvas = new OffscreenCanvas(engine.W, engine.H);
   const ctx = canvas.getContext('2d');
@@ -107,5 +156,5 @@ function tune({ stride = 1, runs = 4 } = {}) {
 }
 
 export function installBench() {
-  window.__relightBench = { open, time, render, tune, close };
+  window.__relightBench = { open, time, render, accumulate, tune, close };
 }

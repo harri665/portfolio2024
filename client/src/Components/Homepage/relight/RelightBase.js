@@ -1,11 +1,32 @@
 // shared by the webgl + webgpu engines: camera, light domain and the cost model
 
-// two lights, double buffered
+// network outputs, one a light plus spares for the bench
 export const SLOTS = 4;
+// full res images the backdrop builds up a light at a time, one per light
+export const RESOLVED = 2;
+// where in each stride x stride block an evaluation takes its pixel
+export const NO_PHASE = [0, 0];
 // below this the fixed per pass cost outweighs the rows (many times over on webgl)
 export const MIN_BAND_ROWS = 16;
 // thin bands make the gpu look slow. 16 rows at 768px read ~16ms for a light that takes ~8
 const MIN_TIMED_SHARE = 0.25;
+
+// bayer order, so the first quarter of a stride's offsets already covers it at half the stride
+const PHASES = new Map();
+export function phaseOrder(stride) {
+  if (!PHASES.has(stride)) {
+    const rank = (x, y, n) =>
+      n === 1 ? 0 : 4 * rank(x % (n / 2), y % (n / 2), n / 2) + [0, 2, 3, 1][(y >= n / 2) * 2 + (x >= n / 2)];
+    const cells = [];
+    for (let y = 0; y < stride; y += 1) {
+      for (let x = 0; x < stride; x += 1) {
+        cells.push([x, y]);
+      }
+    }
+    PHASES.set(stride, cells.sort((a, b) => rank(...a, stride) - rank(...b, stride)));
+  }
+  return PHASES.get(stride);
+}
 
 export class RelightBase {
   constructor(scene, pos) {
@@ -35,6 +56,11 @@ export class RelightBase {
 
   share(stride, r0, r1, c0, c1) {
     return ((r1 - r0) * (c1 - c0)) / (this.rows(stride) * this.cols(stride));
+  }
+
+  // pixels a resolve of these items covers: x0, x1, y0, y1
+  span(stride, r0, r1, c0, c1) {
+    return [c0 * stride, Math.min(this.W, c1 * stride), r0 * stride, Math.min(this.H, r1 * stride)];
   }
 
   timeable(stride, r0, r1, c0, c1) {

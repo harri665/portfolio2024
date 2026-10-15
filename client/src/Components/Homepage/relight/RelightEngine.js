@@ -4,7 +4,7 @@
 // no compute shaders in webgl2 so the MLP is a chain of fragment passes over bands of rows,
 // ping-ponging activations between two texture arrays
 
-import { RelightBase, SLOTS } from './RelightBase';
+import { NO_PHASE, RESOLVED, RelightBase, SLOTS } from './RelightBase';
 
 export { SLOTS };
 
@@ -90,7 +90,7 @@ uniform sampler2DArray src;
 layout(std140) uniform Wt { vec4 w[${kin * out * 4}]; };
 uniform vec4 bias[${out}];
 uniform int yOff;
-${first ? 'uniform vec4 ln; uniform int stride;' : ''}
+${first ? 'uniform vec4 ln; uniform int stride; uniform ivec2 phase;' : ''}
 ${first && geo ? `${GEOM}
 uniform vec3 boxLo, boxHi; uniform vec2 radRange;
 void geoFeatures(ivec2 px, vec4 L, out vec4 g0, out vec4 g1) {
@@ -110,7 +110,9 @@ void geoFeatures(ivec2 px, vec4 L, out vec4 g0, out vec4 g1) {
 ${J.map((j) => `layout(location = ${j}) out vec4 o${j};`).join('\n')}
 void main() {
   ivec2 q = ivec2(gl_FragCoord.xy);
-  ${stage === 'l0' ? 'vec4 L = ln; ivec2 px = ivec2(q.x, q.y + yOff) * stride;' : 'ivec2 px = ivec2(q.x, q.y - yOff);'}
+  ${stage === 'l0'
+    ? 'vec4 L = ln; ivec2 px = min(ivec2(q.x, q.y + yOff) * stride + phase, textureSize(src, 0).xy - 1);'
+    : 'ivec2 px = ivec2(q.x, q.y - yOff);'}
   ${J.map((j) => `vec4 a${j} = bias[${j}];`).join(' ')}
   for (int k = 0; k < ${nTex}; k++) {
     vec4 x = texelFetch(src, ivec3(px, k), 0);
@@ -128,7 +130,7 @@ void main() {
 
 // rows bottom first, that's what three.js render targets expect
 const compositeFS = (W, H, mul) => `${HEAD}
-uniform sampler2DArray outT;
+uniform sampler2DArray outT; uniform sampler2DArray resT;
 ${GEOM}
 uniform vec3 camX, camY, camZ; uniform vec2 tanxy;
 uniform float exposure; uniform int nLights;
@@ -171,7 +173,15 @@ void outAt(int slot, ivec2 c, out vec3 a, out vec3 b) {
   a = v0.xyz; b = vec3(v0.w, v1.xy);`
     : 'a = texelFetch(outT, ivec3(c, slot), 0).xyz; b = vec3(0.0);'}
 }
+// stride 0 is a light's full res image
 void netAt(int slot, int s, ivec2 pix, out vec3 a, out vec3 b) {
+  if (s == 0) {
+    ${mul
+      ? `vec4 v0 = texelFetch(resT, ivec3(pix, 2 * slot), 0), v1 = texelFetch(resT, ivec3(pix, 2 * slot + 1), 0);
+    a = v0.xyz; b = vec3(v0.w, v1.xy);`
+      : 'a = texelFetch(resT, ivec3(pix, slot), 0).xyz; b = vec3(0.0);'}
+    return;
+  }
   if (s <= 1) {
     outAt(slot, pix, a, b);
     return;
@@ -221,6 +231,53 @@ void main() {
     I += lE[l] * (lit(l, pix) + (lInfo[l].z != 0 ? directCov(pix, l) : 0.0));
   }
   disp = vec4(clamp(srgb(tone(I)), 0.0, 1.0), 1.0);
+}`;
+
+// folds one evaluation into a light's full res image, see the webgpu resolve. a pass can't read
+// the pixel it blends into, so it's drawn in three parts: side 0 is upsampled pixels with
+// nothing kept, side 1 the kept ones (blended by alpha), side 2 the evaluated pixels
+const resolveFS = (W, H, mul) => `${HEAD}
+uniform sampler2DArray outT;
+${GEOM}
+uniform int slot, s, side; uniform ivec2 phase; uniform float sigK;
+uniform ivec4 items, keep;  // c0, c1, r0, r1 and x0, y0, x1, y1
+layout(location = 0) out vec4 o0;
+${mul ? 'layout(location = 1) out vec4 o1;' : ''}
+void main() {
+  ivec2 pix = ivec2(gl_FragCoord.xy);
+  ivec2 lo = items.xz;
+  ivec2 hi = max(min(items.yw - 1, (ivec2(${W - 1}, ${H - 1}) - phase) / s), lo);
+  ivec2 d = pix - phase;
+  ivec2 c = max(d, ivec2(0)) / s;
+  bool on = all(greaterThanEqual(d, ivec2(0))) && d.x % s == 0 && d.y % s == 0
+    && all(greaterThanEqual(c, lo)) && all(lessThanEqual(c, hi));
+  if (side == 2) {
+    if (!on) discard;
+    o0 = texelFetch(outT, ivec3(c, ${mul ? '2 * slot' : 'slot'}), 0);
+    ${mul ? 'o1 = texelFetch(outT, ivec3(c, 2 * slot + 1), 0);' : ''}
+    return;
+  }
+  bool kept = all(greaterThanEqual(pix, keep.xy)) && all(lessThan(pix, keep.zw));
+  if (on || kept != (side == 1)) discard;
+  vec2 f = max(vec2(d), 0.0) / float(s);
+  ivec2 c0 = clamp(ivec2(f), lo, hi), c1 = min(c0 + 1, hi);
+  vec2 t = clamp(f - vec2(c0), 0.0, 1.0);
+  vec4 g = geomAt(pix);
+  float sig = sigK * float(s) * max(g.w, 1e-3);
+  vec4 a = vec4(0.0), b = vec4(0.0); float ws = 0.0;
+  for (int k = 0; k < 4; k++) {
+    ivec2 cc = ivec2((k & 1) == 1 ? c1.x : c0.x, k >= 2 ? c1.y : c0.y);
+    float wb = ((k & 1) == 1 ? t.x : 1.0 - t.x) * (k >= 2 ? t.y : 1.0 - t.y);
+    vec4 q = geomAt(cc * s + phase);
+    vec3 dq = q.xyz - g.xyz;
+    float wg = (q.w > 0.0) == (g.w > 0.0) ? exp(-dot(dq, dq) / (2.0 * sig * sig)) : 0.0;
+    float w = wb * (wg + 1e-4);
+    a += w * texelFetch(outT, ivec3(cc, ${mul ? '2 * slot' : 'slot'}), 0);
+    ${mul ? 'b += w * texelFetch(outT, ivec3(cc, 2 * slot + 1), 0);' : ''}
+    ws += w;
+  }
+  o0 = a / max(ws, 1e-12);
+  ${mul ? 'o1 = b / max(ws, 1e-12);' : ''}
 }`;
 
 function packLayer(layer, nIn, kin, out, inCol) {
@@ -318,7 +375,12 @@ export class RelightEngine extends RelightBase {
     this.outFbos = Array.from({ length: SLOTS }, (_, s) =>
       this.framebuffer(Array.from({ length: per }, (__, j) => [this.outTex, s * per + j]))
     );
+    this.resTex = this.texture(A2, gl.RGBA16F, W, H, RESOLVED * per);
+    this.resFbos = Array.from({ length: RESOLVED }, (_, s) =>
+      this.framebuffer(Array.from({ length: per }, (__, j) => [this.resTex, s * per + j]))
+    );
     this.pComp = this.program(compositeFS(W, H, mul), 'composite');
+    this.pResolve = this.program(resolveFS(W, H, mul), 'resolve');
     const th = Math.max(8, Math.min(H, Math.floor(bandBytes / (W * G * 8))));
     this.arrs = [0, 1].map(() => this.texture(A2, gl.RGBA16F, W, th, G));
     this.th = th;
@@ -564,7 +626,7 @@ export class RelightEngine extends RelightBase {
       gl.uniformBlockBinding(p, block, 0);
     }
     gl.useProgram(p);
-    [['src', 0], ['outT', 0], ['posT', 2], ['auxT', 4], ['gridT', 6]].forEach(([name, unit]) => {
+    [['src', 0], ['outT', 0], ['resT', 1], ['posT', 2], ['auxT', 4], ['gridT', 6]].forEach(([name, unit]) => {
       if (u[name]) {
         gl.uniform1i(u[name], unit);
       }
@@ -582,7 +644,7 @@ export class RelightEngine extends RelightBase {
     return { p, u };
   }
 
-  evaluate(light, slot, stride = 1, r0 = 0, r1 = this.rows(stride), c0 = 0, c1 = this.cols(stride)) {
+  evaluate(light, slot, stride = 1, r0 = 0, r1 = this.rows(stride), c0 = 0, c1 = this.cols(stride), phase = NO_PHASE) {
     const gl = this.gl;
     const E = this.net;
     r1 = Math.min(r1, this.rows(stride));
@@ -600,6 +662,7 @@ export class RelightEngine extends RelightBase {
     const setLight = (P) => {
       gl.uniform4fv(P.u.ln, ln);
       gl.uniform1i(P.u.stride, stride);
+      gl.uniform2i(P.u.phase, phase[0], phase[1]);
     };
 
     this.startTiming(stride, r0, r1, c0, c1);
@@ -640,6 +703,51 @@ export class RelightEngine extends RelightBase {
     this.stopTiming();
   }
 
+  // slot is the evaluation, target the light's full res image. keep is the span that image
+  // already holds (x0, x1, y0, y1), outside it pixels are just upsampled
+  resolve(slot, target, stride, phase, [r0, r1, c0, c1], alpha, keep = null) {
+    const gl = this.gl;
+    r1 = Math.min(r1, this.rows(stride));
+    c1 = Math.min(c1, this.cols(stride));
+    const [x0, x1, y0, y1] = this.span(stride, r0, r1, c0, c1);
+    if (x1 <= x0 || y1 <= y0) {
+      return null;
+    }
+    const k = keep && alpha < 1 ? keep : [0, 0, 0, 0];
+    const { u, p } = this.pResolve;
+    gl.useProgram(p);
+    gl.uniform1i(u.slot, slot);
+    gl.uniform1i(u.s, stride);
+    gl.uniform2i(u.phase, phase[0], phase[1]);
+    gl.uniform1f(u.sigK, (1.5 * 2 * this.cam.tx) / this.W);
+    gl.uniform4i(u.items, c0, c1, r0, r1);
+    gl.uniform4i(u.keep, k[0], k[2], k[1], k[3]);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.outTex);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, this.posTex);
+    gl.bindVertexArray(this.vao);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.resFbos[target]);
+    gl.viewport(x0, y0, x1 - x0, y1 - y0);
+    const draw = (side) => {
+      gl.uniform1i(u.side, side);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    };
+    const keepsAll = k[0] <= x0 && k[1] >= x1 && k[2] <= y0 && k[3] >= y1;
+    if (!keepsAll) {
+      draw(0);
+    }
+    if (alpha > 0 && k[1] > k[0]) {
+      gl.enable(gl.BLEND);
+      gl.blendColor(0, 0, 0, alpha);
+      gl.blendFunc(gl.CONSTANT_ALPHA, gl.ONE_MINUS_CONSTANT_ALPHA);
+      draw(1);
+      gl.disable(gl.BLEND);
+    }
+    draw(2);
+    return [x0, x1, y0, y1];
+  }
+
   composite(lights, exposure = 1) {
     const gl = this.gl;
     const { u, p } = this.pComp;
@@ -659,13 +767,16 @@ export class RelightEngine extends RelightBase {
     lights.slice(0, n).forEach((l, i) => {
       pr.set([...l.pos, l.radius], i * 4);
       E.set(l.color.map((c) => c * l.intensity), i * 3);
-      info.set([l.slot, l.stride || 1, l.hidden ? 0 : 1], i * 3);
+      const resolved = l.resolved != null;
+      info.set([resolved ? l.resolved : l.slot, resolved ? 0 : l.stride || 1, l.hidden ? 0 : 1], i * 3);
     });
     gl.uniform4fv(u.lPR, pr);
     gl.uniform3fv(u.lE, E);
     gl.uniform3iv(u.lInfo, info);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.outTex);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.resTex);
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, this.posTex);
     gl.activeTexture(gl.TEXTURE4);
