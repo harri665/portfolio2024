@@ -1,34 +1,47 @@
-// webgl2 fallback for the relight network, trimmed port of my relight project's runtime
-// (Neural Render Proxies, Sancho et al. EGSR 2026). only used where there's no webgpu
-//
-// no compute shaders in webgl2 so the MLP is a chain of fragment passes over bands of rows,
-// ping-ponging activations between two texture arrays
-
-import { NO_PHASE, RESOLVED, RelightBase, SLOTS } from './RelightBase';
+import { NO_PHASE, RESOLVED, RelightBase, SLOTS, readNetwork } from './RelightBase';
+import { fence } from './util';
 
 export { SLOTS };
 
-// 32MB ran ~20% faster than 8MB
 const BAND_BYTES = 16 << 20;
-// on a 3080 one group per pass is 2x as fast as eight, but it depends on the gpu so tune() decides
+const MIN_BAND_HEIGHT = 8;
 const OUTPUTS = [1, 2, 4, 8];
 const DEFAULT_OUTPUTS = 2;
+const MAX_ENCODE_TARGETS = 8;
+const MAX_GRID_WIDTH = 4096;
+const FENCE_TIMEOUT_MS = 1000;
+const FENCE_POLL_MS = 1;
 const outputsName = (n) => `o${n}`;
-const FENCE_GIVE_UP = 1000;
 
-const VS = `#version 300 es
+const UNIT = { input: 0, resolved: 1, positions: 2, aux: 4, grid: 6 };
+const SAMPLER_UNITS = [
+  ['src', UNIT.input],
+  ['outT', UNIT.input],
+  ['resT', UNIT.resolved],
+  ['posT', UNIT.positions],
+  ['auxT', UNIT.aux],
+  ['gridT', UNIT.grid],
+];
+
+const FULL_RES_STRIDE = 0;
+const SIDE = { upsampled: 0, kept: 1, evaluated: 2 };
+const OUTPUT_STAGE = 'out';
+const LAYER0_STAGE = 'l0';
+const HIDDEN_STAGE = 'hid';
+
+const FULLSCREEN_VS = `#version 300 es
 void main() {
   gl_Position = vec4(gl_VertexID == 1 ? 3.0 : -1.0, gl_VertexID == 2 ? 3.0 : -1.0, 0.0, 1.0);
 }`;
 
-const HEAD = `#version 300 es
+const HEADER = `#version 300 es
 precision highp float; precision highp int;
 precision highp sampler2D; precision highp sampler2DArray; precision highp usampler2D;
 `;
 
-const GEOM = `
+const GEOMETRY_GLSL = `
 uniform usampler2D posT; uniform sampler2DArray auxT;
-uniform vec2 posMap; uniform vec3 camO;  // posMap: lowest position, step
+uniform vec2 posMap; uniform vec3 camO;
 vec4 geomAt(ivec2 px) {
   uvec4 q = texelFetch(posT, px, 0);
   if (q.x == 0u) return vec4(0.0);
@@ -39,24 +52,43 @@ vec3 normalAt(ivec2 px) {
   return vec3(texelFetch(auxT, ivec3(px, 0), 0).w, texelFetch(auxT, ivec3(px, 1), 0).xy);
 }`;
 
-function encodeFS({ W, H, levels, feats, gridRes, gridOff, auxDim, GW, k0, n }) {
-  const ENC = levels * feats;
+const SOLID_ANGLE_GLSL = `
+float solidAngle(float r, float d) {
+  float s = min(r / d, 1.0);
+  return 6.283185307 * s * s / (1.0 + sqrt(max(1.0 - s * s, 0.0)));
+}`;
+
+const TAP_GLSL = `
+ivec2 tapCell(int k, ivec2 c0, ivec2 c1) {
+  return ivec2((k & 1) == 1 ? c1.x : c0.x, k >= 2 ? c1.y : c0.y);
+}
+float tapWeight(int k, vec2 t, vec4 g, vec4 q, float sig) {
+  float wb = ((k & 1) == 1 ? t.x : 1.0 - t.x) * (k >= 2 ? t.y : 1.0 - t.y);
+  vec3 dq = q.xyz - g.xyz;
+  float wg = (q.w > 0.0) == (g.w > 0.0) ? exp(-dot(dq, dq) / (2.0 * sig * sig)) : 0.0;
+  return wb * (wg + 1e-4);
+}`;
+
+const range = (n) => [...Array(n).keys()];
+const outputDecls = (n) => range(n).map((j) => `layout(location = ${j}) out vec4 o${j};`).join('\n');
+
+function encodeFS({ W, H, levels, feats, gridRes, gridOff, auxDim, gridWidth, first, count }) {
+  const encoded = levels * feats;
   const input = (i) => {
-    if (i < ENC) {
+    if (i < encoded) {
       const l = Math.floor(i / feats);
       return `bil(${gridRes[l]}, ${gridOff[l]}, ${i % feats}, uv)`;
     }
-    if (i < ENC + auxDim) {
-      const j = i - ENC;
+    if (i < encoded + auxDim) {
+      const j = i - encoded;
       return `a${j >> 2}.${'xyzw'[j & 3]}`;
     }
     return '0.0';
   };
-  const J = [...Array(n).keys()];
-  return `${HEAD}
+  return `${HEADER}
 uniform sampler2D gridT; uniform sampler2DArray auxT;
-${J.map((j) => `layout(location = ${j}) out vec4 o${j};`).join('\n')}
-float gridAt(int i) { return texelFetch(gridT, ivec2(i % ${GW}, i / ${GW}), 0).x; }
+${outputDecls(count)}
+float gridAt(int i) { return texelFetch(gridT, ivec2(i % ${gridWidth}, i / ${gridWidth}), 0).x; }
 float bil(int R, int off, int f, vec2 uv) {
   vec2 g = uv * float(R - 1);
   ivec2 c = min(ivec2(floor(g)), ivec2(R - 2));
@@ -71,29 +103,13 @@ void main() {
   ivec2 px = ivec2(gl_FragCoord.xy);
   vec2 uv = (vec2(px) + 0.5) / vec2(${W}.0, ${H}.0);
   vec4 a0 = texelFetch(auxT, ivec3(px, 0), 0), a1 = texelFetch(auxT, ivec3(px, 1), 0);
-  ${J.map((j) => `o${j} = vec4(${[0, 1, 2, 3].map((c) => input(4 * (k0 + j) + c)).join(', ')});`).join('\n  ')}
+  ${range(count).map((j) => `o${j} = vec4(${[0, 1, 2, 3].map((c) => input(4 * (first + j) + c)).join(', ')});`).join('\n  ')}
 }`;
 }
 
-// the hidden matmuls run in mediump, which phones do at twice the rate (desktops run it as highp).
-// geometry stays highp (positions and the log of a distance don't survive f16), so does the output
-// layer, same as the webgpu kernel: it's hdr and only 6 wide
-function layerFS({ kin, out, relu, stage, xg = 0, geo = false }) {
-  const J = [...Array(out).keys()];
-  const acc = (x, b) =>
-    J.map(
-      (j) =>
-        `a${j} += w[${b} + ${4 * j}] * ${x}.x + w[${b} + ${4 * j + 1}] * ${x}.y + ` +
-        `w[${b} + ${4 * j + 2}] * ${x}.z + w[${b} + ${4 * j + 3}] * ${x}.w;`
-    ).join('\n    ');
-  const first = stage === 'l0';
-  const nTex = first ? xg : kin;
-  return `${HEAD}
-uniform sampler2DArray src;
-uniform int yOff;
-${first ? 'uniform vec4 ln; uniform int stride; uniform ivec2 phase;' : ''}
-${first && geo ? `${GEOM}
-uniform vec3 boxLo, boxHi; uniform vec2 radRange;
+function geoFeaturesGLSL() {
+  return `${GEOMETRY_GLSL}
+uniform vec3 boxLo, boxHi; uniform vec2 radRange;${SOLID_ANGLE_GLSL}
 void geoFeatures(ivec2 px, vec4 L, out vec4 g0, out vec4 g1) {
   vec3 c = boxLo + (L.xyz + 1.0) * 0.5 * (boxHi - boxLo);
   float r = radRange.x + (L.w + 1.0) * 0.5 * (radRange.y - radRange.x);
@@ -103,42 +119,66 @@ void geoFeatures(ivec2 px, vec4 L, out vec4 g0, out vec4 g1) {
   float d = max(length(v), 1e-4);
   vec3 l = v / d;
   float cosv = dot(normalAt(px), l);
-  float s = min(r / d, 1.0);
-  float omega = 6.283185307 * s * s / (1.0 + sqrt(max(1.0 - s * s, 0.0)));
+  float omega = solidAngle(r, d);
   g0 = vec4(l, cosv) * valid;
   g1 = vec4(0.5 * log(d), 0.25 * log(omega + 1e-6), 0.0, 0.0) * valid;
-}` : ''}
-${stage === 'out' ? '' : 'precision mediump float;'}
-layout(std140) uniform Wt { vec4 w[${kin * out * 4}]; };
-uniform vec4 bias[${out}];
-${J.map((j) => `layout(location = ${j}) out vec4 o${j};`).join('\n')}
+}`;
+}
+
+function layerFS({ inputVec4s, outputVec4s, relu, stage, pixelVec4s = 0, geo = false }) {
+  const J = range(outputVec4s);
+  const accumulate = (x, b) =>
+    J.map(
+      (j) =>
+        `a${j} += w[${b} + ${4 * j}] * ${x}.x + w[${b} + ${4 * j + 1}] * ${x}.y + ` +
+        `w[${b} + ${4 * j + 2}] * ${x}.z + w[${b} + ${4 * j + 3}] * ${x}.w;`
+    ).join('\n    ');
+  const first = stage === LAYER0_STAGE;
+  const textures = first ? pixelVec4s : inputVec4s;
+  const rowBlock = (row) => row * outputVec4s * 4;
+  const hiddenPrecision = stage === OUTPUT_STAGE ? '' : 'precision mediump float;';
+  return `${HEADER}
+uniform sampler2DArray src;
+uniform int yOff;
+${first ? 'uniform vec4 ln; uniform int stride; uniform ivec2 phase;' : ''}
+${first && geo ? geoFeaturesGLSL() : ''}
+${hiddenPrecision}
+layout(std140) uniform Wt { vec4 w[${inputVec4s * outputVec4s * 4}]; };
+uniform vec4 bias[${outputVec4s}];
+${outputDecls(outputVec4s)}
 void main() {
   ivec2 q = ivec2(gl_FragCoord.xy);
-  ${stage === 'l0'
+  ${first
     ? 'vec4 L = ln; ivec2 px = min(ivec2(q.x, q.y + yOff) * stride + phase, textureSize(src, 0).xy - 1);'
     : 'ivec2 px = ivec2(q.x, q.y - yOff);'}
   ${J.map((j) => `vec4 a${j} = bias[${j}];`).join(' ')}
-  for (int k = 0; k < ${nTex}; k++) {
+  for (int k = 0; k < ${textures}; k++) {
     vec4 x = texelFetch(src, ivec3(px, k), 0);
-    int b = k * ${out * 4};
-    ${acc('x', 'b')}
+    int b = k * ${outputVec4s * 4};
+    ${accumulate('x', 'b')}
   }
-  ${stage === 'l0' ? acc('L', xg * out * 4) : ''}
-  ${stage === 'l0' && geo ? `vec4 g0, g1;
+  ${first ? accumulate('L', rowBlock(pixelVec4s)) : ''}
+  ${first && geo ? `vec4 g0, g1;
   geoFeatures(px, ln, g0, g1);
-  ${acc('g0', (xg + 1) * out * 4)}
-  ${acc('g1', (xg + 2) * out * 4)}` : ''}
+  ${accumulate('g0', rowBlock(pixelVec4s + 1))}
+  ${accumulate('g1', rowBlock(pixelVec4s + 2))}` : ''}
   ${J.map((j) => `o${j} = ${relu ? `max(a${j}, vec4(0.0))` : `a${j}`};`).join('\n  ')}
 }`;
 }
 
-// rows bottom first, that's what three.js render targets expect
-const compositeFS = (W, H, mul) => `${HEAD}
+function readNetGLSL(texture, cell, mul) {
+  return mul
+    ? `vec4 v0 = texelFetch(${texture}, ivec3(${cell}, 2 * slot), 0), v1 = texelFetch(${texture}, ivec3(${cell}, 2 * slot + 1), 0);
+  a = v0.xyz; b = vec3(v0.w, v1.xy);`
+    : `a = texelFetch(${texture}, ivec3(${cell}, slot), 0).xyz; b = vec3(0.0);`;
+}
+
+const compositeFS = (W, H, mul) => `${HEADER}
 uniform sampler2DArray outT; uniform sampler2DArray resT;
-${GEOM}
+${GEOMETRY_GLSL}${SOLID_ANGLE_GLSL}${TAP_GLSL}
 uniform vec3 camX, camY, camZ; uniform vec2 tanxy;
 uniform float exposure; uniform int nLights;
-uniform vec4 lPR[${SLOTS}]; uniform vec3 lE[${SLOTS}]; uniform ivec3 lInfo[${SLOTS}];  // slot, stride, disc shown
+uniform vec4 lPR[${SLOTS}]; uniform vec3 lE[${SLOTS}]; uniform ivec3 lInfo[${SLOTS}];
 layout(location = 0) out vec4 disp;
 const float W = ${W}.0, H = ${H}.0;
 
@@ -172,18 +212,11 @@ float directCov(ivec2 pix, int l) {
   return cnt / 16.0;
 }
 void outAt(int slot, ivec2 c, out vec3 a, out vec3 b) {
-  ${mul
-    ? `vec4 v0 = texelFetch(outT, ivec3(c, 2 * slot), 0), v1 = texelFetch(outT, ivec3(c, 2 * slot + 1), 0);
-  a = v0.xyz; b = vec3(v0.w, v1.xy);`
-    : 'a = texelFetch(outT, ivec3(c, slot), 0).xyz; b = vec3(0.0);'}
+  ${readNetGLSL('outT', 'c', mul)}
 }
-// stride 0 is a light's full res image
 void netAt(int slot, int s, ivec2 pix, out vec3 a, out vec3 b) {
-  if (s == 0) {
-    ${mul
-      ? `vec4 v0 = texelFetch(resT, ivec3(pix, 2 * slot), 0), v1 = texelFetch(resT, ivec3(pix, 2 * slot + 1), 0);
-    a = v0.xyz; b = vec3(v0.w, v1.xy);`
-      : 'a = texelFetch(resT, ivec3(pix, slot), 0).xyz; b = vec3(0.0);'}
+  if (s == ${FULL_RES_STRIDE}) {
+    ${readNetGLSL('resT', 'pix', mul)}
     return;
   }
   if (s <= 1) {
@@ -198,12 +231,8 @@ void netAt(int slot, int s, ivec2 pix, out vec3 a, out vec3 b) {
   float sig = 1.5 * float(s) * 2.0 * tanxy.x / W * max(g.w, 1e-3);
   a = vec3(0.0); b = vec3(0.0); float ws = 0.0;
   for (int k = 0; k < 4; k++) {
-    ivec2 c = ivec2((k & 1) == 1 ? c1.x : c0.x, k >= 2 ? c1.y : c0.y);
-    float wb = ((k & 1) == 1 ? t.x : 1.0 - t.x) * (k >= 2 ? t.y : 1.0 - t.y);
-    vec4 q = geomAt(c * s);
-    vec3 dq = q.xyz - g.xyz;
-    float wg = (q.w > 0.0) == (g.w > 0.0) ? exp(-dot(dq, dq) / (2.0 * sig * sig)) : 0.0;
-    float w = wb * (wg + 1e-4);
+    ivec2 c = tapCell(k, c0, c1);
+    float w = tapWeight(k, t, g, geomAt(c * s), sig);
     vec3 na, nb;
     outAt(slot, c, na, nb);
     a += w * na; b += w * nb;
@@ -219,8 +248,7 @@ vec3 lit(int l, ivec2 pix) {
   if (gm.w <= 0.0) return max(b, 0.0);
   vec3 v = lPR[l].xyz - gm.xyz;
   float d = max(length(v), 1e-4);
-  float s = min(lPR[l].w / d, 1.0);
-  float omega = 6.283185307 * s * s / (1.0 + sqrt(max(1.0 - s * s, 0.0)));
+  float omega = solidAngle(lPR[l].w, d);
   float G = omega * max(dot(normalAt(pix), v / d), 0.0) / 3.141592654;
   return max(a * G + b, 0.0);`
     : 'return max(a, 0.0);'}
@@ -237,14 +265,13 @@ void main() {
   disp = vec4(clamp(srgb(tone(I)), 0.0, 1.0), 1.0);
 }`;
 
-// folds one evaluation into a light's full res image, see the webgpu resolve. a pass can't read
-// the pixel it blends into, so it's drawn in three parts: side 0 is upsampled pixels with
-// nothing kept, side 1 the kept ones (blended by alpha), side 2 the evaluated pixels
-const resolveFS = (W, H, mul) => `${HEAD}
+const resolveFS = (W, H, mul) => {
+  const firstLayer = mul ? '2 * slot' : 'slot';
+  return `${HEADER}
 uniform sampler2DArray outT;
-${GEOM}
+${GEOMETRY_GLSL}${TAP_GLSL}
 uniform int slot, s, side; uniform ivec2 phase; uniform float sigK;
-uniform ivec4 items, keep;  // c0, c1, r0, r1 and x0, y0, x1, y1
+uniform ivec4 items, keep;
 layout(location = 0) out vec4 o0;
 ${mul ? 'layout(location = 1) out vec4 o1;' : ''}
 void main() {
@@ -255,14 +282,14 @@ void main() {
   ivec2 c = max(d, ivec2(0)) / s;
   bool on = all(greaterThanEqual(d, ivec2(0))) && d.x % s == 0 && d.y % s == 0
     && all(greaterThanEqual(c, lo)) && all(lessThanEqual(c, hi));
-  if (side == 2) {
+  if (side == ${SIDE.evaluated}) {
     if (!on) discard;
-    o0 = texelFetch(outT, ivec3(c, ${mul ? '2 * slot' : 'slot'}), 0);
+    o0 = texelFetch(outT, ivec3(c, ${firstLayer}), 0);
     ${mul ? 'o1 = texelFetch(outT, ivec3(c, 2 * slot + 1), 0);' : ''}
     return;
   }
   bool kept = all(greaterThanEqual(pix, keep.xy)) && all(lessThan(pix, keep.zw));
-  if (on || kept != (side == 1)) discard;
+  if (on || kept != (side == ${SIDE.kept})) discard;
   vec2 f = max(vec2(d), 0.0) / float(s);
   ivec2 c0 = clamp(ivec2(f), lo, hi), c1 = min(c0 + 1, hi);
   vec2 t = clamp(f - vec2(c0), 0.0, 1.0);
@@ -270,38 +297,35 @@ void main() {
   float sig = sigK * float(s) * max(g.w, 1e-3);
   vec4 a = vec4(0.0), b = vec4(0.0); float ws = 0.0;
   for (int k = 0; k < 4; k++) {
-    ivec2 cc = ivec2((k & 1) == 1 ? c1.x : c0.x, k >= 2 ? c1.y : c0.y);
-    float wb = ((k & 1) == 1 ? t.x : 1.0 - t.x) * (k >= 2 ? t.y : 1.0 - t.y);
-    vec4 q = geomAt(cc * s + phase);
-    vec3 dq = q.xyz - g.xyz;
-    float wg = (q.w > 0.0) == (g.w > 0.0) ? exp(-dot(dq, dq) / (2.0 * sig * sig)) : 0.0;
-    float w = wb * (wg + 1e-4);
-    a += w * texelFetch(outT, ivec3(cc, ${mul ? '2 * slot' : 'slot'}), 0);
+    ivec2 cc = tapCell(k, c0, c1);
+    float w = tapWeight(k, t, g, geomAt(cc * s + phase), sig);
+    a += w * texelFetch(outT, ivec3(cc, ${firstLayer}), 0);
     ${mul ? 'b += w * texelFetch(outT, ivec3(cc, 2 * slot + 1), 0);' : ''}
     ws += w;
   }
   o0 = a / max(ws, 1e-12);
   ${mul ? 'o1 = b / max(ws, 1e-12);' : ''}
 }`;
+};
 
-function packLayer(layer, nIn, kin, out, inCol) {
-  const nOut = layer.shape[0];
-  const passes = Math.ceil(Math.ceil(nOut / 4) / out);
+function packLayer(layer, inputs, inputVec4s, outputVec4s, columnOf) {
+  const outputs = layer.shape[0];
+  const passes = Math.ceil(Math.ceil(outputs / 4) / outputVec4s);
   return Array.from({ length: passes }, (_, p) => {
-    const w = new Float32Array(kin * out * 16);
-    const b = new Float32Array(out * 4);
-    for (let j = 0; j < out; j += 1) {
+    const w = new Float32Array(inputVec4s * outputVec4s * 16);
+    const b = new Float32Array(outputVec4s * 4);
+    for (let j = 0; j < outputVec4s; j += 1) {
       for (let r = 0; r < 4; r += 1) {
-        const o = 4 * (p * out + j) + r;
-        if (o >= nOut) {
+        const o = 4 * (p * outputVec4s + j) + r;
+        if (o >= outputs) {
           continue;
         }
         b[j * 4 + r] = layer.b[o];
-        for (let k = 0; k < kin; k += 1) {
+        for (let k = 0; k < inputVec4s; k += 1) {
           for (let c = 0; c < 4; c += 1) {
-            const i = inCol(k, c);
+            const i = columnOf(k, c);
             if (i >= 0) {
-              w[((k * out + j) * 4 + c) * 4 + r] = layer.w[o * nIn + i];
+              w[((k * outputVec4s + j) * 4 + c) * 4 + r] = layer.w[o * inputs + i];
             }
           }
         }
@@ -311,6 +335,12 @@ function packLayer(layer, nIn, kin, out, inCol) {
   });
 }
 
+function createCanvas(width, height) {
+  return typeof OffscreenCanvas === 'undefined'
+    ? Object.assign(document.createElement('canvas'), { width, height })
+    : new OffscreenCanvas(width, height);
+}
+
 export class RelightEngine extends RelightBase {
   constructor(
     { scene, layers, grid, gridOff, aux, pos },
@@ -318,12 +348,24 @@ export class RelightEngine extends RelightBase {
   ) {
     super(scene, pos);
     this.images = images;
-    // offscreen so we can hand over an ImageBitmap. without OffscreenCanvas the canvas has
-    // to be read the same frame it's drawn
-    this.canvas =
-      typeof OffscreenCanvas === 'undefined'
-        ? Object.assign(document.createElement('canvas'), { width: this.W, height: this.H })
-        : new OffscreenCanvas(this.W, this.H);
+    this.openContext();
+    this.resources = { textures: [], framebuffers: [], programs: [], buffers: [] };
+    this.readShape(readNetwork(scene.network, layers), layers);
+    this.uploadPixels(aux, pos);
+    this.encodeInputs(grid, gridOff);
+    this.createImageTargets();
+    this.createBands(bandBytes);
+    this.passes = new Map();
+    const named = this.outputs.find((n) => outputsName(n) === kernel);
+    this.setOutputs(named ?? this.outputs.filter((n) => n <= DEFAULT_OUTPUTS).pop() ?? this.outputs[0]);
+    const gl = this.gl;
+    gl.bindVertexArray(null);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+  }
+
+  openContext() {
+    this.canvas = createCanvas(this.W, this.H);
     const gl = this.canvas.getContext('webgl2', {
       alpha: false,
       antialias: false,
@@ -341,64 +383,110 @@ export class RelightEngine extends RelightBase {
       throw new Error('this GPU cannot render to floating-point textures');
     }
     this.timer = gl.getExtension('EXT_disjoint_timer_query_webgl2');
-    const { W, H } = this;
-    this.resources = { textures: [], framebuffers: [], programs: [], buffers: [] };
+  }
 
-    const net = scene.network;
-    const WD = net.width;
-    const NH = net.hidden - 1;
-    const G = WD / 4;
-    const auxDim = net.aux_dim ?? 7;
-    const geo = !!net.geo;
-    const mul = net.head === 'mul';
-    const PIXIN = net.grid_res.length * net.feats + auxDim;
-    const XG = Math.ceil(PIXIN / 4);
-    const IN = layers[0].shape[1];
-    if (IN !== PIXIN + 4 + (geo ? 6 : 0)) {
-      throw new Error(`unexpected first-layer width ${IN}`);
-    }
-    this.NH = NH;
-
-    const P = (p) => gl.getParameter(p);
-    const maxBlock = P(gl.MAX_UNIFORM_BLOCK_SIZE);
-    const maxRT = Math.min(P(gl.MAX_DRAW_BUFFERS), P(gl.MAX_COLOR_ATTACHMENTS));
-    this.outputs = OUTPUTS.filter((n) => n <= maxRT && G % n === 0 && G * 64 * n <= maxBlock);
-    this.shape = { WD, G, XG, PIXIN, IN, geo, mul, align: P(gl.UNIFORM_BUFFER_OFFSET_ALIGNMENT) };
+  readShape(network, layers) {
+    const gl = this.gl;
+    const groups = network.width / 4;
+    this.network = network;
+    this.hiddenLayers = network.hiddenLayers;
+    const limit = (p) => gl.getParameter(p);
+    const maxBlock = limit(gl.MAX_UNIFORM_BLOCK_SIZE);
+    this.maxTargets = Math.min(limit(gl.MAX_DRAW_BUFFERS), limit(gl.MAX_COLOR_ATTACHMENTS));
+    this.outputs = OUTPUTS.filter((n) => n <= this.maxTargets && groups % n === 0 && groups * 64 * n <= maxBlock);
+    this.shape = {
+      width: network.width,
+      groups,
+      pixelVec4s: Math.ceil(network.pixelInputs / 4),
+      pixelInputs: network.pixelInputs,
+      inputs: network.inputs,
+      geo: network.geo,
+      mul: network.mul,
+      align: limit(gl.UNIFORM_BUFFER_OFFSET_ALIGNMENT),
+    };
     this.layers = layers;
+  }
 
-    const A2 = gl.TEXTURE_2D_ARRAY;
-    const T2 = gl.TEXTURE_2D;
-    const [posLo, posHi] = scene.pixels.pos.range;
-    this.posMap = [posLo, (posHi - posLo) / 65534];
-    this.auxTex = this.texture(A2, gl.RGBA16F, W, H, 2);
-    gl.texSubImage3D(A2, 0, 0, 0, 0, W, H, 2, gl.RGBA, gl.HALF_FLOAT, aux);
-    this.posTex = this.texture(T2, gl.RGBA16UI, W, H);
-    gl.texSubImage2D(T2, 0, 0, 0, W, H, gl.RGBA_INTEGER, gl.UNSIGNED_SHORT, pos);
+  uploadPixels(aux, pos) {
+    const gl = this.gl;
+    const { W, H } = this;
+    this.posMap = [this.posLo, this.posStep];
+    this.auxTex = this.texture(gl.TEXTURE_2D_ARRAY, gl.RGBA16F, W, H, 2);
+    gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, 0, W, H, 2, gl.RGBA, gl.HALF_FLOAT, aux);
+    this.posTex = this.texture(gl.TEXTURE_2D, gl.RGBA16UI, W, H);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, W, H, gl.RGBA_INTEGER, gl.UNSIGNED_SHORT, pos);
     this.vao = gl.createVertexArray();
-    this.xTex = this.texture(A2, gl.RGBA16F, W, H, XG);
-    this.encodeInputs({ grid, gridOff, XG, auxDim, maxRT });
+    this.xTex = this.texture(gl.TEXTURE_2D_ARRAY, gl.RGBA16F, W, H, this.shape.pixelVec4s);
+  }
 
-    const per = mul ? 2 : 1;
-    this.outTex = this.texture(A2, gl.RGBA16F, W, H, SLOTS * per);
-    this.outFbos = Array.from({ length: SLOTS }, (_, s) =>
-      this.framebuffer(Array.from({ length: per }, (__, j) => [this.outTex, s * per + j]))
-    );
-    this.resTex = this.texture(A2, gl.RGBA16F, W, H, images * per);
-    this.resFbos = Array.from({ length: images }, (_, s) =>
-      this.framebuffer(Array.from({ length: per }, (__, j) => [this.resTex, s * per + j]))
-    );
+  encodeInputs(grid, gridOff) {
+    const gl = this.gl;
+    const { W, H } = this;
+    const { pixelVec4s } = this.shape;
+    const net = this.scene.network;
+    const gridWidth = Math.min(MAX_GRID_WIDTH, gl.getParameter(gl.MAX_TEXTURE_SIZE));
+    const rows = Math.ceil(grid.length / gridWidth);
+    const padded = new Uint16Array(gridWidth * rows);
+    padded.set(grid);
+    const gridTex = this.texture(gl.TEXTURE_2D, gl.R16F, gridWidth, rows);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gridWidth, rows, gl.RED, gl.HALF_FLOAT, padded);
+    this.bindTexture(UNIT.grid, gl.TEXTURE_2D, gridTex);
+    this.bindTexture(UNIT.aux, gl.TEXTURE_2D_ARRAY, this.auxTex);
+    gl.bindVertexArray(this.vao);
+    gl.viewport(0, 0, W, H);
+    const shapes = {
+      W,
+      H,
+      levels: this.network.levels,
+      feats: net.feats,
+      gridRes: net.grid_res,
+      gridOff,
+      auxDim: this.network.auxDim,
+      gridWidth,
+    };
+    const perPass = Math.min(this.maxTargets, MAX_ENCODE_TARGETS);
+    for (let first = 0; first < pixelVec4s; first += perPass) {
+      const count = Math.min(perPass, pixelVec4s - first);
+      const { p } = this.program(encodeFS({ ...shapes, first, count }), 'input encoding');
+      const fbo = this.framebuffer(Array.from({ length: count }, (_, j) => [this.xTex, first + j]));
+      gl.useProgram(p);
+      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, fbo);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+    gl.deleteTexture(gridTex);
+    this.resources.textures.splice(this.resources.textures.indexOf(gridTex), 1);
+  }
+
+  createImageTargets() {
+    const gl = this.gl;
+    const { W, H, images } = this;
+    const { mul } = this.shape;
+    const layersPerImage = mul ? 2 : 1;
+    const targets = (texture, count) =>
+      Array.from({ length: count }, (_, s) =>
+        this.framebuffer(Array.from({ length: layersPerImage }, (__, j) => [texture, s * layersPerImage + j]))
+      );
+    this.outTex = this.texture(gl.TEXTURE_2D_ARRAY, gl.RGBA16F, W, H, SLOTS * layersPerImage);
+    this.outFbos = targets(this.outTex, SLOTS);
+    this.resTex = this.texture(gl.TEXTURE_2D_ARRAY, gl.RGBA16F, W, H, images * layersPerImage);
+    this.resFbos = targets(this.resTex, images);
     this.pComp = this.program(compositeFS(W, H, mul), 'composite');
     this.pResolve = this.program(resolveFS(W, H, mul), 'resolve');
-    const th = Math.max(8, Math.min(H, Math.floor(bandBytes / (W * G * 8))));
-    this.arrs = [0, 1].map(() => this.texture(A2, gl.RGBA16F, W, th, G));
+  }
+
+  createBands(bandBytes) {
+    const gl = this.gl;
+    const { W, H } = this;
+    const { groups, mul } = this.shape;
+    const bytesPerRow = W * groups * 8;
+    const th = Math.max(MIN_BAND_HEIGHT, Math.min(H, Math.floor(bandBytes / bytesPerRow)));
+    this.arrs = [0, 1].map(() => this.texture(gl.TEXTURE_2D_ARRAY, gl.RGBA16F, W, th, groups));
     this.th = th;
-    this.pOut = this.program(layerFS({ kin: G, out: mul ? 2 : 1, relu: false, stage: 'out' }), 'output layer');
-    this.passes = new Map();
-    const named = this.outputs.find((n) => outputsName(n) === kernel);
-    this.setOutputs(named ?? this.outputs.filter((n) => n <= DEFAULT_OUTPUTS).pop() ?? this.outputs[0]);
-    gl.bindVertexArray(null);
-    gl.bindTexture(A2, null);
-    gl.bindTexture(T2, null);
+    this.pOut = this.program(
+      layerFS({ inputVec4s: groups, outputVec4s: mul ? 2 : 1, relu: false, stage: OUTPUT_STAGE }),
+      'output layer'
+    );
   }
 
   passesFor(out) {
@@ -407,7 +495,7 @@ export class RelightEngine extends RelightBase {
     }
     const gl = this.gl;
     const { layers } = this;
-    const { WD, G, XG, PIXIN, IN, geo, mul, align } = this.shape;
+    const { width, groups, pixelVec4s, pixelInputs, inputs, geo, mul, align } = this.shape;
     const before = { programs: this.resources.programs.length, framebuffers: this.resources.framebuffers.length };
     const blocks = [];
     let uboLen = 0;
@@ -417,16 +505,21 @@ export class RelightEngine extends RelightBase {
       blocks.push([off, w]);
       return { off, size: w.byteLength, b };
     };
-    const l0 = packLayer(layers[0], IN, XG + 1 + (geo ? 2 : 0), out, (k, c) => {
-      if (k < XG) {
-        return 4 * k + c < PIXIN ? 4 * k + c : -1;
+    const layer0Vec4s = pixelVec4s + 1 + (geo ? 2 : 0);
+    const layer0Column = (k, c) => {
+      if (k < pixelVec4s) {
+        return 4 * k + c < pixelInputs ? 4 * k + c : -1;
       }
-      const i = PIXIN + 4 * (k - XG) + c;
-      return i < IN ? i : -1;
-    });
-    const hidden = layers.slice(1, this.NH + 1).map((L) => packLayer(L, WD, G, out, (k, c) => 4 * k + c));
+      const i = pixelInputs + 4 * (k - pixelVec4s) + c;
+      return i < inputs ? i : -1;
+    };
+    const denseColumn = (k, c) => 4 * k + c;
+    const l0 = packLayer(layers[0], inputs, layer0Vec4s, out, layer0Column);
+    const hidden = layers
+      .slice(1, this.hiddenLayers + 1)
+      .map((L) => packLayer(L, width, groups, out, denseColumn));
     const w = [l0, ...hidden].map((passes) => passes.map(place));
-    const wOut = place(packLayer(layers[this.NH + 1], WD, G, mul ? 2 : 1, (k, c) => 4 * k + c)[0]);
+    const wOut = place(packLayer(layers[this.hiddenLayers + 1], width, groups, mul ? 2 : 1, denseColumn)[0]);
     const all = new Float32Array(uboLen / 4);
     blocks.forEach(([off, data]) => all.set(data, off / 4));
     const ubo = gl.createBuffer();
@@ -440,12 +533,15 @@ export class RelightEngine extends RelightBase {
       w,
       wOut,
       fbos: this.arrs.map((t) =>
-        Array.from({ length: G / out }, (_, p) =>
+        Array.from({ length: groups / out }, (_, p) =>
           this.framebuffer(Array.from({ length: out }, (_, j) => [t, p * out + j]))
         )
       ),
-      l0: this.program(layerFS({ kin: XG + 1 + (geo ? 2 : 0), out, relu: true, stage: 'l0', xg: XG, geo }), 'layer 0'),
-      hid: this.program(layerFS({ kin: G, out, relu: true, stage: 'hid' }), 'hidden layer'),
+      l0: this.program(
+        layerFS({ inputVec4s: layer0Vec4s, outputVec4s: out, relu: true, stage: LAYER0_STAGE, pixelVec4s, geo }),
+        'layer 0'
+      ),
+      hid: this.program(layerFS({ inputVec4s: groups, outputVec4s: out, relu: true, stage: HIDDEN_STAGE }), 'hidden layer'),
     };
     passes.resources = {
       programs: this.resources.programs.slice(before.programs),
@@ -461,6 +557,22 @@ export class RelightEngine extends RelightBase {
 
   get kernelName() {
     return outputsName(this.net.out);
+  }
+
+  tuneCandidates() {
+    return this.outputs;
+  }
+
+  useVariant(out) {
+    this.setOutputs(out);
+  }
+
+  whenIdle() {
+    return fence(this.gl);
+  }
+
+  afterTune() {
+    this.dropOtherPasses();
   }
 
   dropOtherPasses() {
@@ -481,94 +593,6 @@ export class RelightEngine extends RelightBase {
     });
   }
 
-  // fence state only changes between tasks so poll across them
-  finish() {
-    const gl = this.gl;
-    const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
-    gl.flush();
-    return new Promise((resolve) => {
-      const channel = new MessageChannel();
-      channel.port1.onmessage = () => {
-        if (gl.clientWaitSync(sync, 0, 0) === gl.TIMEOUT_EXPIRED) {
-          channel.port2.postMessage(0);
-          return;
-        }
-        gl.deleteSync(sync);
-        channel.port1.close();
-        resolve();
-      };
-      channel.port2.postMessage(0);
-    });
-  }
-
-  async tune(light, stride, runs = 3, signal = null, slot = 0) {
-    const timing = this.timing;
-    this.timing = { ...timing, pending: {} };
-    const times = {};
-    let best = null;
-    try {
-      for (const out of this.outputs) {
-        if (signal?.aborted) {
-          break;
-        }
-        this.setOutputs(out);
-        this.evaluate(light, slot, stride);
-        await this.finish();
-        if (signal?.aborted) {
-          break;
-        }
-        const t0 = performance.now();
-        for (let i = 0; i < runs; i += 1) {
-          this.evaluate(light, slot, stride);
-        }
-        await this.finish();
-        const ms = (performance.now() - t0) / runs;
-        times[outputsName(out)] = ms;
-        if (!best || ms < best.ms) {
-          best = { out, ms };
-        }
-      }
-    } finally {
-      this.timing = timing;
-    }
-    if (best) {
-      this.setOutputs(best.out);
-    }
-    this.dropOtherPasses();
-    return { kernel: this.kernelName, times };
-  }
-
-  encodeInputs({ grid, gridOff, XG, auxDim, maxRT }) {
-    const gl = this.gl;
-    const { W, H } = this;
-    const net = this.scene.network;
-    const GW = Math.min(4096, gl.getParameter(gl.MAX_TEXTURE_SIZE));
-    const rows = Math.ceil(grid.length / GW);
-    const padded = new Uint16Array(GW * rows);
-    padded.set(grid);
-    const gridTex = this.texture(gl.TEXTURE_2D, gl.R16F, GW, rows);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, GW, rows, gl.RED, gl.HALF_FLOAT, padded);
-    gl.activeTexture(gl.TEXTURE6);
-    gl.bindTexture(gl.TEXTURE_2D, gridTex);
-    gl.activeTexture(gl.TEXTURE4);
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.auxTex);
-    gl.bindVertexArray(this.vao);
-    gl.viewport(0, 0, W, H);
-    const shapes = { W, H, levels: net.grid_res.length, feats: net.feats, gridRes: net.grid_res, gridOff, auxDim, GW };
-    const n = Math.min(maxRT, 8);
-    for (let k0 = 0; k0 < XG; k0 += n) {
-      const count = Math.min(n, XG - k0);
-      const { p } = this.program(encodeFS({ ...shapes, k0, n: count }), 'input encoding');
-      const fbo = this.framebuffer(Array.from({ length: count }, (_, j) => [this.xTex, k0 + j]));
-      gl.useProgram(p);
-      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, fbo);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-    }
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-    gl.deleteTexture(gridTex);
-    this.resources.textures.splice(this.resources.textures.indexOf(gridTex), 1);
-  }
-
   texture(target, format, w, h, layers = 1) {
     const gl = this.gl;
     const t = gl.createTexture();
@@ -584,6 +608,12 @@ export class RelightEngine extends RelightBase {
     gl.texParameteri(target, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(target, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     return t;
+  }
+
+  bindTexture(unit, target, texture) {
+    const gl = this.gl;
+    gl.activeTexture(gl.TEXTURE0 + unit);
+    gl.bindTexture(target, texture);
   }
 
   framebuffer(attach) {
@@ -611,7 +641,7 @@ export class RelightEngine extends RelightBase {
       gl.compileShader(s);
       return s;
     };
-    const vs = shader(gl.VERTEX_SHADER, VS);
+    const vs = shader(gl.VERTEX_SHADER, FULLSCREEN_VS);
     const f = shader(gl.FRAGMENT_SHADER, fs);
     const p = gl.createProgram();
     gl.attachShader(p, vs);
@@ -637,7 +667,7 @@ export class RelightEngine extends RelightBase {
       gl.uniformBlockBinding(p, block, 0);
     }
     gl.useProgram(p);
-    [['src', 0], ['outT', 0], ['resT', 1], ['posT', 2], ['auxT', 4], ['gridT', 6]].forEach(([name, unit]) => {
+    SAMPLER_UNITS.forEach(([name, unit]) => {
       if (u[name]) {
         gl.uniform1i(u[name], unit);
       }
@@ -678,27 +708,21 @@ export class RelightEngine extends RelightBase {
 
     this.startTiming(stride, r0, r1, c0, c1);
     gl.bindVertexArray(this.vao);
-    gl.activeTexture(gl.TEXTURE2);
-    gl.bindTexture(gl.TEXTURE_2D, this.posTex);
-    gl.activeTexture(gl.TEXTURE4);
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.auxTex);
+    this.bindTexture(UNIT.positions, gl.TEXTURE_2D, this.posTex);
+    this.bindTexture(UNIT.aux, gl.TEXTURE_2D_ARRAY, this.auxTex);
     for (let y0 = r0; y0 < r1; y0 += E.th) {
       const h = Math.min(E.th, r1 - y0);
       let cur = -1;
-      for (let l = 0; l <= this.NH; l += 1) {
+      for (let l = 0; l <= this.hiddenLayers; l += 1) {
         const P = l === 0 ? E.l0 : E.hid;
         const dst = l === 0 ? 0 : 1 - cur;
         gl.useProgram(P.p);
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D_ARRAY, l === 0 ? this.xTex : E.arrs[cur]);
+        this.bindTexture(UNIT.input, gl.TEXTURE_2D_ARRAY, l === 0 ? this.xTex : E.arrs[cur]);
         gl.uniform1i(P.u.yOff, l === 0 ? y0 : 0);
         if (l === 0) {
           setLight(P);
         }
         gl.viewport(c0, 0, gw, h);
-        // no invalidateFramebuffer for tiled gpus: angle takes an array's layers as one image, so
-        // on d3d11 invalidating a pass's layers dropped the layers before it, and on vulkan
-        // (swiftshader) each one cleared the whole band, 1.7x slower at stride 8
         E.w[l].forEach((chunk, p) => {
           gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, E.fbos[dst][p]);
           draw(chunk, P);
@@ -707,8 +731,7 @@ export class RelightEngine extends RelightBase {
       }
       const P = E.outLayer;
       gl.useProgram(P.p);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D_ARRAY, E.arrs[cur]);
+      this.bindTexture(UNIT.input, gl.TEXTURE_2D_ARRAY, E.arrs[cur]);
       gl.uniform1i(P.u.yOff, y0);
       gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.outFbos[slot]);
       gl.viewport(c0, y0, gw, h);
@@ -717,8 +740,6 @@ export class RelightEngine extends RelightBase {
     this.stopTiming();
   }
 
-  // slot is the evaluation, target the light's full res image. keep is the span that image
-  // already holds (x0, x1, y0, y1), outside it pixels are just upsampled
   resolve(slot, target, stride, phase, [r0, r1, c0, c1], alpha, keep = null) {
     const gl = this.gl;
     r1 = Math.min(r1, this.rows(stride));
@@ -727,19 +748,17 @@ export class RelightEngine extends RelightBase {
     if (x1 <= x0 || y1 <= y0) {
       return null;
     }
-    const k = keep && alpha < 1 ? keep : [0, 0, 0, 0];
+    const [kx0, kx1, ky0, ky1] = keep && alpha < 1 ? keep : [0, 0, 0, 0];
     const { u, p } = this.pResolve;
     gl.useProgram(p);
     gl.uniform1i(u.slot, slot);
     gl.uniform1i(u.s, stride);
     gl.uniform2i(u.phase, phase[0], phase[1]);
-    gl.uniform1f(u.sigK, (1.5 * 2 * this.cam.tx) / this.W);
+    gl.uniform1f(u.sigK, this.tapSigmaScale());
     gl.uniform4i(u.items, c0, c1, r0, r1);
-    gl.uniform4i(u.keep, k[0], k[2], k[1], k[3]);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.outTex);
-    gl.activeTexture(gl.TEXTURE2);
-    gl.bindTexture(gl.TEXTURE_2D, this.posTex);
+    gl.uniform4i(u.keep, kx0, ky0, kx1, ky1);
+    this.bindTexture(UNIT.input, gl.TEXTURE_2D_ARRAY, this.outTex);
+    this.bindTexture(UNIT.positions, gl.TEXTURE_2D, this.posTex);
     gl.bindVertexArray(this.vao);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.resFbos[target]);
     gl.viewport(x0, y0, x1 - x0, y1 - y0);
@@ -748,23 +767,22 @@ export class RelightEngine extends RelightBase {
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     };
     if (stride > 1) {
-      const keepsAll = k[0] <= x0 && k[1] >= x1 && k[2] <= y0 && k[3] >= y1;
+      const keepsAll = kx0 <= x0 && kx1 >= x1 && ky0 <= y0 && ky1 >= y1;
       if (!keepsAll) {
-        draw(0);
+        draw(SIDE.upsampled);
       }
-      if (alpha > 0 && k[1] > k[0]) {
+      if (alpha > 0 && kx1 > kx0) {
         gl.enable(gl.BLEND);
         gl.blendColor(0, 0, 0, alpha);
         gl.blendFunc(gl.CONSTANT_ALPHA, gl.ONE_MINUS_CONSTANT_ALPHA);
-        draw(1);
+        draw(SIDE.kept);
         gl.disable(gl.BLEND);
       }
     }
-    draw(2);
+    draw(SIDE.evaluated);
     return [x0, x1, y0, y1];
   }
 
-  // view is the part of the image that's shown, the rest isn't drawn (see RelightBase drawRect)
   composite(lights, exposure = 1, view = null) {
     const gl = this.gl;
     const { u, p } = this.pComp;
@@ -778,26 +796,25 @@ export class RelightEngine extends RelightBase {
     gl.uniform1f(u.exposure, exposure);
     const n = Math.min(lights.length, SLOTS);
     gl.uniform1i(u.nLights, n);
-    const pr = new Float32Array(SLOTS * 4);
-    const E = new Float32Array(SLOTS * 3);
+    const spheres = new Float32Array(SLOTS * 4);
+    const emission = new Float32Array(SLOTS * 3);
     const info = new Int32Array(SLOTS * 3);
     lights.slice(0, n).forEach((l, i) => {
-      pr.set([...l.pos, l.radius], i * 4);
-      E.set(l.color.map((c) => c * l.intensity), i * 3);
+      spheres.set([...l.pos, l.radius], i * 4);
+      emission.set(l.color.map((c) => c * l.intensity), i * 3);
       const resolved = l.resolved != null;
-      info.set([resolved ? l.resolved : l.slot, resolved ? 0 : l.stride || 1, l.hidden ? 0 : 1], i * 3);
+      const source = resolved ? l.resolved : l.slot;
+      const stride = resolved ? FULL_RES_STRIDE : l.stride || 1;
+      const discShown = l.hidden ? 0 : 1;
+      info.set([source, stride, discShown], i * 3);
     });
-    gl.uniform4fv(u.lPR, pr);
-    gl.uniform3fv(u.lE, E);
+    gl.uniform4fv(u.lPR, spheres);
+    gl.uniform3fv(u.lE, emission);
     gl.uniform3iv(u.lInfo, info);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.outTex);
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.resTex);
-    gl.activeTexture(gl.TEXTURE2);
-    gl.bindTexture(gl.TEXTURE_2D, this.posTex);
-    gl.activeTexture(gl.TEXTURE4);
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.auxTex);
+    this.bindTexture(UNIT.input, gl.TEXTURE_2D_ARRAY, this.outTex);
+    this.bindTexture(UNIT.resolved, gl.TEXTURE_2D_ARRAY, this.resTex);
+    this.bindTexture(UNIT.positions, gl.TEXTURE_2D, this.posTex);
+    this.bindTexture(UNIT.aux, gl.TEXTURE_2D_ARRAY, this.auxTex);
     gl.bindVertexArray(this.vao);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
     gl.viewport(0, 0, this.W, this.H);
@@ -807,9 +824,6 @@ export class RelightEngine extends RelightBase {
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.disable(gl.SCISSOR_TEST);
   }
-
-  // fences get watched every ms or so. checking once a frame made every eval read as at least
-  // a frame long and iphones (no timer queries) ran way coarser than they needed to
 
   startTiming(stride, r0, r1, c0, c1) {
     const gl = this.gl;
@@ -860,8 +874,8 @@ export class RelightEngine extends RelightBase {
       }
       if (!pending.before && passed(pending.sync)) {
         pending.ms = now - Math.max(pending.start, pending.beforeAt ?? pending.start);
-      } else if (now - pending.start < FENCE_GIVE_UP) {
-        pending.timer = setTimeout(check, 1);
+      } else if (now - pending.start < FENCE_TIMEOUT_MS) {
+        pending.timer = setTimeout(check, FENCE_POLL_MS);
         return;
       }
       if (pending.before) {
@@ -900,7 +914,6 @@ export class RelightEngine extends RelightBase {
     this.recordTiming(pending.stride, pending.share, ms);
   }
 
-  // the webgpu engine batches a frame's passes into one submit, webgl already does
   beginFrame() {}
 
   endFrame() {}

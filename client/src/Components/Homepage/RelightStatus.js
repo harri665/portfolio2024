@@ -4,10 +4,9 @@ import Button from '../ui/Button';
 import { clearProfile } from './relight/adaptiveQuality';
 import { useRelightStatus } from './relight/status';
 
-// probing makes a webgpu adapter + webgl context so only do it once it's opened
 export default function RelightStatus() {
   const status = useRelightStatus();
-  const [probing, setProbing] = useState(false);
+  const [supportOpen, setSupportOpen] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [resetError, setResetError] = useState(null);
 
@@ -51,12 +50,12 @@ export default function RelightStatus() {
           {resetError && <p role="alert" className="mt-2 text-xs leading-5 text-ink-2">{resetError}</p>}
         </div>
 
-        <details className="group/support mt-5" onToggle={(event) => setProbing(event.currentTarget.open)}>
+        <details className="group/support mt-5" onToggle={(event) => setSupportOpen(event.currentTarget.open)}>
           <summary className="flex cursor-pointer select-none list-none items-center gap-2 text-ink-2 transition-colors hover:text-ink [&::-webkit-details-marker]:hidden">
             What your browser supports
             <Chevron className="group-open/support:rotate-180" />
           </summary>
-          {probing && <BrowserSupport />}
+          {supportOpen && <BrowserSupport />}
         </details>
       </div>
     </details>
@@ -92,16 +91,22 @@ function Summary({ status }) {
 
 const ordinal = (n) => `${n}${n === 2 ? 'nd' : n === 3 ? 'rd' : 'th'}`;
 const every = (stride) => (stride <= 1 ? 'every pixel' : `every ${ordinal(stride)} pixel`);
-// webgpu: '<threads>x<pixels>[c<channel groups>]', webgl: 'o<outputs per pass>'
-const kernelText = (name) => {
+const WEBGPU_KERNEL = /^(\d+)x(\d+)(?:c(\d+))?$/;
+const WEBGL_KERNEL = /^o(\d+)$/;
+const CHANNELS_PER_GROUP = 4;
+const describeKernel = (name) => {
   const [kernel, note] = name.split(', ');
-  const gpu = /^(\d+)x(\d+)(?:c(\d+))?$/.exec(kernel);
-  const gl = /^o(\d+)$/.exec(kernel);
-  const text = gpu
-    ? `${gpu[1]} threads a workgroup, ${gpu[2]} pixels${gpu[3] ? ` by ${4 * gpu[3]} channels` : ''} each`
-    : gl
-      ? `${gl[1]} output group${gl[1] === '1' ? '' : 's'} a pass`
-      : kernel;
+  const gpu = WEBGPU_KERNEL.exec(kernel);
+  const gl = WEBGL_KERNEL.exec(kernel);
+  let text = kernel;
+  if (gpu) {
+    const [, threads, pixels, channelGroups] = gpu;
+    const channels = channelGroups ? ` by ${CHANNELS_PER_GROUP * channelGroups} channels` : '';
+    text = `${threads} threads a workgroup, ${pixels} pixels${channels} each`;
+  } else if (gl) {
+    const [, outputGroups] = gl;
+    text = `${outputGroups} output group${outputGroups === '1' ? '' : 's'} a pass`;
+  }
   return note ? `${text} (${note})` : text;
 };
 
@@ -125,7 +130,7 @@ function Config({ status: s }) {
     ['Source image', `${s.size} × ${s.size} px${s.upgrading ? ', loading another' : ''}`],
     ...(Number.isFinite(s.shownPx) ? [['Displayed room', `${Math.round(s.shownPx)} px across`]] : []),
     ['GPU', s.gpu],
-    ...(s.kernel ? [['Kernel', kernelText(s.kernel)]] : []),
+    ...(s.kernel ? [['Kernel', describeKernel(s.kernel)]] : []),
     [
       'One light, every pixel',
       s.cost === null ? 'measuring…' : `${s.cost} ms${s.seeded ? ' (provisional estimate)' : ''}`,

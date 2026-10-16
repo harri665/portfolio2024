@@ -45,7 +45,14 @@
     "extends": [
       "react-app",
       "react-app/jest"
-    ]
+    ],
+    "globals": {
+      "BigUint64Array": "readonly",
+      "GPUBufferUsage": "readonly",
+      "GPUMapMode": "readonly",
+      "GPUShaderStage": "readonly",
+      "GPUTextureUsage": "readonly"
+    }
   },
   "browserslist": {
     "production": [

@@ -1,6 +1,6 @@
 import { sendReport, visitId } from '../../../utils/visit';
 
-function device() {
+function deviceInfo() {
   const dpr = window.devicePixelRatio || 1;
   return {
     cores: navigator.hardwareConcurrency,
@@ -9,7 +9,6 @@ function device() {
   };
 }
 
-// visit is passed in since it might report after the next page view started
 export function reportRelight(report, visit = visitId()) {
-  sendReport('relight', { ...device(), ...report }, visit);
+  sendReport('relight', { ...deviceInfo(), ...report }, visit);
 }

@@ -1,18 +1,16 @@
 import { useSyncExternalStore } from 'react';
 
-// the backdrop lives inside the three.js canvas, so it publishes here and the page subscribes
-
 let snapshot = { phase: 'idle' };
-let key = JSON.stringify(snapshot);
+let snapshotKey = JSON.stringify(snapshot);
 const listeners = new Set();
 
 export function setRelightStatus(next) {
   const nextKey = JSON.stringify(next);
-  if (nextKey === key) {
+  if (nextKey === snapshotKey) {
     return;
   }
   snapshot = next;
-  key = nextKey;
+  snapshotKey = nextKey;
   listeners.forEach((listener) => listener());
 }
 

@@ -1,32 +1,68 @@
-// shared by the webgl + webgpu engines: camera, light domain and the cost model
-
-// network outputs, one a light plus spares for the bench
 export const SLOTS = 4;
-// full res images the backdrop builds up a light at a time, one per light. an engine can be
-// built with more (options.images) to keep images for where a light is likely to go
 export const RESOLVED = 2;
-// where in each stride x stride block an evaluation takes its pixel
 export const NO_PHASE = [0, 0];
-// below this the fixed per pass cost outweighs the rows (many times over on webgl)
 export const MIN_BAND_ROWS = 16;
-// thin bands make the gpu look slow. 16 rows at 768px read ~16ms for a light that takes ~8
+export const LIGHT_INPUTS = 4;
+export const GEO_INPUTS = 6;
 const MIN_TIMED_SHARE = 0.25;
+const WARMUP_SAMPLES = 2;
+const SOFTWARE_CALIBRATION_SAMPLES = 3;
+const SOFTWARE_TIMING_INTERVAL = 24;
+const FIXED_COST_RESERVE = 0.15;
+const DRAW_MARGIN = 2;
+const POSITION_STEPS = 65534;
+const DEFAULT_AUX_DIM = 7;
+const BAYER_QUADRANT_RANK = [0, 2, 3, 1];
 
-// bayer order, so the first quarter of a stride's offsets already covers it at half the stride
-const PHASES = new Map();
+const PHASE_ORDERS = new Map();
+
+function bayerRank(x, y, n) {
+  if (n === 1) {
+    return 0;
+  }
+  const h = n / 2;
+  return 4 * bayerRank(x % h, y % h, h) + BAYER_QUADRANT_RANK[(y >= h) * 2 + (x >= h)];
+}
+
 export function phaseOrder(stride) {
-  if (!PHASES.has(stride)) {
-    const rank = (x, y, n) =>
-      n === 1 ? 0 : 4 * rank(x % (n / 2), y % (n / 2), n / 2) + [0, 2, 3, 1][(y >= n / 2) * 2 + (x >= n / 2)];
+  if (!PHASE_ORDERS.has(stride)) {
     const cells = [];
     for (let y = 0; y < stride; y += 1) {
       for (let x = 0; x < stride; x += 1) {
         cells.push([x, y]);
       }
     }
-    PHASES.set(stride, cells.sort((a, b) => rank(...a, stride) - rank(...b, stride)));
+    PHASE_ORDERS.set(stride, cells.sort((a, b) => bayerRank(...a, stride) - bayerRank(...b, stride)));
   }
-  return PHASES.get(stride);
+  return PHASE_ORDERS.get(stride);
+}
+
+export function readNetwork(net, layers) {
+  const auxDim = net.aux_dim ?? DEFAULT_AUX_DIM;
+  const geo = !!net.geo;
+  const levels = net.grid_res.length;
+  const pixelInputs = levels * net.feats + auxDim;
+  const inputs = layers[0].shape[1];
+  if (inputs !== pixelInputs + LIGHT_INPUTS + (geo ? GEO_INPUTS : 0)) {
+    throw new Error(`unexpected first-layer width ${inputs}`);
+  }
+  return {
+    width: net.width,
+    hiddenLayers: net.hidden - 1,
+    auxDim,
+    geo,
+    mul: net.head === 'mul',
+    levels,
+    pixelInputs,
+    inputs,
+  };
+}
+
+function smoothCost(previous, sample) {
+  if (!previous) {
+    return sample;
+  }
+  return sample < previous ? 0.5 * previous + 0.5 * sample : 0.9 * previous + 0.1 * sample;
 }
 
 export class RelightBase {
@@ -34,6 +70,7 @@ export class RelightBase {
     this.scene = scene;
     this.pos = pos;
     [this.posLo, this.posHi] = scene.pixels.pos.range;
+    this.posStep = (this.posHi - this.posLo) / POSITION_STEPS;
     const W = scene.width;
     const H = scene.height;
     this.W = W;
@@ -59,13 +96,10 @@ export class RelightBase {
     return ((r1 - r0) * (c1 - c0)) / (this.rows(stride) * this.cols(stride));
   }
 
-  // pixels a resolve of these items covers: x0, x1, y0, y1
   span(stride, r0, r1, c0, c1) {
     return [c0 * stride, Math.min(this.W, c1 * stride), r0 * stride, Math.min(this.H, r1 * stride)];
   }
 
-  // pixels a composite of view (image uv u0, u1, v0, v1) draws: x0, x1, y0, y1 from the top.
-  // 2 over so the room's catmull-rom taps at the edge land on drawn pixels
   drawRect(view) {
     if (!view) {
       return [0, this.W, 0, this.H];
@@ -73,33 +107,37 @@ export class RelightBase {
     const [u0, u1, v0, v1] = view;
     const { W, H } = this;
     return [
-      Math.max(0, Math.floor(u0 * W) - 2),
-      Math.min(W, Math.ceil(u1 * W) + 2),
-      Math.max(0, Math.floor(v0 * H) - 2),
-      Math.min(H, Math.ceil(v1 * H) + 2),
+      Math.max(0, Math.floor(u0 * W) - DRAW_MARGIN),
+      Math.min(W, Math.ceil(u1 * W) + DRAW_MARGIN),
+      Math.max(0, Math.floor(v0 * H) - DRAW_MARGIN),
+      Math.min(H, Math.ceil(v1 * H) + DRAW_MARGIN),
     ];
   }
 
-  timeable(stride, r0, r1, c0, c1, cheap = true) {
+  tapSigmaScale() {
+    return (1.5 * 2 * this.cam.tx) / this.W;
+  }
+
+  timeable(stride, r0, r1, c0, c1, hardwareTimer = true) {
     const rows = this.rows(stride);
     const least = Math.min(1, Math.max(MIN_BAND_ROWS / rows, MIN_TIMED_SHARE));
     if (this.timing.pending || r1 - r0 < Math.min(rows, MIN_BAND_ROWS) || this.share(stride, r0, r1, c0, c1) < least) {
       return false;
     }
-    if (!cheap && !this.timing.seeded && (this.timing.counts?.[stride] || 0) >= 3) {
+    const calibrated = (this.timing.counts?.[stride] || 0) >= SOFTWARE_CALIBRATION_SAMPLES;
+    if (!hardwareTimer && !this.timing.seeded && calibrated) {
       this.timing.ticks = (this.timing.ticks || 0) + 1;
-      return this.timing.ticks % 24 === 0;
+      return this.timing.ticks % SOFTWARE_TIMING_INTERVAL === 0;
     }
     return true;
   }
 
   recordTiming(stride, share, ms) {
     this.timing.samples += 1;
-    // first runs include shader compiles
-    if (ms === null || this.timing.samples <= 2) {
+    if (ms === null || this.timing.samples <= WARMUP_SAMPLES) {
       return;
     }
-    const full = ms / share;
+    const fullGridMs = ms / share;
     if (this.timing.seeded) {
       this.timing.seeded = false;
       this.timing.byStride = {};
@@ -110,8 +148,7 @@ export class RelightBase {
     }
     this.timing.counts[stride] = (this.timing.counts[stride] || 0) + 1;
     const t = this.timing.byStride;
-    // drops fast, rises slow, so one stall doesn't make a fast gpu look slow
-    t[stride] = !t[stride] ? full : full < t[stride] ? 0.5 * t[stride] + 0.5 * full : 0.9 * t[stride] + 0.1 * full;
+    t[stride] = smoothCost(t[stride], fullGridMs);
   }
 
   seedTiming(byStride) {
@@ -128,40 +165,81 @@ export class RelightBase {
     }
   }
 
-  // An actual measurement at this stride wins. Otherwise use nearby measurements
-  // to separate fixed dispatch overhead from per-pixel work. A lone sample cannot
-  // identify either component: retain its full pixel-scaled cost plus a 15% fixed
-  // reserve, so sparse passes never become free. This remains an estimate of
-  // inference; callers must also budget resolves and presentation.
   evalCost(s) {
     const t = this.timing.byStride;
     if (Number.isFinite(t[s]) && t[s] > 0) {
       return t[s];
     }
-    const x = 1 / (s * s);
-    const known = Object.entries(t)
+    const pixelShare = 1 / (s * s);
+    const nearest = Object.entries(t)
       .filter(([stride, ms]) => Number(stride) > 0 && Number.isFinite(ms) && ms > 0)
       .map(([stride, ms]) => ({ x: 1 / (Number(stride) ** 2), ms }))
-      .sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x))
+      .sort((a, b) => Math.abs(a.x - pixelShare) - Math.abs(b.x - pixelShare))
       .slice(0, 2);
-    if (!known.length) {
+    if (!nearest.length) {
       return null;
     }
-    const reserve = Math.min(...known.map((v) => v.ms)) * 0.15;
-    if (known.length === 2) {
-      const [a, b] = known;
-      const variable = (b.ms - a.ms) / (b.x - a.x);
-      const fixed = a.ms - variable * a.x;
-      if (variable < 0) {
-        // Noisy or incomparable measurements do not justify a negative cost.
+    const reserve = Math.min(...nearest.map((v) => v.ms)) * FIXED_COST_RESERVE;
+    if (nearest.length === 2) {
+      const [a, b] = nearest;
+      const perPixel = (b.ms - a.ms) / (b.x - a.x);
+      const fixed = a.ms - perPixel * a.x;
+      if (perPixel < 0) {
         return Math.max(a.ms, b.ms);
       }
-      if (Number.isFinite(variable) && fixed >= reserve) {
-        return fixed + variable * x;
+      if (Number.isFinite(perPixel) && fixed >= reserve) {
+        return fixed + perPixel * pixelShare;
       }
     }
-    return reserve + Math.max(...known.map((v) => v.ms / v.x)) * x;
+    return reserve + Math.max(...nearest.map((v) => v.ms / v.x)) * pixelShare;
   }
+
+  async tune(light, stride, runs = 3, signal = null, slot = 0) {
+    const timing = this.timing;
+    this.timing = { ...timing, pending: {} };
+    const times = {};
+    let best = null;
+    try {
+      for (const candidate of this.tuneCandidates()) {
+        if (signal?.aborted) {
+          break;
+        }
+        const variant = await this.prepareVariant(candidate);
+        if (!variant || signal?.aborted) {
+          continue;
+        }
+        this.useVariant(variant);
+        this.evaluate(light, slot, stride);
+        await this.whenIdle();
+        if (signal?.aborted) {
+          break;
+        }
+        const t0 = performance.now();
+        for (let i = 0; i < runs; i += 1) {
+          this.evaluate(light, slot, stride);
+        }
+        await this.whenIdle();
+        const ms = (performance.now() - t0) / runs;
+        times[this.kernelName] = ms;
+        if (!best || ms < best.ms) {
+          best = { variant, ms };
+        }
+      }
+    } finally {
+      this.timing = timing;
+    }
+    if (best) {
+      this.useVariant(best.variant);
+    }
+    this.afterTune();
+    return { kernel: this.kernelName, times };
+  }
+
+  prepareVariant(candidate) {
+    return candidate;
+  }
+
+  afterTune() {}
 
   normLight(l) {
     const { lo, hi } = this;
@@ -185,16 +263,14 @@ export class RelightBase {
     return [0, 1, 2].map((i) => O[i] + X[i] * xc + Y[i] * yc + Z[i] * zc);
   }
 
-  // interpolated, otherwise a light held off the floor stepped a whole row at a time
   surfaceDistance(u, v) {
     const { O } = this.cam;
-    const scale = (this.posHi - this.posLo) / 65534;
     const at = (x, y) => {
       const p = (clampInt(y, this.H) * this.W + clampInt(x, this.W)) * 4;
       if (!this.pos[p]) {
         return Infinity;
       }
-      const d = [0, 1, 2].map((i) => this.posLo + (this.pos[p + i] - 1) * scale - O[i]);
+      const d = [0, 1, 2].map((i) => this.posLo + (this.pos[p + i] - 1) * this.posStep - O[i]);
       return Math.hypot(d[0], d[1], d[2]);
     };
     const fx = u * this.W - 0.5;

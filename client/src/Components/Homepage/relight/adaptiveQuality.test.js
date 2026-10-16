@@ -13,7 +13,6 @@ test('clearing settings survives the old renderer saving again during reload', (
   expect(loadProfile(profile.gpu, profile.fps)).toMatchObject(profile);
 
   expect(clearProfile()).toBe(true);
-  // The renderer saves periodically, on pagehide, and during effect cleanup.
   saveProfile(profile);
   window.dispatchEvent(new Event('pagehide'));
   saveProfile(profile);
@@ -22,7 +21,6 @@ test('clearing settings survives the old renderer saving again during reload', (
   expect(loadProfile(profile.gpu, profile.fps)).toBeNull();
   expect(window.localStorage.getItem('unrelated-preference')).toBe('keep');
 
-  // A fresh page may learn and save a new profile normally.
   jest.resetModules();
   const fresh = require('./adaptiveQuality');
   fresh.saveProfile({ ...profile, budget: 9 });
@@ -75,7 +73,6 @@ test('normal alternating 33/50 ms delivery never counts as a missed update', () 
   expect(q.stats.late).toBe(0);
   expect(q.stats.frames / q.stats.seconds).toBeCloseTo(24);
   expect(q.budget).toBeCloseTo(q.budgetMax);
-  // Callers without metadata still tolerate the ordinary refresh quantization.
   const fallback = quality();
   fallback.worked();
   fallback.frame(0.05, true);
@@ -117,7 +114,6 @@ test('idle DPR adapts over elapsed time, independently of callback count', () =>
       elapsed += delta;
     }
     expect(q.dpr).toBe(1.5);
-    // Floating-point accumulation can leave the boundary one callback short.
     q.frame(delta, true, false, { missedSlots: 1 });
     q.frame(delta, true, false, { missedSlots: 1 });
     expect(q.dpr).toBe(1.25);
@@ -209,7 +205,6 @@ test('model selection budgets every resting pixel within the refinement goal', (
   const small = (cost) => engine(384, cost, {
     scene: { network: { width: 64, hidden: 4 } },
   });
-  // Reclaim model fidelity only with twice the required headroom.
   expect(switchNetwork(small(fullLimit * 0.49 / 3.3), budget)).toBe('128x4');
   expect(switchNetwork(small(fullLimit * 0.51 / 3.3), budget)).toBeNull();
 });
@@ -222,7 +217,6 @@ test('elevated DPR steps down under sustained late frames during active lighting
   }
   expect(q.dpr).toBe(1.25);
 
-  // Even when on-time during active work, DPR does not climb until idle.
   const qOnTime = quality({ dpr: 1.25, dprRange: [1, 2] });
   for (let i = 0; i < 200; i += 1) {
     qOnTime.worked();

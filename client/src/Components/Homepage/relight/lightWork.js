@@ -1,9 +1,9 @@
 import { NO_PHASE } from './RelightBase';
 
-// The cached image is linear network output: color, intensity and intro fades stay in composite.
 export const FILL = { pos: [0.64, 0.72, -0.64], radius: 0.07, color: [0.55, 0.7, 1], intensity: 9, hidden: true, fixed: true };
 export const WHOLE = [0, 1, 0, 1];
 export const REST_DELAY = 0.15;
+export const UNEVALUATED = Object.freeze({ evalPos: null, rect: null, kept: null, stride: 0, phase: 0, done: 0, next: 0 });
 
 export function previewStride(engine, budget, area = 1) {
   if (engine.evalCost(1) === null) return 4;
@@ -19,8 +19,6 @@ export function itemRect(engine, [u0, u1, v0, v1], stride) {
   ];
 }
 
-// Full-detail rows make monotonic progress even as the frame budget changes. A single
-// resolve follows each bounded band; extra phased resolves cannot multiply its overhead.
 export function evaluateRows(engine, job, rect, budget, least = 0) {
   const [r0, r1, c0, c1] = itemRect(engine, rect, 1);
   const full = engine.evalCost(1);
@@ -54,9 +52,8 @@ export function fillStep(engine, light, budget, idle) {
   return spent;
 }
 
-// Valid only on this engine instance. A new model, source tier or device gets a fresh image.
 export function createFill(engine) {
-  return { ...FILL, pos: [...FILL.pos], engine, image: 1, slot: 1, evalPos: null, rect: null, kept: null, stride: 0, phase: 0, done: 0, next: 0 };
+  return { ...FILL, pos: [...FILL.pos], engine, image: 1, slot: 1, ...UNEVALUATED };
 }
 
 export function fillMatches(fill, engine) {

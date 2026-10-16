@@ -1,19 +1,5 @@
-// webgpu version of the relight forward pass. whole MLP per workgroup tile in workgroup memory,
-// ~5ms vs ~21ms on webgl2 for a 512px light (3080)
-//
-// stores the pixel inputs (39 halves, 21MB) and runs layer 0 in the kernel instead of caching
-// it per pixel like the relight repo does (128 floats, 134MB). phones need the memory
-//
-// f16 where available: ~1/3 faster on the 3080, image moves by 3/255 at most
+import { NO_PHASE, RESOLVED, RelightBase, SLOTS, GEO_INPUTS, LIGHT_INPUTS, readNetwork } from './RelightBase';
 
-/* global GPUBufferUsage, GPUMapMode, GPUShaderStage, GPUTextureUsage, BigUint64Array */
-import { NO_PHASE, RESOLVED, RelightBase, SLOTS } from './RelightBase';
-
-// which one's fastest depends on the gpu, tune() times them. first that fits is the default.
-// a thread works out pixels x channels groups of 4 outputs. more pixels reuse each weight it
-// loads (what the 3080 is short of, 8 is enough there), more channels each activation (phones,
-// where workgroup memory is just cache). 32 threads for gpus with small subgroups (mali, apple).
-// on the 3080 the channel, double and subgroup kernels lose by 3-20%, they're for other gpus
 export const KERNELS = [
   { threads: 256, pixels: 4 },
   { threads: 128, pixels: 4 },
@@ -31,22 +17,42 @@ export const KERNELS = [
   { threads: 64, pixels: 8, subgroup: true },
   { threads: 32, pixels: 8, channels: 2, subgroup: true },
 ];
-// saved profiles hold these, one channel group keeps the old name
+
 export const kernelKey = (k) =>
   `${k.threads}x${k.pixels}${k.channels > 1 ? `c${k.channels}` : ''}${k.double ? 'd' : ''}${k.subgroup ? 's' : ''}`;
 
-// pixels a workgroup takes, CG / channels threads share each pixel
-const tileOf = (k, CG) => ((k.threads * (k.channels ?? 1)) / CG) * k.pixels;
+const QUEUE_GRAIN_MS = 0.1;
+const IMAGE_FORMAT = 'rgba16float';
+const RING_SLOTS = 64;
+const PIXELS_PER_WORKGROUP = 64;
+const GEO_FEATURE_BYTES = 32;
+const FWD_GRID_WORDS = 8;
+const FWD_LIGHT = FWD_GRID_WORDS;
+const FWD_HEADER_WORDS = 12;
+const FRAME_HEADER_WORDS = 24;
+const FRAME_EXPOSURE = 20;
+const FRAME_LIGHT_COUNT = 21;
+const LIGHT_WORDS = 12;
+const LIGHT_EMISSION = 4;
+const LIGHT_INFO = 8;
+const RESOLVE_WORDS = 20;
+const RESOLVE_ALPHA = 17;
+const RESOLVE_SIGMA = 18;
+const RESOLVE_SPARSE = 19;
+const FULL_RES_STRIDE = 1;
+
+const channelsOf = (k) => k.channels ?? 1;
+const tileOf = (k, groups) => ((k.threads * channelsOf(k)) / groups) * k.pixels;
+const outputCount = (mul) => (mul ? 6 : 3);
+const wordsPerPixel = (mul) => (mul ? 3 : 2);
+const u32 = (x) => `${x >>> 0}u`;
 
 function workgroupBytes(k, width, half, outputs) {
   const tile = tileOf(k, width / 4);
-  return tile * width * (half ? 2 : 4) * (k.double ? 2 : 1) + tile * 32 + tile * outputs * 4;
+  const actBytes = tile * width * (half ? 2 : 4) * (k.double ? 2 : 1);
+  return actBytes + tile * GEO_FEATURE_BYTES + tile * outputs * 4;
 }
 
-const outputsOf = (mul) => (mul ? 6 : 3);
-const wordsOf = (mul) => (mul ? 3 : 2);
-
-// asks for the adapter's own workgroup memory limit, the 16KB default only fits the small kernel
 export async function requestRelightDevice() {
   if (!navigator.gpu) {
     throw new Error(window.isSecureContext ? 'this browser has no WebGPU' : 'WebGPU needs HTTPS');
@@ -54,7 +60,6 @@ export async function requestRelightDevice() {
   if (typeof OffscreenCanvas === 'undefined') {
     throw new Error('this browser has no OffscreenCanvas');
   }
-  // default adapter like webgl uses, so on dual gpu laptops the image doesn't cross gpus every frame
   const adapter = await navigator.gpu.requestAdapter();
   if (!adapter) {
     throw new Error('the browser offers no WebGPU adapter for this GPU');
@@ -71,16 +76,6 @@ export async function requestRelightDevice() {
   });
 }
 
-const u = (x) => `${x >>> 0}u`;
-
-// ms, closer completions get reported together
-const QUEUE_GRAIN = 0.1;
-// the composited image. halves so it isn't quantised before the room's upscale and grade
-const IMAGE_FORMAT = 'rgba16float';
-// passes a frame's uniforms have room for, past that it submits early and starts over
-const RING = 64;
-
-// f32 -> f16 bits, round to nearest even
 function toHalf(values) {
   const out = new Uint16Array(values.length);
   const f = new Float32Array(1);
@@ -108,9 +103,61 @@ function toHalf(values) {
   return out;
 }
 
-// f0 = (dir to light, cos), f1 = (0.5 ln d, 0.25 ln solid angle, G, valid)
-const GEO_WGSL = /* wgsl */ `
+function packWeights(layers, { width, hiddenLayers, pixelInputs, inputs, geo, mul }) {
+  const groups = width / 4;
+  const off = {};
+  let len = 0;
+  const alloc = (key, vec4s) => {
+    off[key] = len;
+    len += vec4s;
+  };
+  const hiddenVec4s = width * groups + groups;
+  alloc('layer0Pixel', Math.ceil(pixelInputs / 4) * 4 * groups);
+  alloc('layer0Geo', geo ? GEO_INPUTS * groups : 0);
+  alloc('hidden', hiddenLayers * hiddenVec4s);
+  alloc('outWeights', outputCount(mul) * groups);
+  alloc('outBias', 2);
+  const data = new Float32Array(len * 4);
+  const w0 = layers[0].w;
+  const lightColumn = pixelInputs;
+  const geoColumn = pixelInputs + LIGHT_INPUTS;
+  for (let c = 0; c < width; c += 1) {
+    for (let k = 0; k < pixelInputs; k += 1) {
+      data[(off.layer0Pixel + k * groups) * 4 + c] = w0[c * inputs + k];
+    }
+    for (let j = 0; geo && j < GEO_INPUTS; j += 1) {
+      data[(off.layer0Geo + j * groups) * 4 + c] = w0[c * inputs + geoColumn + j];
+    }
+  }
+  for (let l = 0; l < hiddenLayers; l += 1) {
+    const { w, b } = layers[l + 1];
+    const o = (off.hidden + l * hiddenVec4s) * 4;
+    for (let c = 0; c < width; c += 1) {
+      for (let k = 0; k < width; k += 1) {
+        data[o + k * width + c] = w[c * width + k];
+      }
+    }
+    data.set(b, o + width * width);
+  }
+  data.set(layers[hiddenLayers + 1].w, off.outWeights * 4);
+  data.set(layers[hiddenLayers + 1].b, off.outBias * 4);
+  const lightWeights = new Float32Array(width * LIGHT_INPUTS);
+  for (let c = 0; c < width; c += 1) {
+    for (let j = 0; j < LIGHT_INPUTS; j += 1) {
+      lightWeights[c * LIGHT_INPUTS + j] = w0[c * inputs + lightColumn + j];
+    }
+  }
+  return { off, data, bias0: layers[0].b, lightWeights };
+}
+
+const SOLID_ANGLE_WGSL = `
 const PI = 3.14159265358979;
+fn solidAngle(r: f32, d: f32) -> f32 {
+  let s = min(r / d, 1.0);
+  return 2.0 * PI * s * s / (1.0 + sqrt(max(1.0 - s * s, 0.0)));
+}`;
+
+const GEO_WGSL = `${SOLID_ANGLE_WGSL}
 struct Geo { f0: vec4f, f1: vec4f };
 fn geoFeatures(x: vec4f, n: vec3f, lc: vec4f) -> Geo {
   var o: Geo;
@@ -119,26 +166,36 @@ fn geoFeatures(x: vec4f, n: vec3f, lc: vec4f) -> Geo {
   let d = max(length(v), 1e-4);
   let l = v / d;
   let cs = dot(n, l);
-  let s = min(lc.w / d, 1.0);
-  let om = 2.0 * PI * s * s / (1.0 + sqrt(max(1.0 - s * s, 0.0)));
+  let om = solidAngle(lc.w, d);
   o.f0 = vec4f(l, cs);
   o.f1 = vec4f(0.5 * log(d), 0.25 * log(om + 1e-6), om * max(cs, 0.0) / PI, 1.0);
   return o;
 }
 `;
 
-// pixel positions (+ camera distance) and normals in separate arrays of halves, so the
-// bilateral taps, which only want positions, read 8 bytes a pixel instead of 16 of every 32.
-// halved positions move the image by 1/255 at most and don't change the PSNR
-const POS_WGSL = /* wgsl */ `
+const POS_WGSL = `
 fn posAt(p: u32) -> vec4f { let q = ppos[p]; return vec4f(unpack2x16float(q.x), unpack2x16float(q.y)); }`;
-const NRM_WGSL = /* wgsl */ `
+const NRM_WGSL = `
 fn nrmAt(p: u32) -> vec3f { let n = pnrm[p]; return vec3f(unpack2x16float(n.x), unpack2x16float(n.y).x); }`;
 
-function precomputeWGSL({ W, H, levels, feats, gridRes, gridOff, auxDim, XW, posRange, camO }) {
-  const arr = (a) => `array<u32, ${a.length}>(${a.map(u).join(', ')})`;
-  const f = (x) => `${x}`.includes('.') || `${x}`.includes('e') ? `${x}` : `${x}.0`;
-  return /* wgsl */ `
+const TAP_WGSL = `
+fn tapWeight(k: u32, t: vec2f, g: vec4f, q: vec4f, sig: f32) -> f32 {
+  let wb = select(1.0 - t.x, t.x, (k & 1u) == 1u) * select(1.0 - t.y, t.y, k >= 2u);
+  let dq = q.xyz - g.xyz;
+  var wgt = exp(-dot(dq, dq) / (2.0 * sig * sig));
+  if ((q.w > 0.0) != (g.w > 0.0)) { wgt = 0.0; }
+  return wb * (wgt + 1e-4);
+}`;
+
+const FULLSCREEN_WGSL = `
+fn fullscreenCorner(i: u32) -> vec2f {
+  return array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0))[i];
+}`;
+
+function precomputeWGSL({ W, H, levels, feats, gridRes, gridOff, auxDim, inputWords, posLo, posStep, camO }) {
+  const arr = (a) => `array<u32, ${a.length}>(${a.map(u32).join(', ')})`;
+  const f = (x) => (`${x}`.includes('.') || `${x}`.includes('e') ? `${x}` : `${x}.0`);
+  return `
 @group(0) @binding(0) var<storage, read> grid: array<u32>;
 @group(0) @binding(1) var<storage, read> auxB: array<u32>;
 @group(0) @binding(2) var<storage, read> posB: array<u32>;
@@ -147,8 +204,8 @@ function precomputeWGSL({ W, H, levels, feats, gridRes, gridOff, auxDim, XW, pos
 @group(0) @binding(5) var<storage, read_write> pnrm: array<vec2u>;
 var<private> RES: array<u32, ${levels}> = ${arr(gridRes)};
 var<private> GOFF: array<u32, ${levels}> = ${arr(gridOff)};
-const W = ${u(W)}; const H = ${u(H)}; const F = ${u(feats)}; const NP = ${u(W * H)};
-const POS_LO = ${f(posRange[0])}; const POS_STEP = ${f((posRange[1] - posRange[0]) / 65534)};
+const W = ${u32(W)}; const H = ${u32(H)}; const F = ${u32(feats)}; const NP = ${u32(W * H)};
+const POS_LO = ${f(posLo)}; const POS_STEP = ${f(posStep)};
 const CAM_O = vec3f(${camO.map(f).join(', ')});
 
 fn gridAt(i: u32) -> f32 {
@@ -159,14 +216,14 @@ fn auxAt(p: u32, j: u32) -> f32 {
   return unpack2x16float(auxB[i >> 1u])[i & 1u];
 }
 
-@compute @workgroup_size(64)
+@compute @workgroup_size(${PIXELS_PER_WORKGROUP})
 fn main(@builtin(global_invocation_id) gid: vec3u) {
   let p = gid.x;
   if (p >= NP) { return; }
   let uu = (f32(p % W) + 0.5) / f32(W);
   let vv = (f32(p / W) + 0.5) / f32(H);
-  var x: array<f32, ${XW * 2}>;
-  for (var l = 0u; l < ${u(levels)}; l++) {
+  var x: array<f32, ${inputWords * 2}>;
+  for (var l = 0u; l < ${u32(levels)}; l++) {
     let R = RES[l];
     let fx = uu * f32(R - 1u); let fy = vv * f32(R - 1u);
     let x0 = min(u32(floor(fx)), R - 2u); let y0 = min(u32(floor(fy)), R - 2u);
@@ -180,8 +237,8 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       x[l * F + f] = mix(mix(v00, v01, tx), mix(v10, v11, tx), ty);
     }
   }
-  for (var j = 0u; j < ${u(auxDim)}; j++) { x[${u(levels * feats)} + j] = auxAt(p, j); }
-  for (var j = 0u; j < ${u(XW)}; j++) { X[p * ${u(XW)} + j] = pack2x16float(vec2f(x[2u * j], x[2u * j + 1u])); }
+  for (var j = 0u; j < ${u32(auxDim)}; j++) { x[${u32(levels * feats)} + j] = auxAt(p, j); }
+  for (var j = 0u; j < ${u32(inputWords)}; j++) { X[p * ${u32(inputWords)} + j] = pack2x16float(vec2f(x[2u * j], x[2u * j + 1u])); }
 
   let q0 = posB[2u * p]; let q1 = posB[2u * p + 1u];
   var g = vec4f(0.0);
@@ -195,110 +252,117 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
 `;
 }
 
-// activations are vec4s so a thread loads 4 inputs at once. one at a time, the workgroup
-// memory loads outnumbered the FMAs, which is what phone gpus are worst at. a thread with
-// C channel groups loads 4C weights and P activations a step for 16CP FMAs.
-// double writes each layer into the other half of act, so it needs no barrier before the writes.
-// subgroup keeps a pixel's activations in its threads' registers between hidden layers and
-// shuffles them across, so those need no barriers or workgroup memory
-function forwardWGSL({ W, H, WD, NH, PIXIN, XW, geo, mul, threads, pixels: P, channels: C = 1, double: DB, subgroup: SG, off, half }) {
-  const CG = WD / 4;
-  // threads a pixel, a thread's channel groups are CGC apart so neighbours read neighbouring weights
-  const CGC = CG / C;
-  const NO = outputsOf(mul);
-  const NW = wordsOf(mul);
-  const PG = threads / CGC;
-  const TP = PG * P;
-  const Q = [...Array(P).keys()];
-  const CS = [...Array(C).keys()];
-  const HSTRIDE = WD * CG + CG;
-  const A = TP * CG;
-  // the half the last layer wrote
-  const LAST = DB ? ((NH + 1) % 2) * A : 0;
-  const X4 = Math.ceil(XW / 2);
-  const PIN4 = Math.ceil(PIXIN / 4);
-  const V = half ? 'vec4h' : 'vec4f';
-  const lines = (list, f) => list.map(f).join('\n      ');
-  // acc(c, q) += x(q) · weights w{c}0..3
-  const fma = (acc, x) =>
-    lines(
-      CS.flatMap((c) => Q.map((q) => [c, q])),
+function forwardWGSL({
+  W,
+  H,
+  width,
+  hiddenLayers,
+  pixelInputs,
+  inputWords,
+  geo,
+  mul,
+  threads,
+  pixels,
+  channels = 1,
+  double: doubleBuffer,
+  subgroup: shuffle,
+  off,
+  half,
+}) {
+  const groups = width / 4;
+  const threadsPerPixel = groups / channels;
+  const outputs = outputCount(mul);
+  const words = wordsPerPixel(mul);
+  const teams = threads / threadsPerPixel;
+  const tilePixels = teams * pixels;
+  const pixelIdx = [...Array(pixels).keys()];
+  const channelIdx = [...Array(channels).keys()];
+  const hiddenVec4s = width * groups + groups;
+  const actVec4s = tilePixels * groups;
+  const lastActOffset = doubleBuffer ? ((hiddenLayers + 1) % 2) * actVec4s : 0;
+  const inputVec4s = Math.ceil(inputWords / 2);
+  const layer0Steps = Math.ceil(pixelInputs / 4);
+  const vec4T = half ? 'vec4h' : 'vec4f';
+  const joinLines = (list, f) => list.map(f).join('\n      ');
+  const accumulate = (acc, x) =>
+    joinLines(
+      channelIdx.flatMap((c) => pixelIdx.map((q) => [c, q])),
       ([c, q]) => `${acc(c, q)} += ${x(q)}.x * w${c}0 + ${x(q)}.y * w${c}1 + ${x(q)}.z * w${c}2 + ${x(q)}.w * w${c}3;`
     );
-  const rows4 = (at) =>
-    CS.map((c) => [0, 1, 2, 3].map((j) => `let w${c}${j} = Wv[${at} + ${u(j * CG + c * CGC)}];`).join(' ')).join(
-      '\n      '
-    );
-  const acts = (at) => Q.map((q) => `let x${q} = act[${at(q)}];`).join(' ');
-  const hq = (c, q) => (typeof q === 'number' ? `h[${c * P + q}]` : `h[${c ? `${u(c * P)} + ` : ''}${q}]`);
-  return /* wgsl */ `
+  const loadWeights = (at) =>
+    channelIdx
+      .map((c) =>
+        [0, 1, 2, 3].map((j) => `let w${c}${j} = Wv[${at} + ${u32(j * groups + c * threadsPerPixel)}];`).join(' ')
+      )
+      .join('\n      ');
+  const loadActs = (at) => pixelIdx.map((q) => `let x${q} = act[${at(q)}];`).join(' ');
+  const hiddenAt = (c, q) =>
+    typeof q === 'number' ? `h[${c * pixels + q}]` : `h[${c ? `${u32(c * pixels)} + ` : ''}${q}]`;
+  return `
 ${half ? 'enable f16;' : ''}
-${SG ? 'enable subgroups;\nrequires subgroup_id;' : ''}
+${shuffle ? 'enable subgroups;\nrequires subgroup_id;' : ''}
 struct Fwd {
   i0: u32, i1: u32, stride: u32, slot: u32, x0: u32, xw: u32, px: u32, py: u32,
-  lc: vec4f, add: array<vec4f, ${CG}>,
+  lc: vec4f, add: array<vec4f, ${groups}>,
 };
-@group(0) @binding(0) var<storage, read> Wv: array<${V}>;
+@group(0) @binding(0) var<storage, read> Wv: array<${vec4T}>;
 @group(0) @binding(1) var<storage, read> X: array<u32>;
 @group(0) @binding(2) var<storage, read> ppos: array<vec2u>;
 @group(0) @binding(3) var<uniform> fu: Fwd;
 @group(0) @binding(4) var<storage, read_write> outB: array<u32>;
 @group(0) @binding(5) var<storage, read> pnrm: array<vec2u>;
-var<workgroup> act: array<${V}, ${DB ? 2 * A : A}>;
-var<workgroup> pf: array<vec4f, ${2 * TP}>;
-var<workgroup> res: array<f32, ${TP * NO}>;
+var<workgroup> act: array<${vec4T}, ${doubleBuffer ? 2 * actVec4s : actVec4s}>;
+var<workgroup> pf: array<vec4f, ${2 * tilePixels}>;
+var<workgroup> res: array<f32, ${tilePixels * outputs}>;
 ${GEO_WGSL}
 ${POS_WGSL}
 ${NRM_WGSL}
-// px, py offset the grid so each frame can take different pixels. the last row/column can land
-// off the image, they're read clamped and the resolve doesn't use them
 fn pixelOf(i: u32) -> u32 {
   let s = fu.stride;
-  let x = min((fu.x0 + i % fu.xw) * s + fu.px, ${u(W - 1)});
-  let y = min((i / fu.xw) * s + fu.py, ${u(H - 1)});
-  return y * ${u(W)} + x;
+  let x = min((fu.x0 + i % fu.xw) * s + fu.px, ${u32(W - 1)});
+  let y = min((i / fu.xw) * s + fu.py, ${u32(H - 1)});
+  return y * ${u32(W)} + x;
 }
 fn itemOf(i: u32) -> u32 {
-  let cw = (${u(W)} + fu.stride - 1u) / fu.stride;
+  let cw = (${u32(W)} + fu.stride - 1u) / fu.stride;
   return (i / fu.xw) * cw + fu.x0 + i % fu.xw;
 }
 fn outRow(o: u32, pl: u32) -> f32 {
-  var acc = f32(Wv[${u(off.BO)} + o / 4u][o % 4u]);
-  let row = ${u(off.WO)} + o * ${u(CG)};
-  for (var k = 0u; k < ${u(CG)}; k++) {
-    acc += f32(dot(Wv[row + k], act[${LAST ? `${u(LAST)} + ` : ''}pl * ${u(CG)} + k]));
+  var acc = f32(Wv[${u32(off.outBias)} + o / 4u][o % 4u]);
+  let row = ${u32(off.outWeights)} + o * ${u32(groups)};
+  for (var k = 0u; k < ${u32(groups)}; k++) {
+    acc += f32(dot(Wv[row + k], act[${lastActOffset ? `${u32(lastActOffset)} + ` : ''}pl * ${u32(groups)} + k]));
   }
   return acc;
 }
 
 @compute @workgroup_size(${threads})
 fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) t: u32${
-    SG
+    shuffle
       ? `,
     @builtin(subgroup_id) sgi: u32, @builtin(subgroup_size) sgs: u32, @builtin(subgroup_invocation_id) lane: u32`
       : ''
   }) {
-  let base = fu.i0 + wg.x * ${u(TP)};
-  ${SG
-    ? `// a pixel's threads are lanes lane0.. of one subgroup, whichever threads the gpu put in it
-  let tt = sgi * sgs + lane;
-  let pg = tt / ${u(CGC)};
-  let cg = tt % ${u(CGC)};
+  let base = fu.i0 + wg.x * ${u32(tilePixels)};
+  ${shuffle
+    ? `let tt = sgi * sgs + lane;
+  let pg = tt / ${u32(threadsPerPixel)};
+  let cg = tt % ${u32(threadsPerPixel)};
   let lane0 = lane - cg;`
-    : `let pg = t / ${u(CGC)};
-  let cg = t % ${u(CGC)};`}
+    : `let pg = t / ${u32(threadsPerPixel)};
+  let cg = t % ${u32(threadsPerPixel)};`}
 
-  for (var e = t; e < ${u(TP * X4)}; e += ${u(threads)}) {
-    let pl = e / ${u(X4)}; let q = e % ${u(X4)};
+  for (var e = t; e < ${u32(tilePixels * inputVec4s)}; e += ${u32(threads)}) {
+    let pl = e / ${u32(inputVec4s)}; let q = e % ${u32(inputVec4s)};
     var v = vec4f(0.0);
     if (base + pl < fu.i1) {
-      let at = pixelOf(base + pl) * ${u(XW)} + 2u * q;
-      let hi = ${XW % 2 ? `select(vec2f(0.0), unpack2x16float(X[at + 1u]), 2u * q + 1u < ${u(XW)})` : 'unpack2x16float(X[at + 1u])'};
+      let at = pixelOf(base + pl) * ${u32(inputWords)} + 2u * q;
+      let hi = ${inputWords % 2 ? `select(vec2f(0.0), unpack2x16float(X[at + 1u]), 2u * q + 1u < ${u32(inputWords)})` : 'unpack2x16float(X[at + 1u])'};
       v = vec4f(unpack2x16float(X[at]), hi);
     }
-    act[pl * ${u(CG)} + q] = ${V}(v);
+    act[pl * ${u32(groups)} + q] = ${vec4T}(v);
   }
-  if (t < ${u(TP)}) {
+  if (t < ${u32(tilePixels)}) {
     var g: Geo;
     if (base + t < fu.i1) {
       let p = pixelOf(base + t);
@@ -308,73 +372,72 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) t: u3
   }
   workgroupBarrier();
 
-  ${CS.map((c) => `let add${c} = ${V}(fu.add[cg + ${u(c * CGC)}]);`).join(' ')}
-  var h = array<${V}, ${C * P}>(${CS.flatMap((c) => Q.map(() => `add${c}`)).join(', ')});
-  let r0 = pg * ${u(P * CG)};
-  for (var k = 0u; k < ${u(PIN4)}; k++) {
-    ${rows4(`${u(off.W0T)} + k * ${u(4 * CG)} + cg`)}
-    ${acts((q) => `r0 + ${u(q * CG)} + k`)}
-    ${fma(hq, (q) => `x${q}`)}
+  ${channelIdx.map((c) => `let add${c} = ${vec4T}(fu.add[cg + ${u32(c * threadsPerPixel)}]);`).join(' ')}
+  var h = array<${vec4T}, ${channels * pixels}>(${channelIdx.flatMap((c) => pixelIdx.map(() => `add${c}`)).join(', ')});
+  let r0 = pg * ${u32(pixels * groups)};
+  for (var k = 0u; k < ${u32(layer0Steps)}; k++) {
+    ${loadWeights(`${u32(off.layer0Pixel)} + k * ${u32(4 * groups)} + cg`)}
+    ${loadActs((q) => `r0 + ${u32(q * groups)} + k`)}
+    ${accumulate(hiddenAt, (q) => `x${q}`)}
   }
-  ${geo ? `for (var q = 0u; q < ${u(P)}; q++) {
-    let f0 = ${V}(pf[2u * (pg * ${u(P)} + q)]); let f1 = ${V}(pf[2u * (pg * ${u(P)} + q) + 1u]);
-    ${CS.map((c) => {
-      const g = (j) => `Wv[${u(off.W0G + j * CG + c * CGC)} + cg]`;
-      return `${hq(c, 'q')} += ${g(0)} * f0.x + ${g(1)} * f0.y
+  ${geo ? `for (var q = 0u; q < ${u32(pixels)}; q++) {
+    let f0 = ${vec4T}(pf[2u * (pg * ${u32(pixels)} + q)]); let f1 = ${vec4T}(pf[2u * (pg * ${u32(pixels)} + q) + 1u]);
+    ${channelIdx.map((c) => {
+      const g = (j) => `Wv[${u32(off.layer0Geo + j * groups + c * threadsPerPixel)} + cg]`;
+      return `${hiddenAt(c, 'q')} += ${g(0)} * f0.x + ${g(1)} * f0.y
           + ${g(2)} * f0.z + ${g(3)} * f0.w
           + ${g(4)} * f1.x + ${g(5)} * f1.y;`;
     }).join('\n    ')}
   }` : ''}
-  ${DB || SG ? '' : 'workgroupBarrier();'}
-  for (var q = 0u; q < ${u(P)}; q++) {
-    let live = base + pg * ${u(P)} + q < fu.i1;
-    ${CS.map((c) =>
-      SG
-        ? `${hq(c, 'q')} = select(${V}(0.0), max(${hq(c, 'q')}, ${V}(0.0)), live);`
-        : `act[${DB ? `${u(A)} + ` : ''}r0 + q * ${u(CG)} + cg + ${u(c * CGC)}] = select(${V}(0.0), max(${hq(c, 'q')}, ${V}(0.0)), live);`
+  ${doubleBuffer || shuffle ? '' : 'workgroupBarrier();'}
+  for (var q = 0u; q < ${u32(pixels)}; q++) {
+    let live = base + pg * ${u32(pixels)} + q < fu.i1;
+    ${channelIdx.map((c) =>
+      shuffle
+        ? `${hiddenAt(c, 'q')} = select(${vec4T}(0.0), max(${hiddenAt(c, 'q')}, ${vec4T}(0.0)), live);`
+        : `act[${doubleBuffer ? `${u32(actVec4s)} + ` : ''}r0 + q * ${u32(groups)} + cg + ${u32(c * threadsPerPixel)}] = select(${vec4T}(0.0), max(${hiddenAt(c, 'q')}, ${vec4T}(0.0)), live);`
     ).join('\n    ')}
   }
-  ${SG ? '' : 'workgroupBarrier();'}
+  ${shuffle ? '' : 'workgroupBarrier();'}
 
-  for (var l = 0u; l < ${u(NH)}; l++) {
-    let wo = ${u(off.HID)} + l * ${u(HSTRIDE)};
-    ${CS.map((c) => `let bias${c} = Wv[wo + ${u(WD * CG + c * CGC)} + cg];`).join(' ')}
-    ${CS.map((c) => Q.map((q) => `var a${c}_${q} = bias${c};`).join(' ')).join('\n    ')}
-    ${SG
-      ? `${CS.map(
-          (s) => `for (var j = 0u; j < ${u(CGC)}; j++) {
-      let k = ${s ? `${u(s * CGC)} + ` : ''}j;
-      ${rows4(`wo + k * ${u(4 * CG)} + cg`)}
-      ${Q.map((q) => `let x${q} = subgroupShuffle(${hq(s, q)}, lane0 + j);`).join(' ')}
-      ${fma((c, q) => `a${c}_${q}`, (q) => `x${q}`)}
+  for (var l = 0u; l < ${u32(hiddenLayers)}; l++) {
+    let wo = ${u32(off.hidden)} + l * ${u32(hiddenVec4s)};
+    ${channelIdx.map((c) => `let bias${c} = Wv[wo + ${u32(width * groups + c * threadsPerPixel)} + cg];`).join(' ')}
+    ${channelIdx.map((c) => pixelIdx.map((q) => `var a${c}_${q} = bias${c};`).join(' ')).join('\n    ')}
+    ${shuffle
+      ? `${channelIdx.map(
+          (s) => `for (var j = 0u; j < ${u32(threadsPerPixel)}; j++) {
+      let k = ${s ? `${u32(s * threadsPerPixel)} + ` : ''}j;
+      ${loadWeights(`wo + k * ${u32(4 * groups)} + cg`)}
+      ${pixelIdx.map((q) => `let x${q} = subgroupShuffle(${hiddenAt(s, q)}, lane0 + j);`).join(' ')}
+      ${accumulate((c, q) => `a${c}_${q}`, (q) => `x${q}`)}
     }`
         ).join('\n    ')}
-    ${CS.map((c) => Q.map((q) => `${hq(c, q)} = max(a${c}_${q}, ${V}(0.0));`).join(' ')).join('\n    ')}
+    ${channelIdx.map((c) => pixelIdx.map((q) => `${hiddenAt(c, q)} = max(a${c}_${q}, ${vec4T}(0.0));`).join(' ')).join('\n    ')}
   }
-  // the output rows take every channel of a pixel, they go through workgroup memory
   workgroupBarrier();
-  ${CS.map((c) => Q.map((q) => `act[r0 + ${u(q * CG + c * CGC)} + cg] = ${hq(c, q)};`).join(' ')).join('\n  ')}
+  ${channelIdx.map((c) => pixelIdx.map((q) => `act[r0 + ${u32(q * groups + c * threadsPerPixel)} + cg] = ${hiddenAt(c, q)};`).join(' ')).join('\n  ')}
   workgroupBarrier();`
-      : `${DB ? `let src = select(0u, ${u(A)}, (l & 1u) == 0u); let dst = ${u(A)} - src;` : ''}
-    for (var k = 0u; k < ${u(CG)}; k++) {
-      ${rows4(`wo + k * ${u(4 * CG)} + cg`)}
-      ${acts((q) => `${DB ? 'src + ' : ''}r0 + ${u(q * CG)} + k`)}
-      ${fma((c, q) => `a${c}_${q}`, (q) => `x${q}`)}
+      : `${doubleBuffer ? `let src = select(0u, ${u32(actVec4s)}, (l & 1u) == 0u); let dst = ${u32(actVec4s)} - src;` : ''}
+    for (var k = 0u; k < ${u32(groups)}; k++) {
+      ${loadWeights(`wo + k * ${u32(4 * groups)} + cg`)}
+      ${loadActs((q) => `${doubleBuffer ? 'src + ' : ''}r0 + ${u32(q * groups)} + k`)}
+      ${accumulate((c, q) => `a${c}_${q}`, (q) => `x${q}`)}
     }
-    ${DB ? '' : 'workgroupBarrier();'}
-    ${CS.map((c) => Q.map((q) => `act[${DB ? 'dst + ' : ''}r0 + ${u(q * CG + c * CGC)} + cg] = max(a${c}_${q}, ${V}(0.0));`).join('\n    ')).join(
+    ${doubleBuffer ? '' : 'workgroupBarrier();'}
+    ${channelIdx.map((c) => pixelIdx.map((q) => `act[${doubleBuffer ? 'dst + ' : ''}r0 + ${u32(q * groups + c * threadsPerPixel)} + cg] = max(a${c}_${q}, ${vec4T}(0.0));`).join('\n    ')).join(
       '\n    '
     )}
     workgroupBarrier();
   }`}
 
-  for (var e = t; e < ${u(TP * NO)}; e += ${u(threads)}) {
-    res[e] = outRow(e % ${u(NO)}, e / ${u(NO)});
+  for (var e = t; e < ${u32(tilePixels * outputs)}; e += ${u32(threads)}) {
+    res[e] = outRow(e % ${u32(outputs)}, e / ${u32(outputs)});
   }
   workgroupBarrier();
-  if (t < ${u(TP)} && base + t < fu.i1) {
-    let o = (fu.slot * ${u(W * H)} + itemOf(base + t)) * ${u(NW)};
-    let r = t * ${u(NO)};
+  if (t < ${u32(tilePixels)} && base + t < fu.i1) {
+    let o = (fu.slot * ${u32(W * H)} + itemOf(base + t)) * ${u32(words)};
+    let r = t * ${u32(outputs)};
     ${mul
       ? `outB[o] = pack2x16float(vec2f(res[r], res[r + 1u]));
     outB[o + 1u] = pack2x16float(vec2f(res[r + 2u], res[r + 3u]));
@@ -386,11 +449,10 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) t: u3
 `;
 }
 
-// rows bottom first like the webgl render target
 function compositeWGSL({ W, H, mul }) {
-  const NW = wordsOf(mul);
-  return /* wgsl */ `
-struct Light { pr: vec4f, e: vec4f, info: vec4u };  // info: slot, stride, disc shown
+  const words = wordsPerPixel(mul);
+  return `
+struct Light { pr: vec4f, e: vec4f, info: vec4u };
 struct Frame {
   camO: vec4f, camX: vec4f, camY: vec4f, camZ: vec4f, tanxy: vec4f,
   exposure: f32, nLights: u32, _a: u32, _b: u32,
@@ -400,17 +462,18 @@ struct Frame {
 @group(0) @binding(1) var<storage, read> outB: array<u32>;
 @group(0) @binding(2) var<storage, read> ppos: array<vec2u>;
 ${mul ? '@group(0) @binding(3) var<storage, read> pnrm: array<vec2u>;' : ''}
-const W = ${u(W)}; const H = ${u(H)}; const NP = ${u(W * H)};
-  const PI = 3.14159265358979;
+const W = ${u32(W)}; const H = ${u32(H)}; const NP = ${u32(W * H)};
+${SOLID_ANGLE_WGSL}
 ${POS_WGSL}
 ${mul ? NRM_WGSL : ''}
+${TAP_WGSL}
+${FULLSCREEN_WGSL}
 struct Net { a: vec3f, b: vec3f };
 
 fn camDir(uv: vec2f) -> vec3f {
   return normalize(frame.camX.xyz * ((0.5 - uv.x) * 2.0 * frame.tanxy.x)
     + frame.camY.xyz * ((0.5 - uv.y) * 2.0 * frame.tanxy.y) + frame.camZ.xyz);
 }
-// 4x4 supersampled
 fn directCov(p: u32, g: vec4f, l: u32) -> f32 {
   let L = frame.lights[l];
   let c = L.pr.xyz; let r = L.pr.w;
@@ -438,14 +501,12 @@ fn directCov(p: u32, g: vec4f, l: u32) -> f32 {
   return cnt / 16.0;
 }
 fn outAt(i: u32) -> Net {
-  let w0 = unpack2x16float(outB[${u(NW)} * i]); let w1 = unpack2x16float(outB[${u(NW)} * i + 1u]);
+  let w0 = unpack2x16float(outB[${u32(words)} * i]); let w1 = unpack2x16float(outB[${u32(words)} * i + 1u]);
   ${mul
     ? `let w2 = unpack2x16float(outB[3u * i + 2u]);
   return Net(vec3f(w0, w1.x), vec3f(w1.y, w2));`
     : 'return Net(vec3f(w0, w1.x), vec3f(0.0));'}
 }
-// previews upsample weighted by position so light doesn't bleed across edges. G is
-// computed per pixel so a preview keeps the light's shape, not just its colour
 fn lit(n: Net, g: vec4f, nrm: vec3f, light: vec4f) -> vec3f {
   ${mul
     ? `var G = 0.0;
@@ -454,8 +515,7 @@ fn lit(n: Net, g: vec4f, nrm: vec3f, light: vec4f) -> vec3f {
     let d = max(length(v), 1e-4);
     let cs = dot(nrm, v / d);
     if (cs > 0.0) {
-      let s = min(light.w / d, 1.0);
-      let om = 2.0 * PI * s * s / (1.0 + sqrt(max(1.0 - s * s, 0.0)));
+      let om = solidAngle(light.w, d);
       G = om * cs / PI;
     }
   }
@@ -474,12 +534,7 @@ fn netAt(slot: u32, s: u32, p: u32, g: vec4f) -> Net {
   var acc = Net(vec3f(0.0), vec3f(0.0)); var ws = 0.0;
   for (var k = 0u; k < 4u; k++) {
     let cx = select(x0, x1, (k & 1u) == 1u); let cy = select(y0, y1, k >= 2u);
-    let wb = select(1.0 - tx, tx, (k & 1u) == 1u) * select(1.0 - ty, ty, k >= 2u);
-    let q = posAt(cy * s * W + cx * s);
-    let dq = q.xyz - g.xyz;
-    var wgt = exp(-dot(dq, dq) / (2.0 * sig * sig));
-    if ((q.w > 0.0) != (g.w > 0.0)) { wgt = 0.0; }
-    let w = wb * (wgt + 1e-4);
+    let w = tapWeight(k, vec2f(tx, ty), g, posAt(cy * s * W + cx * s), sig);
     let n = outAt(base + cy * cw + cx);
     acc.a += w * n.a; acc.b += w * n.b;
     ws += w;
@@ -493,8 +548,7 @@ fn srgb(c: vec3f) -> vec3f {
 }
 
 @vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
-  let p = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));
-  return vec4f(p[i], 0.0, 1.0);
+  return vec4f(fullscreenCorner(i), 0.0, 1.0);
 }
 @fragment fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   let p = (H - 1u - min(u32(pos.y), H - 1u)) * W + min(u32(pos.x), W - 1u);
@@ -510,14 +564,13 @@ fn srgb(c: vec3f) -> vec3f {
 `;
 }
 
-// copies the composited image onto a canvas, the same size (snapshots) or half (the glass's copy,
-// each pixel the average of 4)
-const BLIT_WGSL = /* wgsl */ `
+const BLIT_WGSL = `
 @group(0) @binding(0) var image: texture_2d<f32>;
 @group(0) @binding(1) var smp: sampler;
 struct Out { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
+${FULLSCREEN_WGSL}
 @vertex fn vs(@builtin(vertex_index) i: u32) -> Out {
-  let p = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0))[i];
+  let p = fullscreenCorner(i);
   return Out(vec4f(p, 0.0, 1.0), vec2f(0.5 + 0.5 * p.x, 0.5 - 0.5 * p.y));
 }
 @fragment fn fs(o: Out) -> @location(0) vec4f {
@@ -525,12 +578,9 @@ struct Out { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 }
 `;
 
-// folds one evaluation into a light's full res image. pixels it evaluated are copied, the rest
-// move toward the evaluation upsampled by alpha, so at rest every pixel ends up evaluated and a
-// moving light keeps what it evaluated recently. pixels outside keep have nothing to keep yet
 function resolveWGSL({ W, H, mul }) {
-  const NW = wordsOf(mul);
-  return /* wgsl */ `
+  const words = wordsPerPixel(mul);
+  return `
 struct Res {
   s: u32, px: u32, py: u32, raw: u32, dst: u32, c0: u32, c1: u32, r0: u32,
   r1: u32, x0: u32, y0: u32, xw: u32, yh: u32, k0x: u32, k0y: u32, k1x: u32,
@@ -539,22 +589,23 @@ struct Res {
 @group(0) @binding(0) var<uniform> ru: Res;
 @group(0) @binding(1) var<storage, read_write> outB: array<u32>;
 @group(0) @binding(2) var<storage, read> ppos: array<vec2u>;
-const W = ${u(W)}; const H = ${u(H)}; const NP = ${u(W * H)};
+const W = ${u32(W)}; const H = ${u32(H)}; const NP = ${u32(W * H)};
 ${POS_WGSL}
+${TAP_WGSL}
 
-fn load(i: u32, w: ptr<function, array<vec2f, ${NW}>>) {
-  for (var k = 0u; k < ${u(NW)}; k++) { (*w)[k] = unpack2x16float(outB[${u(NW)} * i + k]); }
+fn load(i: u32, w: ptr<function, array<vec2f, ${words}>>) {
+  for (var k = 0u; k < ${u32(words)}; k++) { (*w)[k] = unpack2x16float(outB[${u32(words)} * i + k]); }
 }
-fn store(i: u32, w: array<vec2f, ${NW}>) {
-  for (var k = 0u; k < ${u(NW)}; k++) { outB[${u(NW)} * i + k] = pack2x16float(w[k]); }
+fn store(i: u32, w: array<vec2f, ${words}>) {
+  for (var k = 0u; k < ${u32(words)}; k++) { outB[${u32(words)} * i + k] = pack2x16float(w[k]); }
 }
 
-@compute @workgroup_size(64)
+@compute @workgroup_size(${PIXELS_PER_WORKGROUP})
 fn main(@builtin(global_invocation_id) gid: vec3u) {
   let s = ru.s;
   let cw = (W + s - 1u) / s;
   let raw = ru.raw * NP;
-  var w: array<vec2f, ${NW}>;
+  var w: array<vec2f, ${words}>;
   if (ru.sparse != 0u) {
     let gw = ru.c1 - ru.c0;
     let gh = ru.r1 - ru.r0;
@@ -572,7 +623,6 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   let x = ru.x0 + gid.x % ru.xw; let y = ru.y0 + gid.x / ru.xw;
   let p = y * W + x;
   let dst = ru.dst * NP + p;
-  // last column/row whose pixel is on the image
   let hx = max(min(ru.c1 - 1u, (W - 1u - ru.px) / s), ru.c0);
   let hy = max(min(ru.r1 - 1u, (H - 1u - ru.py) / s), ru.r0);
   if (x >= ru.px && y >= ru.py) {
@@ -595,26 +645,21 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   let tx = clamp(fx - f32(x0), 0.0, 1.0); let ty = clamp(fy - f32(y0), 0.0, 1.0);
   let g = posAt(p);
   let sig = ru.sig * f32(s) * max(g.w, 1e-3);
-  var acc: array<vec2f, ${NW}>;
+  var acc: array<vec2f, ${words}>;
   var ws = 0.0;
   for (var k = 0u; k < 4u; k++) {
     let cx = select(x0, x1, (k & 1u) == 1u); let cy = select(y0, y1, k >= 2u);
-    let wb = select(1.0 - tx, tx, (k & 1u) == 1u) * select(1.0 - ty, ty, k >= 2u);
-    let q = posAt((cy * s + ru.py) * W + cx * s + ru.px);
-    let dq = q.xyz - g.xyz;
-    var wgt = exp(-dot(dq, dq) / (2.0 * sig * sig));
-    if ((q.w > 0.0) != (g.w > 0.0)) { wgt = 0.0; }
-    let wt = wb * (wgt + 1e-4);
-    var n: array<vec2f, ${NW}>;
+    let wt = tapWeight(k, vec2f(tx, ty), g, posAt((cy * s + ru.py) * W + cx * s + ru.px), sig);
+    var n: array<vec2f, ${words}>;
     load(raw + cy * cw + cx, &n);
-    for (var j = 0u; j < ${u(NW)}; j++) { acc[j] += wt * n[j]; }
+    for (var j = 0u; j < ${u32(words)}; j++) { acc[j] += wt * n[j]; }
     ws += wt;
   }
   let iw = 1.0 / max(ws, 1e-12);
   if (alpha < 1.0) {
     load(dst, &w);
   }
-  for (var j = 0u; j < ${u(NW)}; j++) { w[j] = mix(w[j], acc[j] * iw, alpha); }
+  for (var j = 0u; j < ${u32(words)}; j++) { w[j] = mix(w[j], acc[j] * iw, alpha); }
   store(dst, w);
 }
 `;
@@ -637,100 +682,71 @@ export class RelightGPUEngine extends RelightBase {
   }
 
   async build({ scene, layers, grid, gridOff, aux, pos }, { kernel = null, images = RESOLVED } = {}) {
-    const dev = this.device;
     this.images = images;
-    const { W, H } = this;
-    const NP = W * H;
-    const net = scene.network;
-    const WD = net.width;
-    const CG = WD / 4;
-    const NH = net.hidden - 1;
-    const auxDim = net.aux_dim ?? 7;
-    const geo = !!net.geo;
-    const mul = net.head === 'mul';
-    const levels = net.grid_res.length;
-    const PIXIN = levels * net.feats + auxDim;
-    const IN = layers[0].shape[1];
-    if (IN !== PIXIN + 4 + (geo ? 6 : 0)) {
-      throw new Error(`unexpected first-layer width ${IN}`);
-    }
-    const XW = Math.ceil(PIXIN / 2);
-    if (XW * 2 > WD) {
+    const network = readNetwork(scene.network, layers);
+    const inputWords = Math.ceil(network.pixelInputs / 2);
+    if (inputWords * 2 > network.width) {
       throw new Error('the pixel inputs are wider than a layer');
     }
-    const half = dev.features.has('shader-f16');
-    this.half = half;
-    const limits = dev.limits;
-    // a pixel's threads have to share a subgroup, whatever size the gpu picks
-    const info = dev.adapterInfo;
-    const shuffles = (k) =>
-      dev.features.has('subgroups') &&
-      navigator.gpu.wgslLanguageFeatures?.has('subgroup_id') &&
-      info?.subgroupMinSize % (CG / (k.channels ?? 1)) === 0;
-    // the geometry and output stages take a pixel a thread, so a tile can't outnumber the threads
-    this.kernels = KERNELS.filter(
-      (k) =>
-        (!k.subgroup || shuffles(k)) &&
-        CG % (k.channels ?? 1) === 0 &&
-        k.threads % (CG / (k.channels ?? 1)) === 0 &&
-        tileOf(k, CG) <= k.threads &&
-        k.threads <= limits.maxComputeInvocationsPerWorkgroup &&
-        workgroupBytes(k, WD, half, outputsOf(mul)) <= limits.maxComputeWorkgroupStorageSize &&
-        Math.ceil(NP / tileOf(k, CG)) <= limits.maxComputeWorkgroupsPerDimension
-    );
+    this.half = this.device.features.has('shader-f16');
+    this.kernels = this.fittingKernels(network);
     if (!this.kernels.length) {
       throw new Error('not enough workgroup memory for the network');
     }
-    const first = this.kernels.find((k) => kernelKey(k) === kernel) || this.kernels[0];
-
-    const off = {};
-    let len = 0;
-    const alloc = (key, vec4s) => {
-      off[key] = len;
-      len += vec4s;
+    const preferred = this.kernels.find((k) => kernelKey(k) === kernel) || this.kernels[0];
+    const weights = packWeights(layers, network);
+    this.b0 = weights.bias0;
+    this.w0Light = weights.lightWeights;
+    this.shapes = {
+      W: this.W,
+      H: this.H,
+      width: network.width,
+      hiddenLayers: network.hiddenLayers,
+      pixelInputs: network.pixelInputs,
+      inputWords,
+      geo: network.geo,
+      mul: network.mul,
+      off: weights.off,
+      half: this.half,
     };
-    alloc('W0T', Math.ceil(PIXIN / 4) * 4 * CG);
-    alloc('W0G', geo ? 6 * CG : 0);
-    alloc('HID', NH * (WD * CG + CG));
-    const NO = mul ? 6 : 3;
-    alloc('WO', NO * CG);
-    alloc('BO', 2);
-    const P = new Float32Array(len * 4);
-    const w0 = layers[0].w;
-    for (let c = 0; c < WD; c += 1) {
-      for (let k = 0; k < PIXIN; k += 1) {
-        P[(off.W0T + k * CG) * 4 + c] = w0[c * IN + k];
-      }
-      for (let j = 0; geo && j < 6; j += 1) {
-        P[(off.W0G + j * CG) * 4 + c] = w0[c * IN + PIXIN + 4 + j];
-      }
-    }
-    for (let l = 0; l < NH; l += 1) {
-      const { w, b } = layers[l + 1];
-      const o = (off.HID + l * (WD * CG + CG)) * 4;
-      for (let c = 0; c < WD; c += 1) {
-        for (let k = 0; k < WD; k += 1) {
-          P[o + k * WD + c] = w[c * WD + k];
-        }
-      }
-      P.set(b, o + WD * WD);
-    }
-    P.set(layers[NH + 1].w, off.WO * 4);
-    P.set(layers[NH + 1].b, off.BO * 4);
-    this.b0 = layers[0].b;
-    this.w0Light = new Float32Array(WD * 4);
-    for (let c = 0; c < WD; c += 1) {
-      for (let j = 0; j < 4; j += 1) {
-        this.w0Light[c * 4 + j] = w0[c * IN + PIXIN + j];
-      }
-    }
+    const pipelines = await this.createPipelines(network, preferred, gridOff, scene);
+    const storage = this.createBuffers(network, weights.data, pipelines);
+    await this.precomputeInputs(pipelines.pre, storage, { grid, aux, pos });
+    this.context = this.canvas.getContext('webgpu');
+    this.halfContext = this.halfCanvas.getContext('webgpu');
+    this.configure();
+  }
 
-    this.shapes = { W, H, WD, NH, PIXIN, XW, geo, mul, off, half };
+  fittingKernels({ width, mul }) {
+    const dev = this.device;
+    const limits = dev.limits;
+    const groups = width / 4;
+    const pixelCount = this.W * this.H;
+    const threadsPerPixel = (k) => groups / channelsOf(k);
+    const canShuffle = (k) =>
+      dev.features.has('subgroups') &&
+      navigator.gpu.wgslLanguageFeatures?.has('subgroup_id') &&
+      dev.adapterInfo?.subgroupMinSize % threadsPerPixel(k) === 0;
+    return KERNELS.filter(
+      (k) =>
+        (!k.subgroup || canShuffle(k)) &&
+        groups % channelsOf(k) === 0 &&
+        k.threads % threadsPerPixel(k) === 0 &&
+        tileOf(k, groups) <= k.threads &&
+        k.threads <= limits.maxComputeInvocationsPerWorkgroup &&
+        workgroupBytes(k, width, this.half, outputCount(mul)) <= limits.maxComputeWorkgroupStorageSize &&
+        Math.ceil(pixelCount / tileOf(k, groups)) <= limits.maxComputeWorkgroupsPerDimension
+    );
+  }
+
+  async createPipelines(network, preferred, gridOff, scene) {
+    const dev = this.device;
+    const { W, H } = this;
+    const { mul } = network;
     const module = (code, label) => dev.createShaderModule({ code, label });
     const compositeModule = module(compositeWGSL({ W, H, mul }), 'relight composite');
     const blitModule = module(BLIT_WGSL, 'relight blit');
     this.format = navigator.gpu.getPreferredCanvasFormat();
-    // uniforms sit in a ring at dynamic offsets so a frame's passes don't overwrite each other's
     const S = GPUShaderStage;
     const layout = (visibility, types) =>
       dev.createPipelineLayout({
@@ -748,6 +764,7 @@ export class RelightGPUEngine extends RelightBase {
     this.fwdLayout = layout(S.COMPUTE, [R, R, R, 'ring', 'storage', R]);
     const compositeLayout = layout(S.FRAGMENT, ['ring', R, R, ...(mul ? [R] : [])]);
     const resolveLayout = layout(S.COMPUTE, ['ring', 'storage', R]);
+    const fallback = this.kernels[0];
     const [pre, forward, composite, resolve, blit] = await Promise.all([
       dev.createComputePipelineAsync({
         layout: 'auto',
@@ -756,13 +773,14 @@ export class RelightGPUEngine extends RelightBase {
             precomputeWGSL({
               W,
               H,
-              levels,
-              feats: net.feats,
-              gridRes: net.grid_res,
+              levels: network.levels,
+              feats: scene.network.feats,
+              gridRes: scene.network.grid_res,
               gridOff,
-              auxDim,
-              XW,
-              posRange: scene.pixels.pos.range,
+              auxDim: network.auxDim,
+              inputWords: this.shapes.inputWords,
+              posLo: this.posLo,
+              posStep: this.posStep,
               camO: this.cam.O,
             }),
             'relight inputs'
@@ -770,14 +788,13 @@ export class RelightGPUEngine extends RelightBase {
           entryPoint: 'main',
         },
       }),
-      // a saved kernel this gpu won't compile any more falls back to the default
-      this.forwardPipeline(first).then(
-        (pipeline) => ({ k: first, pipeline }),
+      this.forwardPipeline(preferred).then(
+        (pipeline) => ({ k: preferred, pipeline }),
         (error) => {
-          if (first === this.kernels[0]) {
+          if (preferred === fallback) {
             throw error;
           }
-          return this.forwardPipeline(this.kernels[0]).then((pipeline) => ({ k: this.kernels[0], pipeline }));
+          return this.forwardPipeline(fallback).then((pipeline) => ({ k: fallback, pipeline }));
         }
       ),
       dev.createRenderPipelineAsync({
@@ -797,51 +814,65 @@ export class RelightGPUEngine extends RelightBase {
         primitive: { topology: 'triangle-list' },
       }),
     ]);
+    return { pre, forward, composite, resolve, blit };
+  }
 
+  buffer(size, usage, data) {
+    const b = this.device.createBuffer({
+      size: Math.max(16, Math.ceil(size / 16) * 16),
+      usage,
+      mappedAtCreation: !!data,
+    });
+    if (data) {
+      new data.constructor(b.getMappedRange()).set(data);
+      b.unmap();
+    }
+    this.buffers.push(b);
+    return b;
+  }
+
+  bindGroup(pipeline, list) {
+    return this.device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: list.map((b, i) => ({ binding: i, resource: b.buffer ? b : { buffer: b } })),
+    });
+  }
+
+  createBuffers({ width, mul }, weightData, { forward, composite, resolve, blit }) {
+    const dev = this.device;
+    const { W, H, images } = this;
+    const pixelCount = W * H;
+    const groups = width / 4;
     const U = GPUBufferUsage;
-    const buffer = (size, usage, data) => {
-      const b = dev.createBuffer({ size: Math.max(16, Math.ceil(size / 16) * 16), usage, mappedAtCreation: !!data });
-      if (data) {
-        new data.constructor(b.getMappedRange()).set(data);
-        b.unmap();
-      }
-      this.buffers.push(b);
-      return b;
-    };
-    const wBuf = half ? buffer(P.byteLength / 2, U.STORAGE, toHalf(P)) : buffer(P.byteLength, U.STORAGE, P);
-    const xBuf = buffer(NP * XW * 4, U.STORAGE);
-    const posBuf = buffer(NP * 8, U.STORAGE);
-    const nrmBuf = buffer(NP * 8, U.STORAGE);
-    // network slots, then the full res images
-    const outBuf = buffer((SLOTS - RESOLVED + images) * NP * wordsOf(mul) * 4, U.STORAGE);
-    const fwdBytes = 48 + CG * 16;
-    const frameBytes = 96 + SLOTS * 48;
-    const align = limits.minUniformBufferOffsetAlignment;
-    this.ringStride = Math.ceil(Math.max(fwdBytes, frameBytes, 80) / align) * align;
-    this.ringBuf = buffer(RING * this.ringStride, U.UNIFORM | U.COPY_DST);
-    this.ring = new Uint8Array(RING * this.ringStride);
+    const wBuf = this.half
+      ? this.buffer(weightData.byteLength / 2, U.STORAGE, toHalf(weightData))
+      : this.buffer(weightData.byteLength, U.STORAGE, weightData);
+    const xBuf = this.buffer(pixelCount * this.shapes.inputWords * 4, U.STORAGE);
+    const posBuf = this.buffer(pixelCount * 8, U.STORAGE);
+    const nrmBuf = this.buffer(pixelCount * 8, U.STORAGE);
+    const outBuf = this.buffer((SLOTS - RESOLVED + images) * pixelCount * wordsPerPixel(mul) * 4, U.STORAGE);
+    const fwdBytes = FWD_HEADER_WORDS * 4 + groups * 16;
+    const frameBytes = (FRAME_HEADER_WORDS + SLOTS * LIGHT_WORDS) * 4;
+    const resolveBytes = RESOLVE_WORDS * 4;
+    const align = dev.limits.minUniformBufferOffsetAlignment;
+    this.ringStride = Math.ceil(Math.max(fwdBytes, frameBytes, resolveBytes) / align) * align;
+    this.ringBuf = this.buffer(RING_SLOTS * this.ringStride, U.UNIFORM | U.COPY_DST);
+    this.ring = new Uint8Array(RING_SLOTS * this.ringStride);
     this.ringUsed = 0;
     this.enc = null;
     this.framing = false;
     this.afterSubmit = [];
     const ring = (size) => ({ buffer: this.ringBuf, size });
-    this.fwdF32 = new Float32Array(12 + WD);
-    this.fwdU32 = new Uint32Array(this.fwdF32.buffer, 0, 8);
-    const bind = (pipeline, list) =>
-      dev.createBindGroup({
-        layout: pipeline.getBindGroupLayout(0),
-        entries: list.map((b, i) => ({ binding: i, resource: b.buffer ? b : { buffer: b } })),
-      });
+    this.fwdF32 = new Float32Array(FWD_HEADER_WORDS + width);
+    this.fwdU32 = new Uint32Array(this.fwdF32.buffer, 0, FWD_GRID_WORDS);
     this.compositePipeline = composite;
     this.fwdBuffers = [wBuf, xBuf, posBuf, ring(fwdBytes), outBuf, nrmBuf];
     this.setKernel(forward.k, forward.pipeline);
-    this.compositeGroup = bind(composite, [ring(frameBytes), outBuf, posBuf, ...(mul ? [nrmBuf] : [])]);
-    this.resU32 = new Uint32Array(20);
+    this.compositeGroup = this.bindGroup(composite, [ring(frameBytes), outBuf, posBuf, ...(mul ? [nrmBuf] : [])]);
+    this.resU32 = new Uint32Array(RESOLVE_WORDS);
     this.resF32 = new Float32Array(this.resU32.buffer);
     this.resolvePipeline = resolve;
-    this.resolveGroup = bind(resolve, [ring(80), outBuf, posBuf]);
-    // the composite lands here, the room layer draws from it on this device. pixels outside the
-    // view keep an older composite, the backdrop composites again before they show
+    this.resolveGroup = this.bindGroup(resolve, [ring(resolveBytes), outBuf, posBuf]);
     this.image = dev.createTexture({
       size: [W, H],
       format: IMAGE_FORMAT,
@@ -856,15 +887,22 @@ export class RelightGPUEngine extends RelightBase {
         { binding: 1, resource: dev.createSampler({ magFilter: 'linear', minFilter: 'linear' }) },
       ],
     });
-
     if (dev.features.has('timestamp-query')) {
       this.querySet = dev.createQuerySet({ type: 'timestamp', count: 2 });
-      this.queryBuf = buffer(16, U.QUERY_RESOLVE | U.COPY_SRC);
-      this.readBuf = buffer(16, U.MAP_READ | U.COPY_DST);
+      this.queryBuf = this.buffer(16, U.QUERY_RESOLVE | U.COPY_SRC);
+      this.readBuf = this.buffer(16, U.MAP_READ | U.COPY_DST);
     }
+    return { xBuf, posBuf, nrmBuf };
+  }
 
+  async precomputeInputs(pipeline, { xBuf, posBuf, nrmBuf }, { grid, aux, pos }) {
+    const dev = this.device;
     const upload = (data) => {
-      const b = dev.createBuffer({ size: Math.ceil(data.byteLength / 16) * 16, usage: U.STORAGE, mappedAtCreation: true });
+      const b = dev.createBuffer({
+        size: Math.ceil(data.byteLength / 16) * 16,
+        usage: GPUBufferUsage.STORAGE,
+        mappedAtCreation: true,
+      });
       new Uint16Array(b.getMappedRange()).set(data);
       b.unmap();
       return b;
@@ -872,17 +910,13 @@ export class RelightGPUEngine extends RelightBase {
     const inputs = [upload(grid), upload(aux), upload(pos)];
     const enc = dev.createCommandEncoder();
     const pass = enc.beginComputePass();
-    pass.setPipeline(pre);
-    pass.setBindGroup(0, bind(pre, [...inputs, xBuf, posBuf, nrmBuf]));
-    pass.dispatchWorkgroups(Math.ceil(NP / 64));
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, this.bindGroup(pipeline, [...inputs, xBuf, posBuf, nrmBuf]));
+    pass.dispatchWorkgroups(Math.ceil((this.W * this.H) / PIXELS_PER_WORKGROUP));
     pass.end();
     dev.queue.submit([enc.finish()]);
     await dev.queue.onSubmittedWorkDone();
     inputs.forEach((b) => b.destroy());
-
-    this.context = this.canvas.getContext('webgpu');
-    this.halfContext = this.halfCanvas.getContext('webgpu');
-    this.configure();
   }
 
   get kernelName() {
@@ -900,56 +934,26 @@ export class RelightGPUEngine extends RelightBase {
   setKernel(k, pipeline) {
     this.kernel = k;
     this.forward = pipeline;
-    this.fwdGroup = this.device.createBindGroup({
-      layout: pipeline.getBindGroupLayout(0),
-      entries: this.fwdBuffers.map((b, i) => ({ binding: i, resource: b.buffer ? b : { buffer: b } })),
-    });
-    this.tile = tileOf(k, this.shapes.WD / 4);
+    this.fwdGroup = this.bindGroup(pipeline, this.fwdBuffers);
+    this.tile = tileOf(k, this.shapes.width / 4);
   }
 
-  async tune(light, stride, runs = 3, signal = null, slot = 0) {
-    const done = () => this.device.queue.onSubmittedWorkDone();
-    const timing = this.timing;
-    this.timing = { ...timing, pending: {} };
-    const times = {};
-    let best = null;
-    try {
-      for (const k of this.kernels) {
-        if (signal?.aborted) {
-          break;
-        }
-        const pipeline =
-          kernelKey(k) === kernelKey(this.kernel)
-            ? this.forward
-            : await this.forwardPipeline(k).catch(() => null);
-        if (!pipeline || signal?.aborted) {
-          continue;
-        }
-        this.setKernel(k, pipeline);
-        // first run sets up the pipeline
-        this.evaluate(light, slot, stride);
-        await done();
-        if (signal?.aborted) {
-          break;
-        }
-        const t0 = performance.now();
-        for (let i = 0; i < runs; i += 1) {
-          this.evaluate(light, slot, stride);
-        }
-        await done();
-        const ms = (performance.now() - t0) / runs;
-        times[kernelKey(k)] = ms;
-        if (!best || ms < best.ms) {
-          best = { k, pipeline, ms };
-        }
-      }
-    } finally {
-      this.timing = timing;
-    }
-    if (best) {
-      this.setKernel(best.k, best.pipeline);
-    }
-    return { kernel: this.kernelName, times };
+  tuneCandidates() {
+    return this.kernels;
+  }
+
+  async prepareVariant(k) {
+    const pipeline =
+      kernelKey(k) === kernelKey(this.kernel) ? this.forward : await this.forwardPipeline(k).catch(() => null);
+    return pipeline && { k, pipeline };
+  }
+
+  useVariant({ k, pipeline }) {
+    this.setKernel(k, pipeline);
+  }
+
+  whenIdle() {
+    return this.device.queue.onSubmittedWorkDone();
   }
 
   configure() {
@@ -958,7 +962,6 @@ export class RelightGPUEngine extends RelightBase {
     );
   }
 
-  // firefox forgets the canvas config every snapshot so reconfigure each time
   currentTexture(context = this.context) {
     try {
       return context.getCurrentTexture();
@@ -968,9 +971,6 @@ export class RelightGPUEngine extends RelightBase {
     }
   }
 
-  // a frame's passes go in one encoder and one submit: beginFrame, then evaluate / resolve /
-  // composite as often as it likes, then endFrame. the fixed cost of a submit was most of a
-  // pass at the strides phones run. outside a frame every pass submits on its own
   beginFrame() {
     this.framing = true;
   }
@@ -1009,15 +1009,27 @@ export class RelightGPUEngine extends RelightBase {
     after.forEach((f) => f());
   }
 
-  // a pass's uniforms, returns their offset in the ring. a full ring submits what's queued
   stage(data) {
-    if (this.ringUsed === RING) {
+    if (this.ringUsed === RING_SLOTS) {
       this.flush();
     }
     const at = this.ringUsed * this.ringStride;
     this.ring.set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength), at);
     this.ringUsed += 1;
     return at;
+  }
+
+  writeForwardUniforms(light, slot, stride, i0, i1, c0, xw, phase) {
+    const ln = this.normLight(light);
+    const { fwdU32, fwdF32 } = this;
+    fwdU32.set([i0, i1, stride, slot, c0, xw, phase[0], phase[1]]);
+    fwdF32.set(light.pos, FWD_LIGHT);
+    fwdF32[FWD_LIGHT + 3] = light.radius;
+    const w = this.w0Light;
+    for (let c = 0; c < this.b0.length; c += 1) {
+      fwdF32[FWD_HEADER_WORDS + c] =
+        this.b0[c] + w[c * 4] * ln[0] + w[c * 4 + 1] * ln[1] + w[c * 4 + 2] * ln[2] + w[c * 4 + 3] * ln[3];
+    }
   }
 
   evaluate(light, slot, stride = 1, r0 = 0, r1 = this.rows(stride), c0 = 0, c1 = this.cols(stride), phase = NO_PHASE) {
@@ -1029,27 +1041,17 @@ export class RelightGPUEngine extends RelightBase {
     if (i1 <= i0 || xw <= 0) {
       return;
     }
-    const ln = this.normLight(light);
-    const { fwdU32, fwdF32 } = this;
-    fwdU32.set([i0, i1, stride, slot, c0, xw, phase[0], phase[1]]);
-    fwdF32.set(light.pos, 8);
-    fwdF32[11] = light.radius;
-    const w = this.w0Light;
-    for (let c = 0; c < this.b0.length; c += 1) {
-      fwdF32[12 + c] =
-        this.b0[c] + w[c * 4] * ln[0] + w[c * 4 + 1] * ln[1] + w[c * 4 + 2] * ln[2] + w[c * 4 + 3] * ln[3];
-    }
+    this.writeForwardUniforms(light, slot, stride, i0, i1, c0, xw, phase);
 
     const canStamp = Boolean(this.querySet && this.readBuf.mapState === 'unmapped');
     const timed = this.timeable(stride, r0, r1, c0, c1, canStamp);
     const stamped = timed && canStamp;
-    // without timestamps the queue emptying times it, so it goes in a submit of its own
-    const alone = timed && !stamped;
-    if (alone) {
+    const ownSubmit = timed && !stamped;
+    if (ownSubmit) {
       this.flush();
     }
-    const queued = alone ? this.queueDone() : null;
-    const at = this.stage(fwdF32);
+    const queued = ownSubmit ? this.queueDone() : null;
+    const at = this.stage(this.fwdF32);
     const enc = this.encoder();
     const pass = enc.beginComputePass(
       stamped
@@ -1067,15 +1069,13 @@ export class RelightGPUEngine extends RelightBase {
     if (timed) {
       this.time(stride, this.share(stride, r0, r1, c0, c1), stamped, queued);
     }
-    if (alone) {
+    if (ownSubmit) {
       this.flush();
     } else {
       this.commit();
     }
   }
 
-  // slot is the evaluation, target the light's full res image. keep is the span that image
-  // already holds (x0, x1, y0, y1), outside it pixels are just upsampled
   resolve(slot, target, stride, phase, [r0, r1, c0, c1], alpha, keep = null) {
     r1 = Math.min(r1, this.rows(stride));
     c1 = Math.min(c1, this.cols(stride));
@@ -1083,21 +1083,22 @@ export class RelightGPUEngine extends RelightBase {
     if (x1 <= x0 || y1 <= y0) {
       return null;
     }
-    const k = keep && alpha < 1 ? keep : [0, 0, 0, 0];
-    const keepsAll = k[0] <= x0 && k[1] >= x1 && k[2] <= y0 && k[3] >= y1;
-    const sparse = (stride === 1 && phase[0] === 0 && phase[1] === 0) || (alpha <= 0 && keepsAll) ? 1 : 0;
+    const [kx0, kx1, ky0, ky1] = keep && alpha < 1 ? keep : [0, 0, 0, 0];
+    const keepsAll = kx0 <= x0 && kx1 >= x1 && ky0 <= y0 && ky1 >= y1;
+    const evaluatedOnly = stride === 1 && phase[0] === 0 && phase[1] === 0;
+    const sparse = evaluatedOnly || (alpha <= 0 && keepsAll) ? 1 : 0;
+    const image = SLOTS - RESOLVED + target;
     const R = this.resU32;
-    R.set([stride, phase[0], phase[1], slot, SLOTS - RESOLVED + target, c0, c1, r0, r1, x0, y0, x1 - x0, y1 - y0]);
-    R.set([k[0], k[2], k[1], k[3]], 13);
-    this.resF32[17] = alpha;
-    this.resF32[18] = (1.5 * 2 * this.cam.tx) / this.W;
-    R[19] = sparse;
+    R.set([stride, phase[0], phase[1], slot, image, c0, c1, r0, r1, x0, y0, x1 - x0, y1 - y0, kx0, ky0, kx1, ky1]);
+    this.resF32[RESOLVE_ALPHA] = alpha;
+    this.resF32[RESOLVE_SIGMA] = this.tapSigmaScale();
+    R[RESOLVE_SPARSE] = sparse;
     const at = this.stage(R);
     const pass = this.encoder().beginComputePass();
     pass.setPipeline(this.resolvePipeline);
     pass.setBindGroup(0, this.resolveGroup, [at]);
     const items = sparse ? (c1 - c0) * (r1 - r0) : (x1 - x0) * (y1 - y0);
-    pass.dispatchWorkgroups(Math.ceil(items / 64));
+    pass.dispatchWorkgroups(Math.ceil(items / PIXELS_PER_WORKGROUP));
     pass.end();
     this.commit();
     return [x0, x1, y0, y1];
@@ -1107,8 +1108,6 @@ export class RelightGPUEngine extends RelightBase {
     return this.device.queue.onSubmittedWorkDone().then(() => performance.now());
   }
 
-  // no timestamp queries on a lot of phones. timing from submit counted the rest of the
-  // frame and made the network look several times slower than it is
   time(stride, share, stamped, queued) {
     const pending = { stride, share, done: false, ms: null };
     this.timing.pending = pending;
@@ -1116,7 +1115,6 @@ export class RelightGPUEngine extends RelightBase {
       pending.ms = ms > 0 ? ms : null;
       pending.done = true;
     };
-    // the readback can only start once its pass is submitted
     this.afterSubmit.push(() => this.readTiming(stamped, queued, settle));
   }
 
@@ -1133,11 +1131,10 @@ export class RelightGPUEngine extends RelightBase {
         })
         .catch(() => settle(null));
     } else {
-      // chrome sometimes resolves both at once behind a long queue, fall back to time since submit
       Promise.all([queued, this.queueDone()])
         .then(([before, after]) => {
           const ms = after - Math.max(start, before);
-          settle(ms > QUEUE_GRAIN ? ms : after - start);
+          settle(ms > QUEUE_GRAIN_MS ? ms : after - start);
         })
         .catch(() => settle(null));
     }
@@ -1151,40 +1148,37 @@ export class RelightGPUEngine extends RelightBase {
     }
   }
 
-  // view is the part of the image that's shown, the rest isn't drawn (see RelightBase drawRect)
   composite(lights, exposure = 1, view = null) {
     if (!this.frame) {
-      this.frame = new Float32Array(24 + SLOTS * 12);
+      this.frame = new Float32Array(FRAME_HEADER_WORDS + SLOTS * LIGHT_WORDS);
       const { X, Y, Z, O, tx, ty } = this.cam;
       [O, X, Y, Z, [tx, ty]].forEach((v, i) => this.frame.set(v, i * 4));
       this.frameU32 = new Uint32Array(this.frame.buffer);
     }
     const F = this.frame;
     const U32 = this.frameU32;
-    F[20] = exposure;
+    F[FRAME_EXPOSURE] = exposure;
     const n = Math.min(lights.length, SLOTS);
-    U32[21] = n;
+    U32[FRAME_LIGHT_COUNT] = n;
     for (let i = 0; i < n; i += 1) {
       const l = lights[i];
-      const o = 24 + i * 12;
+      const o = FRAME_HEADER_WORDS + i * LIGHT_WORDS;
       F[o] = l.pos[0];
       F[o + 1] = l.pos[1];
       F[o + 2] = l.pos[2];
       F[o + 3] = l.radius;
       for (let c = 0; c < 3; c += 1) {
-        F[o + 4 + c] = l.color[c] * l.intensity;
+        F[o + LIGHT_EMISSION + c] = l.color[c] * l.intensity;
       }
-      // full res images sit in the last slots
       const resolved = l.resolved != null;
-      U32[o + 8] = resolved ? SLOTS - RESOLVED + l.resolved : l.slot;
-      U32[o + 9] = resolved ? 1 : l.stride || 1;
-      U32[o + 10] = l.hidden ? 0 : 1;
+      U32[o + LIGHT_INFO] = resolved ? SLOTS - RESOLVED + l.resolved : l.slot;
+      U32[o + LIGHT_INFO + 1] = resolved ? FULL_RES_STRIDE : l.stride || 1;
+      U32[o + LIGHT_INFO + 2] = l.hidden ? 0 : 1;
     }
     const at = this.stage(F);
     const pass = this.encoder().beginRenderPass({
       colorAttachments: [{ view: this.imageView, loadOp: 'load', storeOp: 'store' }],
     });
-    // rows are bottom first here, the rect's are from the top
     const [x0, x1, y0, y1] = this.drawRect(view);
     pass.setScissorRect(x0, this.H - y1, x1 - x0, y1 - y0);
     pass.setPipeline(this.compositePipeline);
@@ -1210,8 +1204,6 @@ export class RelightGPUEngine extends RelightBase {
     return this.canvas.transferToImageBitmap();
   }
 
-  // half size for the three.js copy the glass bends, it's blurred there anyway. handed over once
-  // the frame's submitted
   halfImage(done) {
     this.copyImage(this.halfContext);
     this.afterSubmit.push(() => done(this.halfCanvas.transferToImageBitmap()));

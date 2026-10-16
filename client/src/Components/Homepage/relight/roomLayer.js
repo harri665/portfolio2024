@@ -1,10 +1,3 @@
-/* global GPUBufferUsage */
-
-// the room on its own fixed canvas. in the three.js canvas it rode up with every scroll
-// and snapped back (browser scrolls on its own thread), so that canvas only draws the glass now
-
-// catmull-rom upscale (5 bilinear taps) since it's shown several times larger on phones,
-// clamped to the 4 nearest pixels so the light's disc doesn't ring dark
 export const ROOM_FRAGMENT = `
   uniform sampler2D tRelight;
   uniform vec2 texSize;
@@ -79,9 +72,7 @@ export const ROOM_FRAGMENT = `
   }
 `;
 
-// ROOM_FRAGMENT for the webgpu layer, which draws straight from the engine's image on its own
-// device. uniforms come in UNIFORMS order, then the canvas height
-const ROOM_WGSL = /* wgsl */ `
+const ROOM_WGSL = `
 @group(0) @binding(0) var<uniform> room: array<vec4f, 5>;
 @group(0) @binding(1) var tRelight: texture_2d<f32>;
 @group(0) @binding(2) var smp: sampler;
@@ -130,11 +121,14 @@ fn sdRoundBox(p: vec2f, halfSize: vec2f, r: f32) -> f32 {
   let viewport = vec2f(at(3u), at(4u));
   let box = vec4f(at(5u), at(6u), at(7u), at(8u));
   let ready = at(9u);
+  let dim = at(10u);
+  let saturation = at(11u);
+  let hotKeep = at(12u);
   let glowAt = vec3f(at(13u), at(14u), at(15u));
   let glowColor = vec3f(at(16u), at(17u), at(18u));
-  // gl_FragCoord, rows bottom up
-  let frag = vec2f(pos.x, at(19u) - pos.y);
-  let px = vec2f(frag.x, viewport.y * dpr - frag.y) / dpr;
+  let canvasHeight = at(19u);
+  let fragCoord = vec2f(pos.x, canvasHeight - pos.y);
+  let px = vec2f(fragCoord.x, viewport.y * dpr - fragCoord.y) / dpr;
   let base = vec3f(0.031, 0.035, 0.047);
   var color = base;
 
@@ -145,8 +139,8 @@ fn sdRoundBox(p: vec2f, halfSize: vec2f, r: f32) -> f32 {
     if (mask > 0.0) {
       var image = sharpSample(vec2f(uv.x, 1.0 - uv.y), texSize);
       let luma = dot(image, vec3f(0.2126, 0.7152, 0.0722));
-      let hot = smoothstep(0.82, 0.97, luma) * at(12u);
-      image = mix(mix(vec3f(luma), image, at(11u)) * at(10u), image, hot);
+      let hot = smoothstep(0.82, 0.97, luma) * hotKeep;
+      image = mix(mix(vec3f(luma), image, saturation) * dim, image, hot);
       color = mix(base, max(image, base), mask * ready);
     }
 
@@ -155,7 +149,7 @@ fn sdRoundBox(p: vec2f, halfSize: vec2f, r: f32) -> f32 {
     color += glowColor * exp(-r / reach) * smoothstep(glowAt.z * 0.6, glowAt.z * 1.6, r) * ready;
   }
 
-  color += (fract(sin(dot(frag, vec2f(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
+  color += (fract(sin(dot(fragCoord, vec2f(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
   return vec4f(color, 1.0);
 }
 `;
@@ -180,6 +174,8 @@ const UNIFORMS = [
   ['glowColor', 3],
 ];
 const FLOATS = UNIFORMS.reduce((n, [, size]) => n + size, 0);
+const GPU_FLOATS = FLOATS + 1;
+const CANVAS_HEIGHT_AT = FLOATS;
 const COMPONENTS = ['x', 'y', 'z', 'w'];
 
 function layerCanvas() {
@@ -190,7 +186,6 @@ function layerCanvas() {
     left: '0',
     top: '0',
     width: '100%',
-    // large viewport on phones so it doesn't resize when the toolbar collapses
     height: '100vh',
     pointerEvents: 'none',
     zIndex: '0',
@@ -199,22 +194,23 @@ function layerCanvas() {
   return canvas;
 }
 
-// the uniforms in UNIFORMS order
 function gather(values, uniforms, width, height, dpr) {
-  let o = 0;
+  let offset = 0;
   UNIFORMS.forEach(([name, size]) => {
-    const v = name === 'dpr' ? dpr : name === 'viewport' ? null : uniforms[name].value;
-    if (name === 'viewport') {
-      values[o] = width;
-      values[o + 1] = height;
+    if (name === 'dpr') {
+      values[offset] = dpr;
+    } else if (name === 'viewport') {
+      values[offset] = width;
+      values[offset + 1] = height;
     } else if (size === 1) {
-      values[o] = v;
+      values[offset] = uniforms[name].value;
     } else {
+      const v = uniforms[name].value;
       for (let c = 0; c < size; c += 1) {
-        values[o + c] = v[COMPONENTS[c]];
+        values[offset + c] = v[COMPONENTS[c]];
       }
     }
-    o += size;
+    offset += size;
   });
 }
 
@@ -222,7 +218,6 @@ function same(a, b) {
   return a.every((v, i) => v === b[i]);
 }
 
-// canvas size for the layer, true if it changed
 function fit(canvas, width, height, dpr) {
   const w = Math.max(1, Math.round(width * dpr));
   const h = Math.max(1, Math.round(height * dpr));
@@ -234,35 +229,71 @@ function fit(canvas, width, height, dpr) {
   return true;
 }
 
-export class RoomLayer {
+class FixedLayer {
+  constructor(floats) {
+    this.canvas = layerCanvas();
+    this.values = new Float32Array(floats);
+    this.drawnValues = new Float32Array(floats);
+    this.drawn = false;
+  }
+
+  needsDraw(uniforms, width, height, dpr, texW, texH) {
+    const { canvas, values, drawnValues } = this;
+    if (fit(canvas, width, height, dpr)) {
+      this.drawn = false;
+    }
+    gather(values, uniforms, width, height, dpr);
+    values[0] = texW;
+    values[1] = texH;
+    if (values.length > CANVAS_HEIGHT_AT) {
+      values[CANVAS_HEIGHT_AT] = canvas.height;
+    }
+    if (this.drawn && same(values, drawnValues)) {
+      return false;
+    }
+    this.drawn = true;
+    drawnValues.set(values);
+    return true;
+  }
+
+  mount(before) {
+    before.parentNode.insertBefore(this.canvas, before);
+  }
+}
+
+function compileRoomProgram(gl) {
+  const shader = (type, source) => {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, source);
+    gl.compileShader(s);
+    return s;
+  };
+  const vs = shader(gl.VERTEX_SHADER, VERTEX);
+  const fs = shader(gl.FRAGMENT_SHADER, `precision highp float;\n${ROOM_FRAGMENT}`);
+  const program = gl.createProgram();
+  gl.attachShader(program, vs);
+  gl.attachShader(program, fs);
+  gl.bindAttribLocation(program, 0, 'position');
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    throw new Error(`room layer shader: ${gl.getShaderInfoLog(fs) || gl.getProgramInfoLog(program)}`);
+  }
+  gl.deleteShader(vs);
+  gl.deleteShader(fs);
+  return program;
+}
+
+export class RoomLayer extends FixedLayer {
   constructor(before) {
-    const canvas = layerCanvas();
+    super(FLOATS);
     const options = { alpha: false, antialias: false, depth: false, stencil: false };
-    const gl = canvas.getContext('webgl2', options) || canvas.getContext('webgl', options);
+    const gl = this.canvas.getContext('webgl2', options) || this.canvas.getContext('webgl', options);
     if (!gl) {
       throw new Error('WebGL is not available');
     }
-    this.canvas = canvas;
     this.gl = gl;
 
-    const shader = (type, source) => {
-      const s = gl.createShader(type);
-      gl.shaderSource(s, source);
-      gl.compileShader(s);
-      return s;
-    };
-    const vs = shader(gl.VERTEX_SHADER, VERTEX);
-    const fs = shader(gl.FRAGMENT_SHADER, `precision highp float;\n${ROOM_FRAGMENT}`);
-    const program = gl.createProgram();
-    gl.attachShader(program, vs);
-    gl.attachShader(program, fs);
-    gl.bindAttribLocation(program, 0, 'position');
-    gl.linkProgram(program);
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-      throw new Error(`room layer shader: ${gl.getShaderInfoLog(fs) || gl.getProgramInfoLog(program)}`);
-    }
-    gl.deleteShader(vs);
-    gl.deleteShader(fs);
+    const program = compileRoomProgram(gl);
     gl.useProgram(program);
     this.locations = UNIFORMS.map(([name]) => gl.getUniformLocation(program, name));
     gl.uniform1i(gl.getUniformLocation(program, 'tRelight'), 0);
@@ -282,15 +313,11 @@ export class RoomLayer {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
     this.texW = 1;
     this.texH = 1;
-    // rows come bottom first already
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
 
-    this.values = new Float32Array(FLOATS);
-    this.drawnValues = new Float32Array(FLOATS);
-    this.drawn = false;
-    before.parentNode.insertBefore(canvas, before);
+    this.mount(before);
   }
 
   setImage(source) {
@@ -305,31 +332,21 @@ export class RoomLayer {
     this.drawn = false;
   }
 
-  // skipped if nothing changed, the canvas keeps its last frame
   draw(uniforms, width, height, dpr) {
-    const gl = this.gl;
-    if (fit(this.canvas, width, height, dpr)) {
-      this.drawn = false;
-    }
-    const { values, drawnValues } = this;
-    gather(values, uniforms, width, height, dpr);
-    values[0] = this.texW;
-    values[1] = this.texH;
-    if (this.drawn && same(values, drawnValues)) {
+    if (!this.needsDraw(uniforms, width, height, dpr, this.texW, this.texH)) {
       return;
     }
-    this.drawn = true;
-    drawnValues.set(values);
-    let o = 0;
+    const { gl, values } = this;
+    let offset = 0;
     UNIFORMS.forEach(([, size], i) => {
-      const at = this.locations[i];
-      const v = values.subarray(o, o + size);
+      const location = this.locations[i];
+      const v = values.subarray(offset, offset + size);
       if (size === 1) {
-        gl.uniform1f(at, v[0]);
+        gl.uniform1f(location, v[0]);
       } else {
-        gl[`uniform${size}fv`](at, v);
+        gl[`uniform${size}fv`](location, v);
       }
-      o += size;
+      offset += size;
     });
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -341,18 +358,14 @@ export class RoomLayer {
   }
 }
 
-// the room on a webgpu canvas on the engine's device. it upscales the engine's image in the same
-// submit as the composite. the webgl layer takes an ImageBitmap of it into another context each
-// frame, which took longer than the network at the strides phones run
-export class GPURoomLayer {
+export class GPURoomLayer extends FixedLayer {
   constructor(before, engine) {
-    const canvas = layerCanvas();
-    const context = canvas.getContext('webgpu');
+    super(GPU_FLOATS);
+    const context = this.canvas.getContext('webgpu');
     if (!context) {
       throw new Error('no WebGPU canvas');
     }
     const dev = engine.device;
-    this.canvas = canvas;
     this.context = context;
     this.device = dev;
     this.format = navigator.gpu.getPreferredCanvasFormat();
@@ -364,22 +377,30 @@ export class GPURoomLayer {
       fragment: { module, entryPoint: 'fs', targets: [{ format: this.format }] },
       primitive: { topology: 'triangle-list' },
     });
-    this.uniformBuf = dev.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.uniformBuf = dev.createBuffer({
+      size: GPU_FLOATS * Float32Array.BYTES_PER_ELEMENT,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
     this.sampler = dev.createSampler({ magFilter: 'linear', minFilter: 'linear' });
-    this.values = new Float32Array(20);
-    this.drawnValues = new Float32Array(20);
-    this.drawn = false;
     this.engine = null;
     this.image = null;
     this.use(engine);
-    before.parentNode.insertBefore(canvas, before);
+    this.mount(before);
   }
 
   configure() {
     this.context.configure({ device: this.device, format: this.format, alphaMode: 'opaque' });
   }
 
-  // an upgrade brings a new engine on the same device
+  currentTexture() {
+    try {
+      return this.context.getCurrentTexture();
+    } catch {
+      this.configure();
+      return this.context.getCurrentTexture();
+    }
+  }
+
   use(engine) {
     if (engine.image === this.image) {
       return;
@@ -401,33 +422,14 @@ export class GPURoomLayer {
     this.drawn = false;
   }
 
-  // skipped if nothing changed, the canvas keeps its last frame. goes in the engine's frame
   draw(uniforms, width, height, dpr) {
-    const { engine, values, drawnValues } = this;
-    // its engine was disposed
-    if (!this.image || engine.image !== this.image) {
+    const { engine } = this;
+    const engineDisposed = !this.image || engine.image !== this.image;
+    if (engineDisposed || !this.needsDraw(uniforms, width, height, dpr, engine.W, engine.H)) {
       return;
     }
-    if (fit(this.canvas, width, height, dpr)) {
-      this.drawn = false;
-    }
-    gather(values, uniforms, width, height, dpr);
-    values[0] = engine.W;
-    values[1] = engine.H;
-    values[19] = this.canvas.height;
-    if (this.drawn && same(values, drawnValues)) {
-      return;
-    }
-    this.drawn = true;
-    drawnValues.set(values);
-    this.device.queue.writeBuffer(this.uniformBuf, 0, values);
-    let texture;
-    try {
-      texture = this.context.getCurrentTexture();
-    } catch (error) {
-      this.configure();
-      texture = this.context.getCurrentTexture();
-    }
+    this.device.queue.writeBuffer(this.uniformBuf, 0, this.values);
+    const texture = this.currentTexture();
     const pass = engine.encoder().beginRenderPass({
       colorAttachments: [{ view: texture.createView(), loadOp: 'clear', storeOp: 'store' }],
     });

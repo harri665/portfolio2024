@@ -1,7 +1,12 @@
-// Keep fractional deadlines: 24 updates on a 60 Hz display alternate two and three
-// refreshes. Resetting the deadline to each draw would round that down to 20 Hz.
 const JITTER_MS = 0.25;
 const RESUME_MS = 250;
+const REFRESH_SAMPLES = 60;
+const MIN_REFRESH_SAMPLES = 8;
+
+function lowerQuartile(values) {
+  const ordered = [...values].sort((a, b) => a - b);
+  return ordered[Math.floor(ordered.length / 4)];
+}
 
 export class RelightFrameClock {
   constructor(fps = 24) {
@@ -21,20 +26,19 @@ export class RelightFrameClock {
     this.resuming = true;
   }
 
+  measureRefresh(gap) {
+    this.callbackIntervals.push(gap);
+    if (this.callbackIntervals.length > REFRESH_SAMPLES) this.callbackIntervals.shift();
+    if (this.callbackIntervals.length >= MIN_REFRESH_SAMPLES) {
+      this.refreshMs = lowerQuartile(this.callbackIntervals);
+    }
+  }
+
   step(timestamp) {
     if (!Number.isFinite(timestamp)) return null;
     const gap = this.lastCallback === null ? 0 : timestamp - this.lastCallback;
     if (gap < 0 || gap > RESUME_MS) this.suspend();
-    if (gap > 0 && gap < RESUME_MS) {
-      this.callbackIntervals.push(gap);
-      if (this.callbackIntervals.length > 60) this.callbackIntervals.shift();
-      // The lower quartile ignores occasional delayed callbacks while still
-      // adapting to a different refresh rate after a screen change.
-      if (this.callbackIntervals.length >= 8) {
-        const ordered = [...this.callbackIntervals].sort((a, b) => a - b);
-        this.refreshMs = ordered[Math.floor(ordered.length / 4)];
-      }
-    }
+    if (gap > 0 && gap < RESUME_MS) this.measureRefresh(gap);
     this.lastCallback = timestamp;
     if (this.deadline === null) this.deadline = timestamp;
     if (timestamp + JITTER_MS < this.deadline) return null;
@@ -51,10 +55,8 @@ export class RelightFrameClock {
     };
     this.lastDraw = timestamp;
     this.resuming = false;
-    // A stall never queues catch-up work on subsequent callbacks.
-    this.deadline = missedSlots || latenessMs > this.refreshMs + JITTER_MS
-      ? timestamp + this.interval
-      : this.deadline + this.interval;
+    const stalled = missedSlots || latenessMs > this.refreshMs + JITTER_MS;
+    this.deadline = stalled ? timestamp + this.interval : this.deadline + this.interval;
     return sample;
   }
 }

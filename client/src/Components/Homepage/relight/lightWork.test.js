@@ -26,7 +26,7 @@ test('provisional timing is remeasured at rest even when refinement bands were t
 test('fixed fill progressively covers every source pixel and never evaluates again when complete', () => {
   const engine = fakeEngine();
   const fill = createFill(engine);
-  fillStep(engine, fill, 4, true); // coarse image first
+  fillStep(engine, fill, 4, true);
   expect(fill.evalPos).toEqual(fill.pos);
   expect(fill.next).toBe(0);
   for (let i = 0; i < 8; i += 1) fillStep(engine, fill, 4, true);
