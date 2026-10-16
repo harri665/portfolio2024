@@ -115,14 +115,39 @@ export class RelightBase {
     }
   }
 
-  // each measured stride k predicts t[k] * (k / s)^2
+  // An actual measurement at this stride wins. Otherwise use nearby measurements
+  // to separate fixed dispatch overhead from per-pixel work. A lone sample cannot
+  // identify either component: retain its full pixel-scaled cost plus a 15% fixed
+  // reserve, so sparse passes never become free. This remains an estimate of
+  // inference; callers must also budget resolves and presentation.
   evalCost(s) {
     const t = this.timing.byStride;
-    const known = Object.keys(t).map(Number);
+    if (Number.isFinite(t[s]) && t[s] > 0) {
+      return t[s];
+    }
+    const x = 1 / (s * s);
+    const known = Object.entries(t)
+      .filter(([stride, ms]) => Number(stride) > 0 && Number.isFinite(ms) && ms > 0)
+      .map(([stride, ms]) => ({ x: 1 / (Number(stride) ** 2), ms }))
+      .sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x))
+      .slice(0, 2);
     if (!known.length) {
       return null;
     }
-    return Math.min(...known.map((k) => t[k] * (k / s) ** 2));
+    const reserve = Math.min(...known.map((v) => v.ms)) * 0.15;
+    if (known.length === 2) {
+      const [a, b] = known;
+      const variable = (b.ms - a.ms) / (b.x - a.x);
+      const fixed = a.ms - variable * a.x;
+      if (variable < 0) {
+        // Noisy or incomparable measurements do not justify a negative cost.
+        return Math.max(a.ms, b.ms);
+      }
+      if (Number.isFinite(variable) && fixed >= reserve) {
+        return fixed + variable * x;
+      }
+    }
+    return reserve + Math.max(...known.map((v) => v.ms / v.x)) * x;
   }
 
   normLight(l) {

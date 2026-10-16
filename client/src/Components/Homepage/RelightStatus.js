@@ -1,11 +1,25 @@
 import React, { useEffect, useState } from 'react';
 
+import Button from '../ui/Button';
+import { clearProfile } from './relight/adaptiveQuality';
 import { useRelightStatus } from './relight/status';
 
 // probing makes a webgpu adapter + webgl context so only do it once it's opened
 export default function RelightStatus() {
   const status = useRelightStatus();
   const [probing, setProbing] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [resetError, setResetError] = useState(null);
+
+  const resetSettings = () => {
+    setResetError(null);
+    if (!clearProfile()) {
+      setResetError('Your browser blocked access to saved settings. Allow site storage and try again.');
+      return;
+    }
+    setResetting(true);
+    window.location.reload();
+  };
 
   return (
     <details
@@ -26,6 +40,16 @@ export default function RelightStatus() {
 
       <div className="px-5 pb-5 sm:px-6 sm:pb-6">
         {status.phase === 'running' && <Config status={status} />}
+
+        <div className="mt-5 border-t border-line/9 pt-5">
+          <Button size="sm" onClick={resetSettings} disabled={resetting} aria-describedby="relight-reset-description">
+            {resetting ? 'Reloading…' : 'Clear cached settings'}
+          </Button>
+          <p id="relight-reset-description" className="mt-2 text-xs leading-5">
+            Clears saved renderer settings and reloads this page to tune them again for your device.
+          </p>
+          {resetError && <p role="alert" className="mt-2 text-xs leading-5 text-ink-2">{resetError}</p>}
+        </div>
 
         <details className="group/support mt-5" onToggle={(event) => setProbing(event.currentTarget.open)}>
           <summary className="flex cursor-pointer select-none list-none items-center gap-2 text-ink-2 transition-colors hover:text-ink [&::-webkit-details-marker]:hidden">
@@ -98,20 +122,26 @@ function Config({ status: s }) {
         ? '128 wide, 4 layers'
         : `${s.network.replace('x', ' wide, ')} layers (the lighter one, for this GPU)`,
     ],
-    ['Image', `${s.size} × ${s.size} px${s.upgrading ? ', loading another' : ''}`],
+    ['Source image', `${s.size} × ${s.size} px${s.upgrading ? ', loading another' : ''}`],
+    ...(Number.isFinite(s.shownPx) ? [['Displayed room', `${Math.round(s.shownPx)} px across`]] : []),
     ['GPU', s.gpu],
     ...(s.kernel ? [['Kernel', kernelText(s.kernel)]] : []),
     [
       'One light, every pixel',
-      s.cost === null ? 'measuring…' : `${s.cost} ms${s.seeded ? ' (from your last visit)' : ''}`,
+      s.cost === null ? 'measuring…' : `${s.cost} ms${s.seeded ? ' (provisional estimate)' : ''}`,
     ],
-    ['Network budget', `${s.budget} ms a frame`],
+    ['Network budget', `${s.budget} ms an update`],
     ['Moving light', every(s.moving)],
-    ['Resting light', `refined to ${every(s.resting)}`],
+    ['Resting light', s.converged === true
+      ? 'every pixel, complete'
+      : Number.isFinite(s.refining)
+        ? `${Math.round(s.refining * 100)}% complete; converges to every pixel`
+        : `converges to ${every(s.resting)}`],
+    ...(typeof s.fillPrepared === 'boolean' ? [['Stationary light', s.fillPrepared ? 'preparation started while loading' : 'refined during rendering']] : []),
     ['Pixel ratio', `${s.dpr}×`],
-    ['Frame rate', s.capped ? `${s.fps} fps (held there on touch screens)` : `at least ${s.fps} fps`],
+    ['Lighting target', `${s.fps} updates a second`],
     ['Room layer', s.fixedLayer ? `fixed to the screen, at ${s.roomDpr}×` : 'scrolls with the page'],
-    ['Settings', s.fromProfile ? 'tuned on an earlier visit' : 'being tuned on this visit'],
+    ['Settings', s.fromProfile ? 'saved starting point; checked again this visit' : 'being tuned on this visit'],
     [
       'Warm-up',
       s.prepared === 'timed'
@@ -287,7 +317,7 @@ function BrowserSupport() {
     ['Memory', d.memory ? `${d.memory} GB or more` : 'not reported', 'the largest image needs 4 GB'],
     ['CPU threads', d.cores ? String(d.cores) : 'not reported'],
     ['Screen', `${d.screen} at ${d.dpr}×`],
-    ['Touch screen', yes(d.touch), 'draws the page at 30 fps, so the room gets the GPU time'],
+    ['Touch screen', yes(d.touch)],
     ['Reduced motion', yes(d.reducedMotion)],
     ['Connection', d.network || 'not reported', d.saveData ? 'data saver is on: the room stays off' : null],
   ];

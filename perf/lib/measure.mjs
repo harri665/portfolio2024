@@ -1,12 +1,18 @@
 import { blockVisitLogging, waitForQuiet } from './sites.mjs';
 import { networkConditions } from './profiles.mjs';
 
-// 30fps + a bit for vsync rounding, same floor as relight/adaptiveQuality.js
+// Legacy browser-callback threshold used across every page. Relight's separate
+// 24 Hz submission cadence is measured from its own counters below.
 export const LATE_MS = (1000 / 30) * 1.1;
 
 function instrument() {
-  const perf = { lcp: null, cls: 0, longTasks: [], canvases: [] };
+  const perf = { lcp: null, cls: 0, longTasks: [], canvases: [], relight: [] };
   window.__perf = perf;
+  // The renderer calls this only when diagnostics explicitly install an observer.
+  window.__relightObserve = (status) => {
+    perf.relight.push({ at: performance.now(), status: { ...status } });
+    if (perf.relight.length > 200) perf.relight.shift();
+  };
   const observe = (type, fn) => {
     try {
       new PerformanceObserver((list) => list.getEntries().forEach(fn)).observe({ type, buffered: true });
@@ -99,12 +105,13 @@ async function phase(page, cdp, kind, seconds) {
       await page.waitForTimeout(8);
     }
   }
-  const { deltas, longTaskMs } = await sampling;
+  const { deltas, longTaskMs, relight } = await sampling;
   const after = await cpuCounters(cdp);
   return {
     ...frameStats(deltas),
     longTaskMs: round(longTaskMs),
     busyPct: round(((after.cpuMs - before.cpuMs) / (seconds * 1000)) * 100),
+    relight: summarizeRelight(relight),
   };
 }
 
@@ -136,10 +143,53 @@ function sampleFrames({ kind, seconds }) {
       const longTaskMs = window.__perf.longTasks
         .filter(([s]) => s >= start && s <= t)
         .reduce((sum, [, d]) => sum + d, 0);
-      resolve({ deltas, longTaskMs });
+      // Keep only publications inside this phase. Their counter window can be
+      // shorter than the callback window because status is published every 0.5 s.
+      const relight = (window.__perf.relight || []).filter((s) => s.at >= start && s.at <= t);
+      resolve({ deltas, longTaskMs, relight });
     };
     requestAnimationFrame(frame);
   });
+}
+
+// These counters describe submitted scene/lighting work, never confirmed display
+// scanout or GPU completion. Preserve the browser-rAF frameStats separately.
+export function summarizeRelight(snapshots = []) {
+  const counters = ['sceneUpdates', 'measuredSeconds', 'missedFrames', 'lightingUpdates', 'refinementUpdates'];
+  let samples = [];
+  let resets = 0;
+  for (const entry of snapshots) {
+    if (!Number.isFinite(entry?.at) || entry.status?.phase !== 'running' ||
+      !counters.every((key) => Number.isFinite(entry.status[key]) && entry.status[key] >= 0)) continue;
+    const previous = samples.at(-1);
+    if (previous && (entry.at <= previous.at || counters.some((key) => entry.status[key] < previous.status[key]))) {
+      samples = [];
+      resets += 1;
+    }
+    samples.push(entry);
+  }
+  if (samples.length < 2) return null;
+  const first = samples[0];
+  const last = samples.at(-1);
+  const observedSeconds = (last.at - first.at) / 1000;
+  const delta = Object.fromEntries(counters.map((key) => [key, last.status[key] - first.status[key]]));
+  const rate = (count, seconds) => seconds > 0 ? round(count / seconds) : null;
+  return {
+    cadence: 'submitted work; not confirmed display or GPU completion',
+    samples: samples.length,
+    counterResets: resets,
+    observedSeconds: Math.round(observedSeconds * 1000) / 1000,
+    ...delta,
+    measuredSeconds: Math.round(delta.measuredSeconds * 1000) / 1000,
+    sceneUpdateHz: rate(delta.sceneUpdates, delta.measuredSeconds),
+    lightingSubmissionHz: rate(delta.lightingUpdates, observedSeconds),
+    refinementSubmissionHz: rate(delta.refinementUpdates, observedSeconds),
+    missedPct: delta.sceneUpdates > 0 ? round(delta.missedFrames / delta.sceneUpdates * 100) : null,
+    targetHz: last.status.fps,
+    backend: last.status.backend,
+    size: last.status.size,
+    network: last.status.network,
+  };
 }
 
 export function frameStats(deltas) {
@@ -183,20 +233,11 @@ function loadTimings() {
 
 function threeState() {
   const canvases = window.__perf.canvases.filter((c) => c.isConnected);
-  let relight = null;
-  try {
-    const saved = JSON.parse(localStorage.getItem('relight-quality'));
-    if (saved) {
-      relight = {
-        budget: Math.round(saved.budget * 100) / 100,
-        dpr: saved.dpr,
-        failedDpr: saved.failedDpr,
-        gpu: saved.gpu,
-      };
-    }
-  } catch {
-    // no storage
-  }
+  const latest = window.__perf.relight?.at(-1);
+  // A saved profile can outlive the renderer or belong to a different scene.
+  // Only a recent live publication establishes that Relight is mounted here.
+  const relight = canvases.length && latest?.status.phase === 'running' && performance.now() - latest.at < 2000
+    ? { ...latest.status } : null;
   return {
     canvases: canvases.length,
     size: canvases.map((c) => `${c.width}x${c.height}`).join(' '),
@@ -240,4 +281,4 @@ function round(v) {
   return Math.round(v * 10) / 10;
 }
 
-export { instrument };
+export { instrument, threeState };

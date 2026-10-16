@@ -1,0 +1,56 @@
+diff --git a/client/src/Components/Homepage/DistortedTorusScene.js b/client/src/Components/Homepage/DistortedTorusScene.js
+index 57b9c7c..ae7dbe4 100644
+--- a/client/src/Components/Homepage/DistortedTorusScene.js
++++ b/client/src/Components/Homepage/DistortedTorusScene.js
+@@ -249,6 +249,7 @@ function AfterMotion({ settle = false, onFirstFrame, startAt = 0, maxFps = null
+       }
+       const elapsed = window.__sceneStill ? 0 : Math.max(0, (timestamp - start) / 1000);
+       drawnAt = timestamp;
++      if (window.__relightComparison) window.__relightComparison.sceneAdvances += 1;
+       advance(startAt + elapsed);
+       if (!drawn.current) {
+         drawn.current = true;
+diff --git a/client/src/Components/Homepage/RelightBackdrop.js b/client/src/Components/Homepage/RelightBackdrop.js
+index ff0cb25..bdab9ac 100644
+--- a/client/src/Components/Homepage/RelightBackdrop.js
++++ b/client/src/Components/Homepage/RelightBackdrop.js
+@@ -553,6 +553,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
+       });
+       if (dirty) {
+         engine.composite([shown(key, KEY.intensity * keyLevel), shown(fill, FILL.intensity * fillLevel)]);
++        if (window.__relightComparison) window.__relightComparison.composites += 1;
+         state.built.present(state.layer);
+       }
+     }
+@@ -607,6 +608,15 @@ function phoneHero(state, vw, vh) {
+ function publish(state) {
+   const status = statusOf(state);
+   if (status) {
++    const counters = (window.__relightComparison ||= { sceneAdvances: 0, evaluations: 0, composites: 0 });
++    const { frames, seconds, late } = state.quality.stats;
++    status.measured = { sceneUpdates: frames, measuredSeconds: seconds, missedFrames: late };
++    status.submissions = { ...counters };
++    status.lightWork = Object.fromEntries(['key', 'fill'].map((name) => {
++      const light = state[name];
++      return [name, { stride: light.stride, refining: !!light.refineRect, coversView: !!state.view && covers(light.rect, state.view) }];
++    }));
++    window.__relightObserve?.(status);
+     setRelightStatus(status);
+   }
+ }
+@@ -758,6 +768,7 @@ function step(engine, light, now, budget, finest, view) {
+     }
+     const at = { pos: light.evalPos, radius: light.radius };
+     engine.evaluate(at, light.slots[light.shown], stride, ...itemRect(engine, rect, stride));
++    if (window.__relightComparison) window.__relightComparison.evaluations += 1;
+     light.rect = rect;
+     light.stride = stride;
+     light.refineRect = null;
+@@ -777,6 +788,7 @@ function step(engine, light, now, budget, finest, view) {
+     const from = Math.max(r0, light.refineRow);
+     const to = Math.min(r1, from + THREE.MathUtils.clamp(rows, MIN_BAND_ROWS, r1 - r0));
+     engine.evaluate({ pos: light.evalPos, radius: light.radius }, light.slots[other], finest, from, to, c0, c1);
++    if (window.__relightComparison) window.__relightComparison.evaluations += 1;
+     light.refineRow = to;
+     if (to >= r1) {
+       light.shown = other;

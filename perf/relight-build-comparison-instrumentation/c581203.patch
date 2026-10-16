@@ -1,0 +1,60 @@
+diff --git a/client/src/Components/Homepage/RelightBackdrop.js b/client/src/Components/Homepage/RelightBackdrop.js
+index 38ad367..4b0aa14 100644
+--- a/client/src/Components/Homepage/RelightBackdrop.js
++++ b/client/src/Components/Homepage/RelightBackdrop.js
+@@ -520,6 +520,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
+       engine.benchRuns = (engine.benchRuns ?? 0) + 1;
+       state.benching = true;
+       engine.evaluate({ pos: key.evalPos, radius: key.radius }, fill.slot, bench);
++      if (window.__relightComparison) window.__relightComparison.evaluations += 1;
+       state.layer?.draw(uniforms, vw, vh, roomDpr);
+       return;
+     }
+@@ -577,6 +578,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr }) {
+     if (dirty || !covers(state.drawn, view)) {
+       state.drawn = grow(view, dirty ? VIEW_MARGIN : VIEW_GROW);
+       engine.composite([shown(key, KEY.intensity * keyLevel), shown(fill, FILL.intensity * fillLevel)], 1, state.drawn);
++      if (window.__relightComparison) window.__relightComparison.composites += 1;
+       state.glassStale = state.built.present(state.layer, uniforms.texSize.value);
+     }
+     if (state.glassStale && now - state.glassAt >= GLASS_EVERY) {
+@@ -636,6 +638,15 @@ function phoneHero(state, vw, vh) {
+ function publish(state) {
+   const status = statusOf(state);
+   if (status) {
++    status.measured = { sceneUpdates: state.quality.stats.frames, measuredSeconds: state.quality.stats.seconds, missedFrames: state.quality.stats.late };
++    status.submissions = { ...(window.__relightComparison || {}) };
++    status.lightWork = Object.fromEntries(['key', 'fill'].map((name) => {
++      const light = state[name];
++      const currentStrideComplete = name === 'key' ? light.done >= light.stride ** 2 : light.done >= 1;
++      const fullResolutionComplete = currentStrideComplete;
++      return [name, { stride: light.stride, done: light.done, currentStrideComplete, fullResolutionComplete, refining: !!light.refineRect, coversView: !!state.view && covers(light.rect, state.view) }];
++    }));
++    window.__relightObserve?.(status);
+     setRelightStatus(status);
+   }
+ }
+@@ -878,6 +889,7 @@ function step(engine, light, now, budget, view) {
+     light.phase += 1;
+     light.done += 1;
+     engine.evaluate({ pos: light.evalPos, radius: light.radius }, light.slot, stride, ...items, phase);
++    if (window.__relightComparison) window.__relightComparison.evaluations += 1;
+     // the light only moved before the first, the rest are where it is now
+     light.kept = engine.resolve(light.slot, light.image, stride, phase, items, i ? 0 : alpha, light.kept);
+   }
+@@ -893,6 +905,7 @@ function fillStep(engine, light, budget, idle) {
+     const stride = previewStride(engine, budget);
+     const items = [0, engine.rows(stride), 0, engine.cols(stride)];
+     engine.evaluate(light, light.slot, stride, ...items, NO_PHASE);
++    if (window.__relightComparison) window.__relightComparison.evaluations += 1;
+     engine.resolve(light.slot, light.image, stride, NO_PHASE, items, 1);
+     Object.assign(light, { evalPos: [...light.pos], rect: WHOLE, stride: 1, done: 0, next: 0 });
+     return cost === null ? budget : engine.evalCost(stride);
+@@ -918,6 +931,7 @@ function evaluateRows(engine, job, rect, budget, least = 0) {
+     return 0;
+   }
+   engine.evaluate(job, job.slot, 1, from, to, c0, c1, NO_PHASE);
++  if (window.__relightComparison) window.__relightComparison.evaluations += 1;
+   const span = engine.resolve(job.slot, job.image, 1, NO_PHASE, [from, to, c0, c1], 1);
+   // same columns all the way down, so this is every pixel so far
+   job.kept = job.kept && span ? [span[0], span[1], job.kept[2], span[3]] : span;

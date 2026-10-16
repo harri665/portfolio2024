@@ -17,6 +17,7 @@ import {
   upgradeTier,
 } from './adaptiveQuality';
 import { RESOLVED } from './RelightBase';
+import { createFill, fillStep } from './lightWork';
 import { RelightEngine } from './RelightEngine';
 import { RelightGPUEngine, requestRelightDevice } from './RelightGPU';
 import { loadRelightScene } from './scene';
@@ -138,7 +139,7 @@ async function run(prep) {
   const compact = window.matchMedia?.(COMPACT_QUERY).matches ?? false;
   const webgl = new URLSearchParams(window.location.search).get('relight') === 'webgl';
   const gpu = probeGpu();
-  const profile = gpu ? loadProfile(gpu, MIN_FPS) : null;
+  const profile = gpu ? loadProfile(gpu, MIN_FPS, webgl || !navigator.gpu ? 'webgl' : 'webgpu') : null;
   const bandBytes = bandBytesFor(compact);
 
   if (!webgl) {
@@ -158,7 +159,7 @@ async function run(prep) {
       return loadRoom(NATIVE, signal, 'low');
     }),
   ]);
-  const kernel = tunedKernel(profile, network);
+  const kernel = tunedKernel(profile, network, device ? 'webgpu' : 'webgl');
   const built = await createRelightEngine(data, device, bandBytes, signal, kernel);
   prep.engine = built.engine;
   throwIfAborted(signal);
@@ -180,6 +181,7 @@ async function run(prep) {
   await tune(engine, prep);
 
   const budget = firstBudget(profile, compact);
+  result.fill = await prepareFill(result, { signal, budget, claimed: () => prep.claimed, claim: prep.claim });
   const change = () => {
     const other = switchNetwork(engine, budget);
     if (other) {
@@ -227,9 +229,49 @@ async function run(prep) {
     Object.assign(result, { engine, tier, network });
     const timed = await benchmark(engine, prep);
     await tune(engine, prep);
+    result.fill = await prepareFill(result, { signal, budget, claimed: () => prep.claimed, claim: prep.claim });
     next = timed ? change() : null;
   }
   return result;
+}
+
+// Only this async owner writes the engine until the promise hands it to install().
+// Claiming races the yield, so a hidden tab does not hold startup hostage to an rAF.
+// Partial bands and their image travel together and the visible renderer resumes them.
+export async function prepareFill(built, { signal, budget = 8, claimed = () => false, claim = null, maxMs = Infinity }) {
+  const { engine } = built;
+  const fill = createFill(engine);
+  built.fill = fill;
+  const started = performance.now();
+  while (!claimed() && !signal.aborted && fill.done < 1 && performance.now() - started < maxMs) {
+    engine.beginFrame();
+    let spent;
+    try {
+      spent = fillStep(engine, fill, Math.min(8, budget), true);
+    } finally {
+      engine.endFrame();
+    }
+    if (!(spent > 0)) break;
+    await yieldPreparation(signal, claim);
+    engine.pollTiming();
+  }
+  throwIfAborted(signal);
+  return fill;
+}
+
+function yieldPreparation(signal, claim) {
+  return new Promise((resolve) => {
+    let frame;
+    const done = () => {
+      cancelAnimationFrame(frame);
+      signal.removeEventListener('abort', done);
+      resolve();
+    };
+    frame = requestAnimationFrame(done);
+    signal.addEventListener('abort', done, { once: true });
+    claim?.then(done);
+    if (signal.aborted) done();
+  });
 }
 
 // tuning on a 3080: ~15% faster on webgpu, 2x on webgl
@@ -261,10 +303,14 @@ export async function tuneEngine(engine, signal = null, slot = 0) {
 // read 330ms for a light that takes 47 and got stuck at every 16th pixel
 export function benchStride(engine) {
   const known = Object.keys(engine.timing.byStride).map(Number);
-  if (!known.length || engine.timing.seeded) {
+  if (!known.length) {
     return null;
   }
   const finest = [1, 2, 4].find((s) => engine.evalCost(s) <= BENCH_MAX_MS) ?? 8;
+  // Cropped/banded refinement can finish without a large enough timing sample.
+  // Validate a transferred profile on this engine before it can block adaptation
+  // forever. The caller runs this only at rest and caps the number of attempts.
+  if (engine.timing.seeded) return finest;
   return finest < Math.min(...known) ? finest : null;
 }
 

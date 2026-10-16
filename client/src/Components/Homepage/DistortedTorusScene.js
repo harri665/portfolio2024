@@ -10,6 +10,7 @@ import { CoverBackdrop, DraftingGrid } from './ProjectBackdrops';
 import LiquidGlassPass from './LiquidGlassPass';
 import RelightBackdrop from './RelightBackdrop';
 import { MIN_FPS } from './relight/adaptiveQuality';
+import { RelightFrameClock } from './relight/frameClock';
 import useCardLights, { CARD_SELECTOR } from './useCardLights';
 
 // type: 'torusKnot',
@@ -135,6 +136,7 @@ export default function DistortedTorusScene({
   const relight = backdrop === 'relight' && !relightFailed;
   // held here because Canvas re-applies its dpr prop every render
   const [relightDpr, setRelightDpr] = useState(null);
+  const relightFrame = useRef(null);
 
   return (
     <div ref={layer} className={className}>
@@ -155,10 +157,9 @@ export default function DistortedTorusScene({
             settle={settles}
             onFirstFrame={onFirstFrame}
             startAt={startAt}
-            // phones run the room at 30. at 60 the glass drew twice per room frame and ate its gpu time
-            maxFps={relight && compact ? MIN_FPS : null}
+            relightFrame={relight ? relightFrame : null}
           />
-          // has to be first so every frame callback sees the canvas over the viewport
+          {/* Has to be first so every frame callback sees the canvas over the viewport. */}
           {followScroll && <ScrollFollow layer={layer} />}
           <ambientLight intensity={preset.ambientLightIntensity} color="#ffffff" />
           <spotLight
@@ -181,6 +182,7 @@ export default function DistortedTorusScene({
           {drip && !relight && <DripDriver state={dripState.current} onProgress={onDrip} />}
           {relight ? (
             <RelightBackdrop
+              frameInfo={relightFrame}
               onProgress={onDrip}
               onFail={() => setRelightFailed(true)}
               onDpr={setRelightDpr}
@@ -218,10 +220,7 @@ export default function DistortedTorusScene({
 // drives frames after framer-motion moves the cards. on r3f's own loop the glass
 // drew the cards where they were a frame ago
 const SETTLE_MS = 900;
-// ms of slack so vsync jitter doesn't skip a frame
-const FRAME_SLACK = 4;
-
-function AfterMotion({ settle = false, onFirstFrame, startAt = 0, maxFps = null }) {
+function AfterMotion({ settle = false, onFirstFrame, startAt = 0, relightFrame = null }) {
   const advance = useThree((state) => state.advance);
   const firstFrame = useRef(onFirstFrame);
   firstFrame.current = onFirstFrame;
@@ -231,11 +230,16 @@ function AfterMotion({ settle = false, onFirstFrame, startAt = 0, maxFps = null 
     const start = performance.now();
     let last = '';
     let busyUntil = start + SETTLE_MS;
-    let drawnAt = -Infinity;
-    const interval = maxFps ? 1000 / maxFps - FRAME_SLACK : 0;
+    const clock = relightFrame ? new RelightFrameClock(MIN_FPS) : null;
     const tick = ({ timestamp }) => {
-      if (timestamp - drawnAt < interval) {
-        return;
+      if (clock) {
+        if (document.hidden) {
+          clock.suspend();
+          return;
+        }
+        const sample = clock.step(timestamp);
+        if (!sample) return;
+        relightFrame.current = sample;
       }
       if (settle) {
         const now = sceneState();
@@ -248,7 +252,6 @@ function AfterMotion({ settle = false, onFirstFrame, startAt = 0, maxFps = null 
         }
       }
       const elapsed = window.__sceneStill ? 0 : Math.max(0, (timestamp - start) / 1000);
-      drawnAt = timestamp;
       advance(startAt + elapsed);
       if (!drawn.current) {
         drawn.current = true;
@@ -257,7 +260,7 @@ function AfterMotion({ settle = false, onFirstFrame, startAt = 0, maxFps = null 
     };
     frame.postRender(tick, true);
     return () => cancelFrame(tick);
-  }, [advance, settle, startAt, maxFps]);
+  }, [advance, settle, startAt, relightFrame]);
 
   return null;
 }
