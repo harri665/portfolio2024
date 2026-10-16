@@ -1,9 +1,7 @@
 import {
   dampedPosition,
-  handoffProgress,
   imageBlend,
   readyHandoff,
-  MAX_IMAGE_BLEND,
 } from './lightMotion';
 
 test('a distant target follows the original exponential easing without a movement cap', () => {
@@ -20,16 +18,11 @@ test('small moves retain the same damping and settle at the target', () => {
   expect(dampedPosition([0.02, 0, 0], [0.02, 0, 0], 4, 1 / 24)).toEqual([0.02, 0, 0]);
 });
 
-test('large movements retain enough of the previous image while a fresh preview arrives', () => {
+test('nearby movement reuses the image but a distant move drops its old light spot', () => {
   expect(imageBlend(0.01)).toBeCloseTo(1 - Math.exp(-0.01 / 0.06));
-  expect(imageBlend(1)).toBeCloseTo(MAX_IMAGE_BLEND);
-  expect(MAX_IMAGE_BLEND).toBeLessThan(0.4);
-});
-
-test('a prepared-image handoff follows the actual animated position', () => {
-  expect(handoffProgress([0, 0, 0], [1, 0, 0], [0.25, 0, 0])).toBeCloseTo(0.25);
-  expect(handoffProgress([0, 0, 0], [1, 0, 0], [2, 0, 0])).toBe(1);
-  expect(handoffProgress([0, 0, 0], [0, 0, 0], [0, 0, 0])).toBe(1);
+  expect(imageBlend(0.059)).toBeLessThan(1);
+  expect(imageBlend(0.06)).toBe(1);
+  expect(imageBlend(1)).toBe(1);
 });
 
 test('a handoff needs a complete image at the destination that covers the view', () => {

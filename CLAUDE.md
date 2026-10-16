@@ -1,20 +1,24 @@
 # Project handoff
 
-## Current relight movement (October 16, 2026 follow-up)
+## Current relight movement (October 16, 2026)
 
 The key light again uses the original exponential damping: rate `6` near a
 focused card and `4` for pointer or rest movement. Its animated position is not
-distance-capped. Prepared-image handoffs now follow that animated position;
-the bloom follows it too. When a large jump has no ready image, a spare holds
-the previous image briefly while a new preview appears. Image replacement is
-limited to about `0.39` per moving evaluation, preserving detail without
-slowing the light. Reduced-motion mode retains its ready-image snap behavior.
+distance-capped. The renderer composites one moving key-light image. It no
+longer shows an old-position trail or crossfades two key images during normal
+movement; those paths produced visible duplicate lights. A prepared spare image
+is adopted only once the animated light reaches it and the image covers the
+view. If a move exceeds the `0.06` world-unit image trust distance, the stale
+image is discarded so the new evaluation cannot retain a second light spot.
+The bloom follows the animated position. Reduced-motion mode still snaps to a
+ready image or waits for a complete one.
 
-Focused relight tests passed (39 tests), the production build passed, and the
-browser motion check passed on desktop WebGPU/WebGL, reduced motion, mobile
-emulation, and software WebGL. Desktop checks assert that motion exceeds the
-old `0.03` position cap while cached-image replacement stays bounded. The
-browser screenshots were inspected during and after card changes.
+Verification for this change: five focused relight Jest suites passed (38 tests),
+the production client build passed, and the browser motion check passed in
+desktop WebGPU and WebGL, reduced-motion WebGL, mobile WebGL emulation, and
+software WebGL. The desktop WebGPU capture was inspected during a fast card
+change and showed one moving key-light spot. The check asserts at most one
+moving key-light image while preserving uncapped animated movement.
 
 ## Relight motion resilience (October 16, 2026)
 
@@ -27,9 +31,10 @@ light movement. See `client/src/Components/Homepage/RelightBackdrop.js` and
 - The initial motion fix capped movement to `0.03` world units per evaluated
   position, half the cached-image trust distance (`0.06`). The follow-up above
   removed that position cap and retained the trust limit for image blending.
-- When a complete spare image covers the destination view, a jump over `0.18`
-  world units hands off through a crossfade. Reduced-motion mode
-  switches to a ready image or prepares one while keeping the old image shown.
+- The initial implementation crossfaded prepared images over large jumps and
+  briefly displayed an old image as a trail. Those animated paths were removed
+  after duplicate lights appeared. Reduced-motion mode still switches to a
+  ready image or prepares one while keeping the old image shown.
 - Spare preparation can run for the first visible cards, while the renderer
   reserves a separate turn to bootstrap the fill light on slow backends.
   Diagnostic status now reports the largest movement/blend, handoffs, and
@@ -44,8 +49,9 @@ Verification at the time of the commit: five focused relight Jest suites passed
 passed in local Chrome for desktop WebGPU, desktop WebGL, reduced motion,
 mobile emulation, and software WebGL. At that commit, the check asserted at most
 `0.031` world units per evaluated move. The current check verifies restored
-animated movement and at most `0.41` image blend. It uses the built client,
-installed Chrome, and repository project-card cache; see the script for flags.
+animated movement and at most one moving key image in the composite. It uses
+the built client, installed Chrome, and repository project-card cache; see the
+script for flags.
 Browser emulation and a software renderer do not establish physical-device
 performance. The existing build warning about an unused constant in
 `client/src/utils/api.js` was unrelated.
