@@ -34,7 +34,7 @@ import {
 import { requestRelightDevice } from './relight/RelightGPU';
 import { RESOLVED, phaseOrder } from './relight/RelightBase';
 import { FILL, REST_DELAY, evaluateRows, fillMatches, fillStep, itemRect, previewStride, refinementProgress } from './relight/lightWork';
-import { boundedDamp, limitMove, readyHandoff, TRUST_DISTANCE, MAX_EVAL_MOVE, HANDOFF_DISTANCE, HANDOFF_SECONDS } from './relight/lightMotion';
+import { dampedPosition, handoffProgress, imageBlend, readyHandoff, TRUST_DISTANCE, MAX_EVAL_MOVE, HANDOFF_DISTANCE, TRAIL_SECONDS } from './relight/lightMotion';
 import { advanceCopyClock } from './relight/copyClock';
 import { GPURoomLayer, ROOM_FRAGMENT, RoomLayer } from './relight/roomLayer';
 import { reportRelight } from './relight/report';
@@ -137,7 +137,9 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr, frameInfo }
       spares: [],
       handoff: null,
       pendingJump: null,
+      trail: null,
       handoffs: 0,
+      maxAnimatedStep: 0,
       maxMotionStep: 0,
       maxMotionBlend: 0,
       targetsAt: -Infinity,
@@ -532,19 +534,16 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr, frameInfo }
     aim = [...aim];
     keepInRoom(engine, aim, key.radius);
 
-    if (state.handoff || state.pendingJump) {
-      // Keep the old evaluated image and its source position together during the swap.
-      key.pos = [...key.evalPos];
-    } else if (reduceMotion && (!key.evalPos || distance(aim, key.evalPos) <= MAX_EVAL_MOVE)) {
-      key.pos = [...aim];
+    const previousPos = key.pos;
+    if (reduceMotion) {
+      key.pos = state.pendingJump && key.evalPos ? [...key.evalPos] : [...aim];
     } else {
-      // Preserve damping between tiny moves, but never let the animated position run
-      // farther than one trusted step ahead of the last completed evaluation.
-      const from = key.evalPos || key.pos;
-      key.pos = boundedDamp(key.pos, aim, reduceMotion ? 100 : state.card.uv ? 6 : 4, delta, Infinity);
-      keepInRoom(engine, key.pos, key.radius);
-      key.pos = limitMove(from, key.pos);
+      // Keep the original light movement. Image reuse and handoffs handle large
+      // jumps without constraining the position the visitor sees.
+      key.pos = dampedPosition(key.pos, aim, state.card.uv ? 6 : 4, delta);
     }
+    keepInRoom(engine, key.pos, key.radius);
+    state.maxAnimatedStep = Math.max(state.maxAnimatedStep, distance(previousPos, key.pos));
 
     const { budget } = quality;
     const resting = (light) => light.evalPos && distance(light.pos, light.evalPos) <= MOVE_EPS && converged(light);
@@ -594,14 +593,13 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr, frameInfo }
     if (state.handoff && distance(aim, state.handoff.spare.pos) > TRUST_DIST) {
       state.handoff = null;
     }
-    if (!state.handoff && !state.pendingJump && key.evalPos && distance(aim, key.evalPos) > HANDOFF_DISTANCE) {
+    if (!state.handoff && !state.pendingJump && !state.trail && key.evalPos && distance(aim, key.evalPos) > HANDOFF_DISTANCE) {
       const spare = readyHandoff(state.spares, aim, view, TRUST_DIST);
       if (spare) {
         if (reduceMotion) {
           takeSpare(key, spare);
-          key.pos = [...key.evalPos];
         } else {
-          state.handoff = { spare, start: now };
+          state.handoff = { spare, from: [...key.evalPos] };
         }
         state.handoffs += 1;
       } else if (reduceMotion && state.spares.length) {
@@ -616,12 +614,21 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr, frameInfo }
         key.pos = [...key.evalPos];
       }
     }
-    const handoff = state.handoff;
-    const handoffMix = handoff ? clamp01((now - handoff.start) / HANDOFF_SECONDS) : 0;
-    if (handoff && handoffMix >= 1) {
+    let handoff = state.handoff;
+    let handoffMix = handoff ? handoffProgress(handoff.from, handoff.spare.pos, key.pos) : 0;
+    let handoffDone = false;
+    if (handoff && (handoffMix >= 0.95 || distance(key.pos, handoff.spare.pos) <= MAX_EVAL_MOVE)) {
       takeSpare(key, handoff.spare);
-      key.pos = [...key.evalPos];
       state.handoff = null;
+      handoff = null;
+      handoffMix = 0;
+      handoffDone = true;
+    }
+    let trailDone = false;
+    if (state.trail && now - state.trail.start >= TRAIL_SECONDS) {
+      state.trail = null;
+      state.targetsAt = -Infinity;
+      trailDone = true;
     }
     // everything from here to endFrame goes to the gpu in one submit
     engine.beginFrame();
@@ -648,10 +655,13 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr, frameInfo }
       worked = true;
     } else if (!bootstrapFill && !state.handoff && needsWork(key, scrolling, view)) {
       adopt(key, state.spares, aim);
+      if (fill.evalPos && key.evalPos && distance(key.pos, key.evalPos) > TRUST_DIST) {
+        beginTrail(state, now);
+      }
       const moved = key.evalPos ? distance(key.pos, key.evalPos) : null;
       if (moved !== null && moved > MOVE_EPS) {
         state.maxMotionStep = Math.max(state.maxMotionStep, moved);
-        state.maxMotionBlend = Math.max(state.maxMotionBlend, 1 - Math.exp(-moved / TRUST_DIST));
+        state.maxMotionBlend = Math.max(state.maxMotionBlend, imageBlend(moved));
       }
       left -= step(engine, key, now, fill.evalPos ? frameBudget : frameBudget / 2, view, scrolling);
       worked = true;
@@ -662,13 +672,13 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr, frameInfo }
       worked = true;
     }
 
-    let dirty = keyWorked || fillWorked || jumpReady || !!handoff;
+    let dirty = keyWorked || fillWorked || jumpReady || !!handoff || !!state.trail || handoffDone || trailDone;
     if (worked) {
       state.lightingUpdates += 1;
       if (key.refining) state.refinementUpdates += 1;
     }
     // nothing to show changed, so get ready for where the key light goes next
-    if (!worked && !handoff && !state.pendingJump && !scrolling && !state.upgrading && quality.lateRate.idle < 0.05 && (progress > 0.3 || state.card.el) && state.panel && state.spares.length) {
+    if (!worked && !handoff && !state.trail && !state.pendingJump && !scrolling && !state.upgrading && quality.lateRate.idle < 0.05 && (progress > 0.3 || state.card.el) && state.panel && state.spares.length) {
       precompute(state, engine, Math.min(budget * 0.5, 8), now, view, vw, vh, canHover);
     }
     const keyLevel = reduceMotion ? clamp01(age / 0.6) : strike(age);
@@ -687,11 +697,21 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr, frameInfo }
     if (dirty || !covers(state.drawn, view)) {
       state.drawn = grow(view, dirty ? VIEW_MARGIN : VIEW_GROW);
       const keyIntensity = KEY.intensity * keyLevel;
-      const lights = key.evalPos
-        ? handoff && handoffMix < 1
-          ? [shown(key, keyIntensity * (1 - handoffMix)), shown({ ...key, evalPos: handoff.spare.pos, image: handoff.spare.image }, keyIntensity * handoffMix)]
-          : [shown(key, keyIntensity)]
-        : [];
+      const lights = [];
+      if (key.evalPos) {
+        if (handoff) {
+          lights.push(
+            shown(key, keyIntensity * (1 - handoffMix), key.pos),
+            shown({ ...key, image: handoff.spare.image }, keyIntensity * handoffMix, key.pos)
+          );
+        } else if (state.trail) {
+          const mix = clamp01(0.35 + 0.65 * (now - state.trail.start) / TRAIL_SECONDS);
+          lights.push(shown(state.trail.old, keyIntensity * (1 - mix)));
+          lights.push(shown(key, keyIntensity * mix));
+        } else {
+          lights.push(shown(key, keyIntensity));
+        }
+      }
       if (fill.evalPos) lights.push(shown(fill, FILL.intensity * fillLevel));
       engine.composite(lights, 1, state.drawn);
       state.glassStale = state.built.present(state.layer, uniforms.texSize.value);
@@ -704,10 +724,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr, frameInfo }
 
     // soft bloom, the tonemap flattens the key light otherwise
     if (key.evalPos) {
-      const glowPos = state.handoff
-        ? key.evalPos.map((value, i) => THREE.MathUtils.lerp(value, state.handoff.spare.pos[i], handoffMix))
-        : key.evalPos;
-      const p = engine.project(glowPos);
+      const p = engine.project(key.pos);
       const { left, top, size: s } = state.box;
       uniforms.glowAt.value.set(left + p.u * s, top + p.v * s, (key.radius / (p.z * 2 * engine.cam.tx)) * s);
       const glow = THREE.MathUtils.lerp(0.9, 0.45, walk) * keyLevel;
@@ -836,6 +853,8 @@ function statusOf(state) {
     shownPx: Math.round(state.shownPx),
     refining: refinementProgress(state.key, engine),
     preparingJump: !!state.pendingJump,
+    trailingImage: !!state.trail,
+    maxAnimatedStep: Number(state.maxAnimatedStep.toFixed(3)),
     motionStep: state.key.lastMove == null ? null : Number(state.key.lastMove.toFixed(3)),
     motionBlend: state.key.lastAlpha == null ? null : Number(state.key.lastAlpha.toFixed(2)),
     maxMotionStep: Number(state.maxMotionStep.toFixed(3)),
@@ -987,6 +1006,7 @@ function install(state, built, uniforms) {
   state.targetsAt = -Infinity;
   state.handoff = null;
   state.pendingJump = null;
+  state.trail = null;
   state.lastLevels = null;
   state.glassStale = false;
   state.drawn = null;
@@ -1062,7 +1082,7 @@ function step(engine, light, now, budget, view, scrolling = false) {
   light.stride = stride;
   let alpha = 0;
   if (fresh) {
-    alpha = Number.isFinite(moved) ? 1 - Math.exp(-moved / TRUST_DIST) : 1;
+    alpha = Number.isFinite(moved) ? imageBlend(moved) : 1;
     light.lastMove = Number.isFinite(moved) ? moved : null;
     light.lastAlpha = alpha;
     light.evalPos = [...light.pos];
@@ -1123,6 +1143,22 @@ function takeSpare(light, best) {
     refining: false,
   });
   Object.assign(best, { pos: null, evalPos: null, rect: null, kept: null, stride: 0, phase: 0, done: 0, next: 0, slot: 1, ready: false, rank: Infinity });
+}
+
+function beginTrail(state, now) {
+  if (state.trail || !state.key.evalPos) {
+    return;
+  }
+  const spare = state.spares.find((candidate) => !candidate.ready) || state.spares[state.spares.length - 1];
+  if (!spare) {
+    return;
+  }
+  const key = state.key;
+  const old = { ...key, evalPos: [...key.evalPos] };
+  [key.image, spare.image] = [spare.image, key.image];
+  Object.assign(spare, { pos: null, evalPos: null, rect: null, kept: null, next: 0, ready: false, rank: Infinity });
+  Object.assign(key, { evalPos: null, rect: null, kept: null, stride: 0, phase: 0, done: 0, next: 0, refining: false });
+  state.trail = { spare, old, start: now };
 }
 
 // only on frames nothing else needs, a band of rows at a time into the likeliest spare not done yet
@@ -1227,9 +1263,9 @@ function areaOf([u0, u1, v0, v1]) {
   return Math.max(0, u1 - u0) * Math.max(0, v1 - v0);
 }
 
-function shown(light, intensity) {
+function shown(light, intensity, pos = light.evalPos) {
   return {
-    pos: light.evalPos,
+    pos,
     radius: light.radius,
     color: light.color,
     intensity,

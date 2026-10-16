@@ -1,27 +1,35 @@
-import { boundedDamp, limitMove, readyHandoff, MAX_EVAL_MOVE } from './lightMotion';
+import {
+  dampedPosition,
+  handoffProgress,
+  imageBlend,
+  readyHandoff,
+  MAX_IMAGE_BLEND,
+} from './lightMotion';
 
-test('a long frame or distant target cannot move a light beyond one trusted evaluation step', () => {
+test('a distant target follows the original exponential easing without a movement cap', () => {
   const start = [0, 0, 0];
-  const next = boundedDamp(start, [1, 0, 0], 6, 0.5);
-  expect(next[0]).toBeCloseTo(MAX_EVAL_MOVE);
-  expect(next[1]).toBe(0);
-  expect(boundedDamp(next, [1, 0, 0], 6, 0.5)[0]).toBeCloseTo(2 * MAX_EVAL_MOVE);
+  const next = dampedPosition(start, [1, 0, 0], 6, 1 / 24);
+  expect(next[0]).toBeCloseTo(1 - Math.exp(-6 / 24));
+  expect(next[0]).toBeGreaterThan(0.03);
+  expect(dampedPosition(next, [1, 0, 0], 6, 1 / 24)[0]).toBeGreaterThan(next[0]);
 });
 
-test('small moves retain the normal damping and settle at the target', () => {
-  const next = boundedDamp([0, 0, 0], [0.02, 0, 0], 6, 1 / 24);
-  expect(next[0]).toBeCloseTo(0.02 * (1 - Math.exp(-6 / 24)));
-  expect(boundedDamp([0.02, 0, 0], [0.02, 0, 0], 6, 1 / 24)).toEqual([0.02, 0, 0]);
+test('small moves retain the same damping and settle at the target', () => {
+  const next = dampedPosition([0, 0, 0], [0.02, 0, 0], 4, 1 / 24);
+  expect(next[0]).toBeCloseTo(0.02 * (1 - Math.exp(-4 / 24)));
+  expect(dampedPosition([0.02, 0, 0], [0.02, 0, 0], 4, 1 / 24)).toEqual([0.02, 0, 0]);
 });
 
-test('subthreshold movement accumulates while its evaluated position is unchanged', () => {
-  const evaluated = [0, 0, 0];
-  let animated = [...evaluated];
-  for (let i = 0; i < 4; i += 1) {
-    animated = limitMove(evaluated, boundedDamp(animated, [0.02, 0, 0], 6, 1 / 24, Infinity));
-  }
-  expect(animated[0]).toBeGreaterThan(0.004);
-  expect(animated[0]).toBeLessThan(0.02);
+test('large movements retain enough of the previous image while a fresh preview arrives', () => {
+  expect(imageBlend(0.01)).toBeCloseTo(1 - Math.exp(-0.01 / 0.06));
+  expect(imageBlend(1)).toBeCloseTo(MAX_IMAGE_BLEND);
+  expect(MAX_IMAGE_BLEND).toBeLessThan(0.4);
+});
+
+test('a prepared-image handoff follows the actual animated position', () => {
+  expect(handoffProgress([0, 0, 0], [1, 0, 0], [0.25, 0, 0])).toBeCloseTo(0.25);
+  expect(handoffProgress([0, 0, 0], [1, 0, 0], [2, 0, 0])).toBe(1);
+  expect(handoffProgress([0, 0, 0], [0, 0, 0], [0, 0, 0])).toBe(1);
 });
 
 test('a handoff needs a complete image at the destination that covers the view', () => {

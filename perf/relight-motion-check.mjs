@@ -77,8 +77,11 @@ try {
   console.log(JSON.stringify({ beforeCardSwitch, status, cardCount, errors, beforeCardShot, duringCardSwitch, screenshot: shot }, null, 2));
   if (errors.length) throw new Error(`Page errors: ${errors.join('; ')}`);
   if (cardCount < 2) throw new Error('Project cards did not load');
-  if (status.maxMotionStep > 0.031 || status.maxMotionBlend > 0.41) {
-    throw new Error(`Untrusted light move: ${status.maxMotionStep} units, ${status.maxMotionBlend} blend`);
+  if (status.maxMotionBlend > 0.41) {
+    throw new Error(`Cached light image was replaced too quickly: ${status.maxMotionBlend} blend`);
+  }
+  if (!reduced && !mobile && status.maxAnimatedStep <= 0.031) {
+    throw new Error(`Original light movement was capped: ${status.maxAnimatedStep} units`);
   }
   await context.close();
 } finally {
