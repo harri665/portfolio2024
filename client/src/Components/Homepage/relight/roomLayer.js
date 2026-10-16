@@ -15,6 +15,7 @@ export const ROOM_FRAGMENT = `
   uniform float dim;
   uniform float saturation;
   uniform float hotKeep;
+  uniform float sharp;
   uniform vec3 glowAt;
   uniform vec3 glowColor;
 
@@ -60,7 +61,8 @@ export const ROOM_FRAGMENT = `
       float d = sdRoundBox(uv - 0.5, vec2(0.5), 0.05);
       float mask = 1.0 - smoothstep(-box.w, 0.0, d);
       if (mask > 0.0) {
-        vec3 image = sharpSample(vec2(uv.x, 1.0 - uv.y));
+        vec2 sampleUv = vec2(uv.x, 1.0 - uv.y);
+        vec3 image = sharp > 0.5 ? sharpSample(sampleUv) : texture2D(tRelight, sampleUv).rgb;
         float luma = dot(image, vec3(0.2126, 0.7152, 0.0722));
         float hot = smoothstep(0.82, 0.97, luma) * hotKeep;
         image = mix(mix(vec3(luma), image, saturation) * dim, image, hot);
@@ -264,6 +266,7 @@ export class RoomLayer {
     gl.useProgram(program);
     this.locations = UNIFORMS.map(([name]) => gl.getUniformLocation(program, name));
     gl.uniform1i(gl.getUniformLocation(program, 'tRelight'), 0);
+    gl.uniform1f(gl.getUniformLocation(program, 'sharp'), 1);
 
     gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
@@ -277,6 +280,8 @@ export class RoomLayer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
+    this.texW = 1;
+    this.texH = 1;
     // rows come bottom first already
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
@@ -290,7 +295,13 @@ export class RoomLayer {
 
   setImage(source) {
     const gl = this.gl;
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+    if (source.width === this.texW && source.height === this.texH) {
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, source);
+    } else {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+      this.texW = source.width;
+      this.texH = source.height;
+    }
     this.drawn = false;
   }
 
@@ -302,6 +313,8 @@ export class RoomLayer {
     }
     const { values, drawnValues } = this;
     gather(values, uniforms, width, height, dpr);
+    values[0] = this.texW;
+    values[1] = this.texH;
     if (this.drawn && same(values, drawnValues)) {
       return;
     }

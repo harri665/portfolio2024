@@ -44,7 +44,7 @@ export class RelightBase {
     this.cam = { X: col(0), Y: col(1), Z: col(2), O: col(3), tx, ty: (tx * H) / W };
     [this.lo, this.hi] = scene.light_bbox;
     [this.rmin, this.rmax] = scene.radius_range;
-    this.timing = { byStride: {}, samples: 0, pending: null, seeded: false };
+    this.timing = { byStride: {}, counts: {}, ticks: 0, samples: 0, pending: null, seeded: false };
   }
 
   rows(stride = 1) {
@@ -80,10 +80,17 @@ export class RelightBase {
     ];
   }
 
-  timeable(stride, r0, r1, c0, c1) {
+  timeable(stride, r0, r1, c0, c1, cheap = true) {
     const rows = this.rows(stride);
     const least = Math.min(1, Math.max(MIN_BAND_ROWS / rows, MIN_TIMED_SHARE));
-    return !this.timing.pending && r1 - r0 >= Math.min(rows, MIN_BAND_ROWS) && this.share(stride, r0, r1, c0, c1) >= least;
+    if (this.timing.pending || r1 - r0 < Math.min(rows, MIN_BAND_ROWS) || this.share(stride, r0, r1, c0, c1) < least) {
+      return false;
+    }
+    if (!cheap && !this.timing.seeded && (this.timing.counts?.[stride] || 0) >= 3) {
+      this.timing.ticks = (this.timing.ticks || 0) + 1;
+      return this.timing.ticks % 24 === 0;
+    }
+    return true;
   }
 
   recordTiming(stride, share, ms) {
@@ -96,7 +103,12 @@ export class RelightBase {
     if (this.timing.seeded) {
       this.timing.seeded = false;
       this.timing.byStride = {};
+      this.timing.counts = {};
     }
+    if (!this.timing.counts) {
+      this.timing.counts = {};
+    }
+    this.timing.counts[stride] = (this.timing.counts[stride] || 0) + 1;
     const t = this.timing.byStride;
     // drops fast, rises slow, so one stall doesn't make a fast gpu look slow
     t[stride] = !t[stride] ? full : full < t[stride] ? 0.5 * t[stride] + 0.5 * full : 0.9 * t[stride] + 0.1 * full;
@@ -111,6 +123,7 @@ export class RelightBase {
     });
     if (Object.keys(t).length) {
       this.timing.byStride = t;
+      this.timing.counts = {};
       this.timing.seeded = true;
     }
   }

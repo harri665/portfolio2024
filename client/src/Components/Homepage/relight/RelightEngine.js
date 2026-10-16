@@ -514,6 +514,9 @@ export class RelightEngine extends RelightBase {
         this.setOutputs(out);
         this.evaluate(light, slot, stride);
         await this.finish();
+        if (signal?.aborted) {
+          break;
+        }
         const t0 = performance.now();
         for (let i = 0; i < runs; i += 1) {
           this.evaluate(light, slot, stride);
@@ -744,16 +747,18 @@ export class RelightEngine extends RelightBase {
       gl.uniform1i(u.side, side);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     };
-    const keepsAll = k[0] <= x0 && k[1] >= x1 && k[2] <= y0 && k[3] >= y1;
-    if (!keepsAll) {
-      draw(0);
-    }
-    if (alpha > 0 && k[1] > k[0]) {
-      gl.enable(gl.BLEND);
-      gl.blendColor(0, 0, 0, alpha);
-      gl.blendFunc(gl.CONSTANT_ALPHA, gl.ONE_MINUS_CONSTANT_ALPHA);
-      draw(1);
-      gl.disable(gl.BLEND);
+    if (stride > 1) {
+      const keepsAll = k[0] <= x0 && k[1] >= x1 && k[2] <= y0 && k[3] >= y1;
+      if (!keepsAll) {
+        draw(0);
+      }
+      if (alpha > 0 && k[1] > k[0]) {
+        gl.enable(gl.BLEND);
+        gl.blendColor(0, 0, 0, alpha);
+        gl.blendFunc(gl.CONSTANT_ALPHA, gl.ONE_MINUS_CONSTANT_ALPHA);
+        draw(1);
+        gl.disable(gl.BLEND);
+      }
     }
     draw(2);
     return [x0, x1, y0, y1];
@@ -808,7 +813,7 @@ export class RelightEngine extends RelightBase {
 
   startTiming(stride, r0, r1, c0, c1) {
     const gl = this.gl;
-    if (!this.timeable(stride, r0, r1, c0, c1)) {
+    if (!this.timeable(stride, r0, r1, c0, c1, Boolean(this.timer))) {
       this.timing.skip = true;
       return;
     }

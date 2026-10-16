@@ -213,3 +213,20 @@ test('model selection budgets every resting pixel within the refinement goal', (
   expect(switchNetwork(small(fullLimit * 0.49 / 3.3), budget)).toBe('128x4');
   expect(switchNetwork(small(fullLimit * 0.51 / 3.3), budget)).toBeNull();
 });
+
+test('elevated DPR steps down under sustained late frames during active lighting work without climbing while working', () => {
+  const q = quality({ dpr: 1.5, dprRange: [1, 2] });
+  for (let i = 0; i < 80; i += 1) {
+    q.worked();
+    q.frame(1 / 24, true, false, { missedSlots: 1 });
+  }
+  expect(q.dpr).toBe(1.25);
+
+  // Even when on-time during active work, DPR does not climb until idle.
+  const qOnTime = quality({ dpr: 1.25, dprRange: [1, 2] });
+  for (let i = 0; i < 200; i += 1) {
+    qOnTime.worked();
+    qOnTime.frame(1 / 24, true, false, { missedSlots: 0 });
+  }
+  expect(qOnTime.dpr).toBe(1.25);
+});

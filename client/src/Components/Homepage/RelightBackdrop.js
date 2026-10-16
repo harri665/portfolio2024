@@ -34,6 +34,7 @@ import {
 import { requestRelightDevice } from './relight/RelightGPU';
 import { RESOLVED, phaseOrder } from './relight/RelightBase';
 import { FILL, REST_DELAY, evaluateRows, fillMatches, fillStep, itemRect, previewStride, refinementProgress } from './relight/lightWork';
+import { boundedDamp, limitMove, readyHandoff, TRUST_DISTANCE, MAX_EVAL_MOVE, HANDOFF_DISTANCE, HANDOFF_SECONDS } from './relight/lightMotion';
 import { advanceCopyClock } from './relight/copyClock';
 import { GPURoomLayer, ROOM_FRAGMENT, RoomLayer } from './relight/roomLayer';
 import { reportRelight } from './relight/report';
@@ -55,7 +56,7 @@ const END_TOP = 0.14;
 const MOVE_EPS = 0.004;
 // world units. a light that moved this far since a pixel was evaluated keeps ~37% of it,
 // further and the image falls back to the coarse evaluation upsampled
-const TRUST_DIST = 0.06;
+const TRUST_DIST = TRUST_DISTANCE;
 const BENCH_TRIES = 6;
 const SCROLL_REST = 0.15;
 // s between looking for where the cards are while the light rests
@@ -102,6 +103,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr, frameInfo }
     () => new URLSearchParams(window.location.search).get('relight') === 'webgl'
   );
 
+  const meshRef = useRef(null);
   const st = useRef(null);
   if (!st.current) {
     const gpu = gpuName(renderer.getContext());
@@ -133,10 +135,20 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr, frameInfo }
       key: makeLight(INTRO_FROM, KEY, 0),
       fill: makeLight(FILL.pos, FILL, 1),
       spares: [],
+      handoff: null,
+      pendingJump: null,
+      handoffs: 0,
+      maxMotionStep: 0,
+      maxMotionBlend: 0,
       targetsAt: -Infinity,
       lastLevels: null,
       panel: null,
       hero: null,
+      heroCache: { vw: 0, vh: 0, size: 0, y: 0 },
+      texVersion: 0,
+      lastTexVersion: -1,
+      uniformSig: '',
+      sceneVersion: 0,
       scrollY: 0,
       scrolledAt: -Infinity,
       gpu,
@@ -184,6 +196,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr, frameInfo }
       dim: { value: 1 },
       saturation: { value: 1 },
       hotKeep: { value: 1 },
+      sharp: { value: 1 },
       glowAt: { value: new THREE.Vector3(0, 0, 0) }, // x, y, radius (px)
       glowColor: { value: new THREE.Vector3(0, 0, 0) },
     }),
@@ -450,6 +463,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr, frameInfo }
     uniforms.dim.value = THREE.MathUtils.lerp(0.72, 0.4, walk);
     uniforms.saturation.value = THREE.MathUtils.lerp(0.8, 0.55, walk);
     uniforms.hotKeep.value = THREE.MathUtils.lerp(1, 0.35, walk);
+    uniforms.sharp.value = state.layer ? 0 : 1;
 
     updateLights(state.panel || document, size, delta);
 
@@ -463,10 +477,12 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr, frameInfo }
     if (!engine) {
       uniforms.ready.value = 0;
       state.layer?.draw(uniforms, vw, vh, roomDpr);
+      syncGlassScene(state, uniforms, meshRef.current);
       return;
     }
     engine.pollTiming();
     fitLayer(state);
+    uniforms.sharp.value = state.layer ? 0 : 1;
     if (!engine.timing.pending) {
       state.benching = false;
     }
@@ -491,10 +507,9 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr, frameInfo }
 
     const { key, fill } = state;
     let aim = REST;
-    const card =
-      progress > 0.3 && state.panel
-        ? state.panel.querySelector(canHover ? `${CARD_SELECTOR}:hover` : `${CARD_SELECTOR}[data-focus]`)
-        : null;
+    const card = state.panel
+      ? state.panel.querySelector(canHover ? `${CARD_SELECTOR}:hover` : `${CARD_SELECTOR}[data-focus]`)
+      : null;
     if (card !== state.card.el) {
       state.card.el = card;
       state.card.uv = null;
@@ -517,20 +532,30 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr, frameInfo }
     aim = [...aim];
     keepInRoom(engine, aim, key.radius);
 
-    if (reduceMotion) {
+    if (state.handoff || state.pendingJump) {
+      // Keep the old evaluated image and its source position together during the swap.
+      key.pos = [...key.evalPos];
+    } else if (reduceMotion && (!key.evalPos || distance(aim, key.evalPos) <= MAX_EVAL_MOVE)) {
       key.pos = [...aim];
     } else {
-      const lambda = state.card.uv ? 6 : 4;
-      key.pos = key.pos.map((v, i) => THREE.MathUtils.damp(v, aim[i], lambda, delta));
+      // Preserve damping between tiny moves, but never let the animated position run
+      // farther than one trusted step ahead of the last completed evaluation.
+      const from = key.evalPos || key.pos;
+      key.pos = boundedDamp(key.pos, aim, reduceMotion ? 100 : state.card.uv ? 6 : 4, delta, Infinity);
+      keepInRoom(engine, key.pos, key.radius);
+      key.pos = limitMove(from, key.pos);
     }
-    keepInRoom(engine, key.pos, key.radius);
 
     const { budget } = quality;
+    const resting = (light) => light.evalPos && distance(light.pos, light.evalPos) <= MOVE_EPS && converged(light);
     if (state.tuning) {
+      if (scrolling || !resting(key) || (key.evalPos && distance(aim, key.evalPos) > MOVE_EPS)) {
+        state.tuneController.abort();
+      }
       state.layer?.draw(uniforms, vw, vh, roomDpr);
+      syncGlassScene(state, uniforms, meshRef.current);
       return;
     }
-    const resting = (light) => light.evalPos && distance(light.pos, light.evalPos) <= MOVE_EPS && converged(light);
     const timed = engine.evalCost(1) !== null;
 
     const bench = timed && !engine.timing.pending && (engine.benchRuns ?? 0) < BENCH_TRIES ? benchStride(engine) : null;
@@ -539,6 +564,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr, frameInfo }
       state.benching = true;
       engine.evaluate({ pos: key.evalPos, radius: key.radius }, fill.slot, bench);
       state.layer?.draw(uniforms, vw, vh, roomDpr);
+      syncGlassScene(state, uniforms, meshRef.current);
       return;
     }
     if (!engine.tuned && timed && age > 3 && !scrolling && resting(key) && resting(fill) && now - key.still > 1) {
@@ -555,33 +581,95 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr, frameInfo }
           }
         });
       state.layer?.draw(uniforms, vw, vh, roomDpr);
+      syncGlassScene(state, uniforms, meshRef.current);
       return;
     }
 
     const view = visibleRect(state.box, vw, vh);
     state.view = view;
+    if (state.pendingJump && distance(aim, state.pendingJump.spare.pos) > TRUST_DIST) {
+      Object.assign(state.pendingJump.spare, { pos: null, evalPos: null, slot: fill.slot, ready: false, rank: Infinity });
+      state.pendingJump = null;
+    }
+    if (state.handoff && distance(aim, state.handoff.spare.pos) > TRUST_DIST) {
+      state.handoff = null;
+    }
+    if (!state.handoff && !state.pendingJump && key.evalPos && distance(aim, key.evalPos) > HANDOFF_DISTANCE) {
+      const spare = readyHandoff(state.spares, aim, view, TRUST_DIST);
+      if (spare) {
+        if (reduceMotion) {
+          takeSpare(key, spare);
+          key.pos = [...key.evalPos];
+        } else {
+          state.handoff = { spare, start: now };
+        }
+        state.handoffs += 1;
+      } else if (reduceMotion && state.spares.length) {
+        // Reduced motion keeps the old image still until a complete destination image is ready.
+        const target = state.spares.find((s) => !s.ready) || state.spares[state.spares.length - 1];
+        Object.assign(target, {
+          pos: [...aim], evalPos: null, rect: null, kept: null, stride: 0,
+          phase: 0, done: 0, next: 0, still: now, refining: false,
+          slot: key.slot, ready: false, rank: Infinity,
+        });
+        state.pendingJump = { spare: target };
+        key.pos = [...key.evalPos];
+      }
+    }
+    const handoff = state.handoff;
+    const handoffMix = handoff ? clamp01((now - handoff.start) / HANDOFF_SECONDS) : 0;
+    if (handoff && handoffMix >= 1) {
+      takeSpare(key, handoff.spare);
+      key.pos = [...key.evalPos];
+      state.handoff = null;
+    }
     // everything from here to endFrame goes to the gpu in one submit
     engine.beginFrame();
     // key light first and the fill gets what it leaves, but half each until the fill has an image
     let worked = false;
-    let left = budget;
-    if (needsWork(key, scrolling, view)) {
-      adopt(key, state.spares, aim);
-      left -= step(engine, key, now, fill.evalPos ? budget : budget / 2, view);
+    const frameBudget = scrolling ? budget * 0.7 : budget;
+    let left = frameBudget;
+    // On a very slow backend, the first key evaluation can exceed the estimated
+    // frame budget. Give the missing fill its own turn instead of starving it.
+    const bootstrapFill = !fill.evalPos && !!key.evalPos;
+    let keyWorked = false;
+    let jumpReady = false;
+    if (!bootstrapFill && state.pendingJump) {
+      const target = state.pendingJump.spare;
+      left -= step(engine, target, now, frameBudget, view, scrolling);
+      if (converged(target)) {
+        target.ready = true;
+        takeSpare(key, target);
+        key.pos = [...key.evalPos];
+        state.pendingJump = null;
+        state.handoffs += 1;
+        jumpReady = true;
+      }
       worked = true;
+    } else if (!bootstrapFill && !state.handoff && needsWork(key, scrolling, view)) {
+      adopt(key, state.spares, aim);
+      const moved = key.evalPos ? distance(key.pos, key.evalPos) : null;
+      if (moved !== null && moved > MOVE_EPS) {
+        state.maxMotionStep = Math.max(state.maxMotionStep, moved);
+        state.maxMotionBlend = Math.max(state.maxMotionBlend, 1 - Math.exp(-moved / TRUST_DIST));
+      }
+      left -= step(engine, key, now, fill.evalPos ? frameBudget : frameBudget / 2, view, scrolling);
+      worked = true;
+      keyWorked = true;
     }
-    if (needsWork(fill, scrolling, view) && fillStep(engine, fill, left, !worked) > 0) {
+    const fillWorked = needsWork(fill, scrolling, view) && fillStep(engine, fill, bootstrapFill ? frameBudget : left, !worked) > 0;
+    if (fillWorked) {
       worked = true;
     }
 
-    let dirty = worked;
+    let dirty = keyWorked || fillWorked || jumpReady || !!handoff;
     if (worked) {
       state.lightingUpdates += 1;
       if (key.refining) state.refinementUpdates += 1;
     }
     // nothing to show changed, so get ready for where the key light goes next
-    if (!worked && !scrolling && !state.upgrading && quality.lateRate.work < 0.05 && progress > 0.3 && state.panel && state.spares.length) {
-      worked = precompute(state, engine, budget, now, view, vw, vh, canHover) > 0;
+    if (!worked && !handoff && !state.pendingJump && !scrolling && !state.upgrading && quality.lateRate.idle < 0.05 && (progress > 0.3 || state.card.el) && state.panel && state.spares.length) {
+      precompute(state, engine, Math.min(budget * 0.5, 8), now, view, vw, vh, canHover);
     }
     const keyLevel = reduceMotion ? clamp01(age / 0.6) : strike(age);
     const fillLevel = easeOutCubic(clamp01((age - 0.2) / 1.4));
@@ -598,7 +686,14 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr, frameInfo }
     // drawn again once the view leaves that, wider while scrolling so it isn't every frame
     if (dirty || !covers(state.drawn, view)) {
       state.drawn = grow(view, dirty ? VIEW_MARGIN : VIEW_GROW);
-      engine.composite([shown(key, KEY.intensity * keyLevel), shown(fill, FILL.intensity * fillLevel)], 1, state.drawn);
+      const keyIntensity = KEY.intensity * keyLevel;
+      const lights = key.evalPos
+        ? handoff && handoffMix < 1
+          ? [shown(key, keyIntensity * (1 - handoffMix)), shown({ ...key, evalPos: handoff.spare.pos, image: handoff.spare.image }, keyIntensity * handoffMix)]
+          : [shown(key, keyIntensity)]
+        : [];
+      if (fill.evalPos) lights.push(shown(fill, FILL.intensity * fillLevel));
+      engine.composite(lights, 1, state.drawn);
       state.glassStale = state.built.present(state.layer, uniforms.texSize.value);
     }
     if (state.glassStale && now - state.glassAt + 1e-9 >= GLASS_EVERY) {
@@ -609,7 +704,10 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr, frameInfo }
 
     // soft bloom, the tonemap flattens the key light otherwise
     if (key.evalPos) {
-      const p = engine.project(key.evalPos);
+      const glowPos = state.handoff
+        ? key.evalPos.map((value, i) => THREE.MathUtils.lerp(value, state.handoff.spare.pos[i], handoffMix))
+        : key.evalPos;
+      const p = engine.project(glowPos);
       const { left, top, size: s } = state.box;
       uniforms.glowAt.value.set(left + p.u * s, top + p.v * s, (key.radius / (p.z * 2 * engine.cam.tx)) * s);
       const glow = THREE.MathUtils.lerp(0.9, 0.45, walk) * keyLevel;
@@ -618,6 +716,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr, frameInfo }
     uniforms.ready.value = clamp01(age / 0.5);
     state.layer?.draw(uniforms, vw, vh, roomDpr);
     engine.endFrame();
+    syncGlassScene(state, uniforms, meshRef.current);
 
     if (now - state.publishedAt > PUBLISH_EVERY) {
       state.publishedAt = now;
@@ -630,7 +729,7 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr, frameInfo }
   });
 
   return (
-    <mesh frustumCulled={false}>
+    <mesh ref={meshRef} frustumCulled={false}>
       <planeGeometry args={[2, 2]} />
       <shaderMaterial
         uniforms={uniforms}
@@ -643,16 +742,41 @@ export default function RelightBackdrop({ onProgress, onFail, onDpr, frameInfo }
   );
 }
 
+function syncGlassScene(state, uniforms, mesh) {
+  if (!mesh) {
+    return;
+  }
+  const copies = uniforms.tRelight.value?.userData?.copies ?? 0;
+  const b = uniforms.box.value;
+  const g = uniforms.glowAt.value;
+  const c = uniforms.glowColor.value;
+  const v = uniforms.viewport.value;
+  const sig = `${copies}:${uniforms.dpr.value}:${v.x}:${v.y}:${b.x.toFixed(2)}:${b.y.toFixed(2)}:${b.z.toFixed(2)}:${uniforms.ready.value.toFixed(3)}:${uniforms.sharp.value}:${g.x.toFixed(1)}:${g.y.toFixed(1)}:${g.z.toFixed(1)}:${c.x.toFixed(3)}`;
+  if (sig !== state.uniformSig) {
+    state.uniformSig = sig;
+    state.sceneVersion += 1;
+    mesh.userData.sceneVersion = state.sceneVersion;
+  }
+}
+
 function phoneHero(state, vw, vh) {
   if (!state.hero?.isConnected) {
     state.hero = document.querySelector(HERO_SELECTOR);
+    state.heroCache.vw = 0;
   }
   if (!state.hero) {
     return [Math.min(vw * 1.12, vh * 0.6), vh * 0.44];
   }
-  const bottom = state.hero.getBoundingClientRect().bottom + window.scrollY;
-  const space = Math.max(bottom - NAV_CLEAR, vh * 0.4);
-  return [Math.min(vw * 1.2, space), NAV_CLEAR + space / 2];
+  const cache = state.heroCache;
+  if (cache.vw !== vw || cache.vh !== vh) {
+    const bottom = state.hero.getBoundingClientRect().bottom + window.scrollY;
+    const space = Math.max(bottom - NAV_CLEAR, vh * 0.4);
+    cache.vw = vw;
+    cache.vh = vh;
+    cache.size = Math.min(vw * 1.2, space);
+    cache.y = NAV_CLEAR + space / 2;
+  }
+  return [cache.size, cache.y];
 }
 
 function publish(state) {
@@ -690,6 +814,7 @@ function statusOf(state) {
   const round = (x) => (x === null ? null : Number(x.toFixed(1)));
   return {
     phase: 'running',
+    progress: round(state.progress),
     backend: engine.backend,
     notGPU: engine.backend === 'webgpu' ? null : state.notGPU,
     half: !!engine.half,
@@ -710,6 +835,14 @@ function statusOf(state) {
     roomDpr: state.roomDpr,
     shownPx: Math.round(state.shownPx),
     refining: refinementProgress(state.key, engine),
+    preparingJump: !!state.pendingJump,
+    motionStep: state.key.lastMove == null ? null : Number(state.key.lastMove.toFixed(3)),
+    motionBlend: state.key.lastAlpha == null ? null : Number(state.key.lastAlpha.toFixed(2)),
+    maxMotionStep: Number(state.maxMotionStep.toFixed(3)),
+    maxMotionBlend: Number(state.maxMotionBlend.toFixed(2)),
+    handoffs: state.handoffs,
+    sparesReady: state.spares.filter((spare) => spare.ready).length,
+    spareCandidates: state.spares.filter((spare) => spare.rank < Infinity).length,
     converged: converged(state.key) && converged(state.fill),
     fillPrepared: state.fillPrepared,
     lightingUpdates: state.lightingUpdates,
@@ -778,6 +911,7 @@ function withTexture({ engine, notGPU, fill }) {
     const previous = texture.image;
     texture.image = image;
     texture.needsUpdate = true;
+    texture.userData.copies = (texture.userData.copies || 0) + 1;
     texSize.set(image.width, image.height);
     if (previous !== image) {
       release(previous);
@@ -796,9 +930,18 @@ function withTexture({ engine, notGPU, fill }) {
         return true;
       }
       const image = engine.snapshot();
-      take(image, texSize);
-      layer?.setImage(image);
-      return false;
+      if (!layer) {
+        take(image, texSize);
+        return false;
+      }
+      layer.setImage(image);
+      if (!engine.halfImage) {
+        // WebGL has no separate half-size copy. Reuse this snapshot for the glass too.
+        take(image, texSize);
+        return false;
+      }
+      release(image);
+      return true;
     },
     // the three.js copy only shows through the glass, blurred, so half size and at a lower rate
     copyGlass: (texSize) => engine.halfImage((image) => take(image, texSize)),
@@ -820,7 +963,7 @@ function install(state, built, uniforms) {
   uniforms.tRelight.value = built.texture;
   uniforms.texSize.value.set(built.engine.W, built.engine.H);
   [state.key, state.fill].forEach((light, i) =>
-    Object.assign(light, { image: i, evalPos: null, rect: null, kept: null, stride: 0, phase: 0, done: 0, next: 0, refining: false })
+    Object.assign(light, { image: i, evalPos: null, rect: null, kept: null, stride: 0, phase: 0, done: 0, next: 0, refining: false, lastMove: null, lastAlpha: null })
   );
   if (fillMatches(built.fill, built.engine)) {
     const preparedFill = { ...built.fill };
@@ -842,6 +985,8 @@ function install(state, built, uniforms) {
     rank: Infinity,
   }));
   state.targetsAt = -Infinity;
+  state.handoff = null;
+  state.pendingJump = null;
   state.lastLevels = null;
   state.glassStale = false;
   state.drawn = null;
@@ -891,7 +1036,7 @@ function needsWork(light, scrolling, view) {
 // each evaluation takes every stride-th pixel from a different place in the stride x stride block
 // and folds it into the light's image. at rest that's every pixel after stride^2 of them, moving
 // it keeps pixels evaluated while the light was close to where it is now
-function step(engine, light, now, budget, view) {
+function step(engine, light, now, budget, view, scrolling = false) {
   const moved = light.evalPos ? distance(light.pos, light.evalPos) : Infinity;
   const fresh = moved > MOVE_EPS;
   const rect = fresh || !covers(light.rect, view) ? grow(view, fresh ? VIEW_MARGIN : VIEW_GROW) : light.rect;
@@ -918,6 +1063,8 @@ function step(engine, light, now, budget, view) {
   let alpha = 0;
   if (fresh) {
     alpha = Number.isFinite(moved) ? 1 - Math.exp(-moved / TRUST_DIST) : 1;
+    light.lastMove = Number.isFinite(moved) ? moved : null;
+    light.lastAlpha = alpha;
     light.evalPos = [...light.pos];
     light.still = now;
   }
@@ -927,7 +1074,8 @@ function step(engine, light, now, budget, view) {
   // goes on more phases, never more than the cycle has left
   // Each phase also resolves the full covered area; do not fill spare budget with
   // dozens of unmeasured resolves when inference happens to be cheap.
-  const phases = Math.max(1, Math.min(2, Math.floor(budget / Math.max(each, 0.001)), stride ** 2 - light.done));
+  const maxPhases = fresh || scrolling ? 1 : 2;
+  const phases = Math.max(1, Math.min(maxPhases, Math.floor(budget / Math.max(each, 0.001)), stride ** 2 - light.done));
   const order = phaseOrder(stride);
   const items = itemRect(engine, rect, stride);
   for (let i = 0; i < phases; i += 1) {
@@ -942,7 +1090,7 @@ function step(engine, light, now, budget, view) {
   return each * phases;
 }
 
-// a light that comes within TRUST_DIST of an image evaluated ahead for where it's going starts from
+// a light that comes within one trusted movement step of an image evaluated ahead starts from
 // that instead of what it brought from further away. only where it's going, or a light resting
 // next to one would trade its own image for it on the first nudge. swapped, so nothing's copied
 function adopt(light, spares, aim) {
@@ -952,16 +1100,29 @@ function adopt(light, spares, aim) {
   let best = null;
   spares.forEach((spare) => {
     const d = spare.ready && distance(aim, spare.pos) <= TRUST_DIST ? distance(light.pos, spare.pos) : Infinity;
-    if (d <= TRUST_DIST && (!best || d < distance(light.pos, best.pos))) {
+    if (d <= MAX_EVAL_MOVE && (!best || d < distance(light.pos, best.pos))) {
       best = spare;
     }
   });
   if (!best) {
     return;
   }
+  takeSpare(light, best);
+}
+
+function takeSpare(light, best) {
   [light.image, best.image] = [best.image, light.image];
-  Object.assign(light, { evalPos: best.pos, rect: best.rect, kept: best.kept, done: 0 });
-  Object.assign(best, { pos: null, rect: null, kept: null, next: 0, ready: false, rank: Infinity });
+  Object.assign(light, {
+    evalPos: best.pos,
+    rect: best.rect,
+    kept: best.kept,
+    stride: 1,
+    phase: 0,
+    done: 1,
+    next: best.next,
+    refining: false,
+  });
+  Object.assign(best, { pos: null, evalPos: null, rect: null, kept: null, stride: 0, phase: 0, done: 0, next: 0, slot: 1, ready: false, rank: Infinity });
 }
 
 // only on frames nothing else needs, a band of rows at a time into the likeliest spare not done yet

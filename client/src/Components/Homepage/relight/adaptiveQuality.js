@@ -78,7 +78,9 @@ export class AdaptiveQuality {
     }
     this.budget = clamp(this.budget, BUDGET_MIN, this.budgetMax);
 
-    return !recent && settled ? this.judgeDpr(late, delta * 1000) : null;
+    return settled && (!recent || this.dpr > this.dprMin)
+      ? this.judgeDpr(late, delta * 1000, !recent)
+      : null;
   }
 
   worked() {
@@ -123,7 +125,7 @@ export class AdaptiveQuality {
     return next;
   }
 
-  judgeDpr(late, elapsedMs) {
+  judgeDpr(late, elapsedMs, allowUp = true) {
     const w = this.window;
     if (w.settle > 0) {
       w.settle -= elapsedMs;
@@ -145,7 +147,7 @@ export class AdaptiveQuality {
         this.failedDpr = Math.min(this.failedDpr, this.dpr);
         next = Math.max(this.dprMin, this.dpr - DPR_STEP);
       }
-    } else if (rate < DPR_KEEP) {
+    } else if (allowUp && rate < DPR_KEEP) {
       w.good += 1;
       const up = Math.min(this.dprMax, this.dpr + DPR_STEP);
       if (w.good >= 2 && up > this.dpr && up < this.failedDpr) {

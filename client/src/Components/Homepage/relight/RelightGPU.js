@@ -401,7 +401,7 @@ struct Frame {
 @group(0) @binding(2) var<storage, read> ppos: array<vec2u>;
 ${mul ? '@group(0) @binding(3) var<storage, read> pnrm: array<vec2u>;' : ''}
 const W = ${u(W)}; const H = ${u(H)}; const NP = ${u(W * H)};
-${GEO_WGSL}
+  const PI = 3.14159265358979;
 ${POS_WGSL}
 ${mul ? NRM_WGSL : ''}
 struct Net { a: vec3f, b: vec3f };
@@ -411,10 +411,9 @@ fn camDir(uv: vec2f) -> vec3f {
     + frame.camY.xyz * ((0.5 - uv.y) * 2.0 * frame.tanxy.y) + frame.camZ.xyz);
 }
 // 4x4 supersampled
-fn directCov(p: u32, l: u32) -> f32 {
+fn directCov(p: u32, g: vec4f, l: u32) -> f32 {
   let L = frame.lights[l];
   let c = L.pr.xyz; let r = L.pr.w;
-  let g = posAt(p);
   let surf = select(1e9, g.w, g.w > 0.0);
   let oc = frame.camO.xyz - c;
   let px = f32(p % W); let py = f32(p / W);
@@ -447,13 +446,23 @@ fn outAt(i: u32) -> Net {
 }
 // previews upsample weighted by position so light doesn't bleed across edges. G is
 // computed per pixel so a preview keeps the light's shape, not just its colour
-fn lit(n: Net, p: u32, light: vec4f) -> vec3f {
+fn lit(n: Net, g: vec4f, nrm: vec3f, light: vec4f) -> vec3f {
   ${mul
-    ? `let G = geoFeatures(posAt(p), nrmAt(p), light).f1.z;
+    ? `var G = 0.0;
+  if (g.w > 0.0) {
+    let v = light.xyz - g.xyz;
+    let d = max(length(v), 1e-4);
+    let cs = dot(nrm, v / d);
+    if (cs > 0.0) {
+      let s = min(light.w / d, 1.0);
+      let om = 2.0 * PI * s * s / (1.0 + sqrt(max(1.0 - s * s, 0.0)));
+      G = om * cs / PI;
+    }
+  }
   return max(n.a * G + n.b, vec3f(0.0));`
     : 'return max(n.a, vec3f(0.0));'}
 }
-fn netAt(slot: u32, s: u32, p: u32) -> Net {
+fn netAt(slot: u32, s: u32, p: u32, g: vec4f) -> Net {
   let base = slot * NP;
   if (s <= 1u) { return outAt(base + p); }
   let cw = (W + s - 1u) / s; let ch = (H + s - 1u) / s;
@@ -461,7 +470,6 @@ fn netAt(slot: u32, s: u32, p: u32) -> Net {
   let x0 = min(u32(fx), cw - 1u); let y0 = min(u32(fy), ch - 1u);
   let x1 = min(x0 + 1u, cw - 1u); let y1 = min(y0 + 1u, ch - 1u);
   let tx = fx - f32(x0); let ty = fy - f32(y0);
-  let g = posAt(p);
   let sig = 1.5 * f32(s) * 2.0 * frame.tanxy.x / f32(W) * max(g.w, 1e-3);
   var acc = Net(vec3f(0.0), vec3f(0.0)); var ws = 0.0;
   for (var k = 0u; k < 4u; k++) {
@@ -490,10 +498,12 @@ fn srgb(c: vec3f) -> vec3f {
 }
 @fragment fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   let p = (H - 1u - min(u32(pos.y), H - 1u)) * W + min(u32(pos.x), W - 1u);
+  let g = posAt(p);
+  ${mul ? 'let nrm = nrmAt(p);' : 'let nrm = vec3f(0.0);'}
   var I = vec3f(0.0);
   for (var l = 0u; l < frame.nLights; l++) {
     let L = frame.lights[l];
-    I += L.e.xyz * (lit(netAt(L.info.x, L.info.y, p), p, L.pr) + select(0.0, directCov(p, l), L.info.z != 0u));
+    I += L.e.xyz * (lit(netAt(L.info.x, L.info.y, p, g), g, nrm, L.pr) + select(0.0, directCov(p, g, l), L.info.z != 0u));
   }
   return vec4f(clamp(srgb(tone(I)), vec3f(0.0), vec3f(1.0)), 1.0);
 }
@@ -524,7 +534,7 @@ function resolveWGSL({ W, H, mul }) {
 struct Res {
   s: u32, px: u32, py: u32, raw: u32, dst: u32, c0: u32, c1: u32, r0: u32,
   r1: u32, x0: u32, y0: u32, xw: u32, yh: u32, k0x: u32, k0y: u32, k1x: u32,
-  k1y: u32, alpha: f32, sig: f32, _p: u32,
+  k1y: u32, alpha: f32, sig: f32, sparse: u32,
 };
 @group(0) @binding(0) var<uniform> ru: Res;
 @group(0) @binding(1) var<storage, read_write> outB: array<u32>;
@@ -541,17 +551,30 @@ fn store(i: u32, w: array<vec2f, ${NW}>) {
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3u) {
-  if (gid.x >= ru.xw * ru.yh) { return; }
-  let x = ru.x0 + gid.x % ru.xw; let y = ru.y0 + gid.x / ru.xw;
-  let p = y * W + x;
   let s = ru.s;
   let cw = (W + s - 1u) / s;
   let raw = ru.raw * NP;
+  var w: array<vec2f, ${NW}>;
+  if (ru.sparse != 0u) {
+    let gw = ru.c1 - ru.c0;
+    let gh = ru.r1 - ru.r0;
+    if (gid.x >= gw * gh) { return; }
+    let cx = ru.c0 + gid.x % gw;
+    let cy = ru.r0 + gid.x / gw;
+    let x = cx * s + ru.px;
+    let y = cy * s + ru.py;
+    if (x >= W || y >= H) { return; }
+    load(raw + cy * cw + cx, &w);
+    store(ru.dst * NP + y * W + x, w);
+    return;
+  }
+  if (gid.x >= ru.xw * ru.yh) { return; }
+  let x = ru.x0 + gid.x % ru.xw; let y = ru.y0 + gid.x / ru.xw;
+  let p = y * W + x;
   let dst = ru.dst * NP + p;
   // last column/row whose pixel is on the image
   let hx = max(min(ru.c1 - 1u, (W - 1u - ru.px) / s), ru.c0);
   let hy = max(min(ru.r1 - 1u, (H - 1u - ru.py) / s), ru.r0);
-  var w: array<vec2f, ${NW}>;
   if (x >= ru.px && y >= ru.py) {
     let dx = x - ru.px; let dy = y - ru.py;
     let cx = dx / s; let cy = dy / s;
@@ -890,23 +913,25 @@ export class RelightGPUEngine extends RelightBase {
     this.timing = { ...timing, pending: {} };
     const times = {};
     let best = null;
-    // compiled side by side, and a gpu can refuse one
-    const pipelines = this.kernels.map((k) =>
-      kernelKey(k) === kernelKey(this.kernel) ? this.forward : this.forwardPipeline(k).catch(() => null)
-    );
     try {
-      for (const [i, k] of this.kernels.entries()) {
+      for (const k of this.kernels) {
         if (signal?.aborted) {
           break;
         }
-        const pipeline = await pipelines[i];
-        if (!pipeline) {
+        const pipeline =
+          kernelKey(k) === kernelKey(this.kernel)
+            ? this.forward
+            : await this.forwardPipeline(k).catch(() => null);
+        if (!pipeline || signal?.aborted) {
           continue;
         }
         this.setKernel(k, pipeline);
         // first run sets up the pipeline
         this.evaluate(light, slot, stride);
         await done();
+        if (signal?.aborted) {
+          break;
+        }
         const t0 = performance.now();
         for (let i = 0; i < runs; i += 1) {
           this.evaluate(light, slot, stride);
@@ -1015,8 +1040,9 @@ export class RelightGPUEngine extends RelightBase {
         this.b0[c] + w[c * 4] * ln[0] + w[c * 4 + 1] * ln[1] + w[c * 4 + 2] * ln[2] + w[c * 4 + 3] * ln[3];
     }
 
-    const timed = this.timeable(stride, r0, r1, c0, c1);
-    const stamped = timed && this.querySet && this.readBuf.mapState === 'unmapped';
+    const canStamp = Boolean(this.querySet && this.readBuf.mapState === 'unmapped');
+    const timed = this.timeable(stride, r0, r1, c0, c1, canStamp);
+    const stamped = timed && canStamp;
     // without timestamps the queue emptying times it, so it goes in a submit of its own
     const alone = timed && !stamped;
     if (alone) {
@@ -1058,16 +1084,20 @@ export class RelightGPUEngine extends RelightBase {
       return null;
     }
     const k = keep && alpha < 1 ? keep : [0, 0, 0, 0];
+    const keepsAll = k[0] <= x0 && k[1] >= x1 && k[2] <= y0 && k[3] >= y1;
+    const sparse = (stride === 1 && phase[0] === 0 && phase[1] === 0) || (alpha <= 0 && keepsAll) ? 1 : 0;
     const R = this.resU32;
     R.set([stride, phase[0], phase[1], slot, SLOTS - RESOLVED + target, c0, c1, r0, r1, x0, y0, x1 - x0, y1 - y0]);
     R.set([k[0], k[2], k[1], k[3]], 13);
     this.resF32[17] = alpha;
     this.resF32[18] = (1.5 * 2 * this.cam.tx) / this.W;
+    R[19] = sparse;
     const at = this.stage(R);
     const pass = this.encoder().beginComputePass();
     pass.setPipeline(this.resolvePipeline);
     pass.setBindGroup(0, this.resolveGroup, [at]);
-    pass.dispatchWorkgroups(Math.ceil(((x1 - x0) * (y1 - y0)) / 64));
+    const items = sparse ? (c1 - c0) * (r1 - r0) : (x1 - x0) * (y1 - y0);
+    pass.dispatchWorkgroups(Math.ceil(items / 64));
     pass.end();
     this.commit();
     return [x0, x1, y0, y1];

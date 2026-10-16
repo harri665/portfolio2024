@@ -26,3 +26,22 @@ test('unknown strides use nearby samples and reject negative fixed or per-pixel 
   expect(cost({ 1: 10, 4: 0.5 }, 2)).toBeCloseTo(2.575);
   expect(cost({ 1: NaN, 2: -1, 4: 0 }, 8)).toBeNull();
 });
+
+test('software timing measures initial samples then throttles to periodic checks while hardware timing runs every pass', () => {
+  const base = Object.create(RelightBase.prototype);
+  base.W = 512;
+  base.H = 512;
+  base.timing = { byStride: {}, counts: {}, pending: null, seeded: false, ticks: 0 };
+
+  for (let i = 0; i < 3; i += 1) {
+    expect(base.timeable(4, 0, 128, 0, 128, false)).toBe(true);
+    base.recordTiming(4, 1, 2.5);
+  }
+  // Once calibrated with 3 samples, software timing skips 23 out of 24 passes.
+  for (let i = 0; i < 23; i += 1) {
+    expect(base.timeable(4, 0, 128, 0, 128, false)).toBe(false);
+  }
+  expect(base.timeable(4, 0, 128, 0, 128, false)).toBe(true);
+  // Hardware timestamp queries remain enabled on every pass.
+  expect(base.timeable(4, 0, 128, 0, 128, true)).toBe(true);
+});

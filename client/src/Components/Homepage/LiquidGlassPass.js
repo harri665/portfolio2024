@@ -64,11 +64,17 @@ export default function LiquidGlassPass({
     [mipmaps]
   );
   const radii = useRef(new WeakMap());
+  const paneMeta = useRef(new WeakMap());
   const strengths = useRef(new WeakMap());
   const hovers = useRef(new WeakMap());
   const text = useRef({ el: null, observer: null, texture: null, pad: 0, ready: false });
   const images = useRef(new Map());
   const fits = useRef(new WeakMap());
+  const renderedScene = useRef({ version: -1, width: 0, height: 0, hasMips: false });
+  const canHover = useMemo(
+    () => window.matchMedia?.('(hover: hover) and (pointer: fine)').matches ?? true,
+    []
+  );
 
   const pass = useMemo(() => {
     const emptyText = new THREE.DataTexture(new Uint8Array(4), 1, 1);
@@ -93,6 +99,7 @@ export default function LiquidGlassPass({
         adapt: { value: 0 },
         paneHover: { value: new Array(MAX_PANES).fill(0) },
         panes: { value: Array.from({ length: MAX_PANES }, () => new THREE.Vector4()) },
+        panesBounds: { value: new THREE.Vector4(0, 0, 0, 0) },
         paneRadii: { value: new Array(MAX_PANES).fill(0) },
         paneOpacity: { value: new Array(MAX_PANES).fill(1) },
         paneStrength: { value: new Array(MAX_PANES).fill(1) },
@@ -166,6 +173,8 @@ export default function LiquidGlassPass({
   useEffect(() => {
     target.setSize(Math.round(size.width * dpr), Math.round(size.height * dpr));
     mipsMissing.current = true;
+    renderedScene.current.version = -1;
+    renderedScene.current.hasMips = false;
   }, [target, size.width, size.height, dpr]);
 
   useEffect(() => {
@@ -255,6 +264,10 @@ export default function LiquidGlassPass({
 
     let count = 0;
     let anyHover = false;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
     const placed = new Map();
     if (selector) {
       document.querySelectorAll(selector).forEach((el) => {
@@ -270,9 +283,39 @@ export default function LiquidGlassPass({
           radius = parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0;
           radii.current.set(el, radius);
         }
+        let meta = paneMeta.current.get(el);
+        if (meta === undefined) {
+          const thick = parseFloat(el.dataset.liquidGlass);
+          const split = parseFloat(el.dataset.glassSplit);
+          const bezel = parseFloat(el.dataset.glassBezel);
+          const merge = parseFloat(el.dataset.glassMerge);
+          const tint = parseFloat(el.dataset.glassTint);
+          const paneFrost = parseFloat(el.dataset.glassFrost);
+          const paneHaze = parseFloat(el.dataset.glassHaze);
+          meta = {
+            thick,
+            hasLens: el.hasAttribute('data-glass-lens'),
+            hasHover: el.hasAttribute('data-glass-hover'),
+            bevel: el.hasAttribute('data-glass-bevel') ? 1 : 0,
+            split: Number.isNaN(split) ? 1 : split,
+            bezel: Number.isNaN(bezel) ? 1 : bezel,
+            merge: Number.isNaN(merge) ? 0 : merge,
+            tint: Number.isNaN(tint) ? 0 : tint,
+            frost: Number.isNaN(paneFrost) ? -1 : paneFrost,
+            haze: Number.isNaN(paneHaze) ? -1 : paneHaze,
+          };
+          paneMeta.current.set(el, meta);
+        }
+        const pxX = rect.left - canvasRect.left;
+        const pxY = rect.top - canvasRect.top;
+        const pad = meta.merge > 0.5 ? 46 : 2;
+        if (pxX - pad < minX) minX = pxX - pad;
+        if (pxY - pad < minY) minY = pxY - pad;
+        if (pxX + rect.width + pad > maxX) maxX = pxX + rect.width + pad;
+        if (pxY + rect.height + pad > maxY) maxY = pxY + rect.height + pad;
         uniforms.panes.value[count].set(
-          rect.left - canvasRect.left + rect.width / 2,
-          rect.top - canvasRect.top + rect.height / 2,
+          pxX + rect.width / 2,
+          pxY + rect.height / 2,
           rect.width / 2,
           rect.height / 2
         );
@@ -281,15 +324,14 @@ export default function LiquidGlassPass({
         uniforms.paneOpacity.value[count] = Number.isNaN(opacity) ? 1 : opacity;
         placed.set(el, count);
         // data-liquid-glass="1.8" is thicker glass, but only while hovered unless data-glass-lens
-        const thick = parseFloat(el.dataset.liquidGlass);
-        const active = el.matches(':hover') || el.hasAttribute('data-focus');
-        const lens = active || el.hasAttribute('data-glass-lens');
-        const target = !Number.isNaN(thick) && lens ? thick : 1;
+        const active = (canHover && el.matches(':hover')) || el.hasAttribute('data-focus');
+        const lens = active || meta.hasLens;
+        const target = !Number.isNaN(meta.thick) && lens ? meta.thick : 1;
         const current = strengths.current.get(el) ?? 1;
         const strength = current + (target - current) * (1 - Math.exp(-delta * 10));
         strengths.current.set(el, strength);
         uniforms.paneStrength.value[count] = strength;
-        if (hover && el.hasAttribute('data-glass-hover')) {
+        if (hover && meta.hasHover) {
           const was = hovers.current.get(el) ?? 0;
           const now = was + ((active ? 1 : 0) - was) * (1 - Math.exp(-delta * 8));
           hovers.current.set(el, now);
@@ -298,25 +340,21 @@ export default function LiquidGlassPass({
         } else {
           uniforms.paneHover.value[count] = 0;
         }
-        const split = parseFloat(el.dataset.glassSplit);
-        const bezel = parseFloat(el.dataset.glassBezel);
-        uniforms.paneGlass.value[count].set(
-          Number.isNaN(split) ? 1 : split,
-          Number.isNaN(bezel) ? 1 : bezel
-        );
-        const merge = parseFloat(el.dataset.glassMerge);
-        const tint = parseFloat(el.dataset.glassTint);
-        uniforms.paneMerge.value[count] = Number.isNaN(merge) ? 0 : merge;
-        uniforms.paneTint.value[count] = Number.isNaN(tint) ? 0 : tint;
-        uniforms.paneBevel.value[count] = el.hasAttribute('data-glass-bevel') ? 1 : 0;
-        const paneFrost = parseFloat(el.dataset.glassFrost);
-        const paneHaze = parseFloat(el.dataset.glassHaze);
-        uniforms.paneFrost.value[count] = Number.isNaN(paneFrost) ? -1 : paneFrost;
-        uniforms.paneHaze.value[count] = Number.isNaN(paneHaze) ? -1 : paneHaze;
+        uniforms.paneGlass.value[count].set(meta.split, meta.bezel);
+        uniforms.paneMerge.value[count] = meta.merge;
+        uniforms.paneTint.value[count] = meta.tint;
+        uniforms.paneBevel.value[count] = meta.bevel;
+        uniforms.paneFrost.value[count] = meta.frost;
+        uniforms.paneHaze.value[count] = meta.haze;
         count += 1;
       });
     }
     uniforms.paneCount.value = count;
+    if (count > 0) {
+      uniforms.panesBounds.value.set(minX, minY, maxX, maxY);
+    } else {
+      uniforms.panesBounds.value.set(0, 0, 0, 0);
+    }
 
     const textState = text.current;
     if (textSelector && !textState.el?.isConnected) {
@@ -340,14 +378,33 @@ export default function LiquidGlassPass({
       uniforms.textOpacity.value = 0;
     }
 
-    // only rebuild mips while something's hovered (or they're missing)
-    const buildMips = mipmaps && (anyHover || mipsMissing.current);
-    target.texture.generateMipmaps = buildMips;
-    if (buildMips) mipsMissing.current = false;
-    gl.setRenderTarget(target);
-    gl.render(scene, camera);
-    if (imageSelector && selector) {
-      drawImages(canvasRect, placed);
+    const sceneVersion =
+      scene.children.length === 1 && !imageSelector
+        ? scene.children[0].userData?.sceneVersion
+        : undefined;
+    const rs = renderedScene.current;
+    const sameScene =
+      sceneVersion !== undefined &&
+      rs.version === sceneVersion &&
+      rs.width === target.width &&
+      rs.height === target.height &&
+      !mipsMissing.current &&
+      (!mipmaps || !anyHover || rs.hasMips);
+
+    if (!sameScene) {
+      // only rebuild mips while something's hovered (or they're missing)
+      const buildMips = mipmaps && (anyHover || mipsMissing.current);
+      target.texture.generateMipmaps = buildMips;
+      if (buildMips) mipsMissing.current = false;
+      gl.setRenderTarget(target);
+      gl.render(scene, camera);
+      if (imageSelector && selector) {
+        drawImages(canvasRect, placed);
+      }
+      rs.version = sceneVersion ?? -1;
+      rs.width = target.width;
+      rs.height = target.height;
+      rs.hasMips = buildMips || (rs.version === sceneVersion && rs.hasMips);
     }
     gl.setRenderTarget(null);
     gl.render(pass.scene, pass.camera);
@@ -629,6 +686,7 @@ const passFragmentShader = (blurTaps) => `
   uniform float adapt;
   uniform float paneHover[MAX_PANES];
   uniform vec4 panes[MAX_PANES];
+  uniform vec4 panesBounds;
   uniform float paneRadii[MAX_PANES];
   uniform float paneOpacity[MAX_PANES];
   uniform float paneStrength[MAX_PANES];
@@ -793,29 +851,30 @@ const passFragmentShader = (blurTaps) => `
     vec2 px = vec2(vUv.x, 1.0 - vUv.y) * viewport;
     vec4 color = glassOnly > 0.5 ? vec4(0.0) : texture2D(tScene, vUv);
 
+    bool inPanes = paneCount > 0 &&
+      px.x >= panesBounds.x && px.y >= panesBounds.y &&
+      px.x <= panesBounds.z && px.y <= panesBounds.w;
+
     for (int i = 0; i < MAX_PANES; i++) {
-      if (i >= paneCount) break;
+      if (!inPanes || i >= paneCount) break;
 
       // merged group is drawn once, by its first pane
       float group = paneMerge[i];
-      bool drawn = false;
-      if (group > 0.5) {
+      if (group < 0.5) {
+        vec2 dBox = abs(px - panes[i].xy) - panes[i].zw;
+        if (dBox.x > 1.0 || dBox.y > 1.0) continue;
+      } else {
+        bool drawn = false;
         for (int j = 0; j < MAX_PANES; j++) {
           if (j >= i) break;
           if (abs(paneMerge[j] - group) < 0.5) drawn = true;
         }
+        if (drawn) continue;
       }
-      if (drawn) continue;
 
       float r = paneRadii[i];
       float d = paneDistance(px, i, group);
       if (d > 1.0) continue;
-
-      vec2 e = vec2(0.5, 0.0);
-      vec2 normal = normalize(vec2(
-        paneDistance(px + e.xy, i, group) - paneDistance(px - e.xy, i, group),
-        paneDistance(px + e.yx, i, group) - paneDistance(px - e.yx, i, group)
-      ) + 1e-5);
 
       // flat middle, steep rim. thick panes act like a lens and pull in from past the edge instead
       float strength = paneStrength[i];
@@ -826,9 +885,18 @@ const passFragmentShader = (blurTaps) => `
       float bezel = clamp(r * 1.15, 14.0, 34.0) * strength * paneGlass[i].y * swell;
       float rim = rimCap > 0.0 ? min(bezel, min(panes[i].z, panes[i].w) * rimCap) : bezel;
       float t = clamp(-d / rim, 0.0, 1.0);
-      float bend = pow(1.0 - t, 2.4);
-      float reach = mix(-0.7, 0.24, lens);
-      vec2 offset = normal * reach * bend * bezel;
+      vec2 normal = vec2(0.0);
+      vec2 offset = vec2(0.0);
+      if (t < 1.0 || corner > 0.001 || group > 0.5) {
+        vec2 e = vec2(0.5, 0.0);
+        normal = normalize(vec2(
+          paneDistance(px + e.xy, i, group) - paneDistance(px - e.xy, i, group),
+          paneDistance(px + e.yx, i, group) - paneDistance(px - e.yx, i, group)
+        ) + 1e-5);
+        float bend = pow(1.0 - t, 2.4);
+        float reach = mix(-0.7, 0.24, lens);
+        offset = normal * reach * bend * bezel;
+      }
 
       float hovered = paneHover[i];
       float widen = 1.0 + hoverFrost * hovered;
