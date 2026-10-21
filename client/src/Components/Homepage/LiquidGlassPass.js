@@ -10,6 +10,20 @@ import { apiUrl } from '../../utils/api';
 // enough for every gallery card on screen at once
 const MAX_PANES = 16;
 
+// the attributes cached per pane
+const PANE_ATTRIBUTES = [
+  'data-liquid-glass',
+  'data-glass-lens',
+  'data-glass-hover',
+  'data-glass-bevel',
+  'data-glass-split',
+  'data-glass-bezel',
+  'data-glass-merge',
+  'data-glass-tint',
+  'data-glass-frost',
+  'data-glass-haze',
+];
+
 let mountedPasses = 0;
 
 // shared per frame so the project page's two canvases ripple in sync
@@ -183,6 +197,18 @@ export default function LiquidGlassPass({
     };
     window.addEventListener('resize', reset);
     return () => window.removeEventListener('resize', reset);
+  }, []);
+
+  // pane settings are cached, so drop a pane's entry when its attributes change (the glass page's sliders)
+  useEffect(() => {
+    const observer = new MutationObserver((records) => {
+      records.forEach((record) => paneMeta.current.delete(record.target));
+    });
+    observer.observe(document.body, {
+      subtree: true,
+      attributeFilter: PANE_ATTRIBUTES,
+    });
+    return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
