@@ -46,14 +46,14 @@ Getting sand to work was the hardest part of the project. With elasticity alone,
 
 1. **Split F with an SVD** into a rotation, three stretches, and another rotation. Yielding only depends on the stretches. GLSL doesn't have an SVD, so I wrote one with Jacobi rotations.
 2. **Take the log of the stretches**, so that stretching to 2× and squashing to 0.5× count as equal and opposite.
-3. **Check the friction cone.** Split the strain into a volume part and a shape part, and test whether the shape change is more than friction can hold, using the friction angle (about 0.52 radians for sand).
+3. **Check the friction cone.** Split the strain into a volume part and a shape part, and test whether the shape change is more than friction can hold, using the friction angle (0.55 radians, about 31°, for sand).
 4. **If it's outside the cone, project F back onto the cone.** Whatever deformation doesn't fit is thrown away. The particle forgets it, and that permanent change is what makes a pile stay a pile.
 
 For a long time, the sand would have one particle accelerate off to infinity, and that broke the whole simulation. Every particle writes into the shared grid, so one bad particle poisons the nodes around it, then their neighbours, until everything is gone. The day before I turned it in, I rewrote the SVD and added yield thresholds, and the sand finally held. Pressing `p` in the demo turns plasticity off, and switching between the two is the clearest way to see what this step does.
 
 ## The sandcastle
 
-The sandcastle is my favourite scene, because it holds together better than any of the others. It's built from a set of boxes (towers, walls, a keep), with particles spread across them by volume. Dropping a ball on it (`?castle&ball` in the demo) knocks chunks off that stay broken.
+The sandcastle is my favourite scene, because it holds together better than any of the others. It's built from a set of boxes (towers, walls, a keep), with particles spread across them by volume. A ball fired into it (`?castle` in the demo) knocks chunks off that stay broken. The browser version doesn't draw the ball yet, so you only see what it hits.
 
 ![Sand castle collapsing under a ball impact](https://cloud.harrison-martin.com/public.php/dav/files/enykwkka9TsR8Hn/)
 
@@ -73,20 +73,36 @@ Poisson's ratio was touchier: anything from 0.01 to 0.4 works, 0.5 doesn't spawn
 
 ## The same program, three times
 
-After the class, I wanted to see how different it would be to write the same complex program in different languages, so I ported it twice. The math stayed the same. The hard parts were in how each platform handles memory and atomics.
+After the class, I wanted to see how different it would be to write the same complex program in different languages, so I ported it twice. The math stayed the same. The hard parts were in how each platform handles memory and atomics. All three now live in one repo and build every scene from the same seeded random numbers, so they start from identical particles.
 
-**OpenGL compute shaders (the original).** The particles-to-grid step has thousands of threads adding into the same grid nodes at once, and GLSL has no atomic add for floats. I worked around it with a compare-and-swap loop: read the value, add to it, and try to swap it in, retrying if another thread got there first. It's also strict about memory layout, so every column of a 3×3 matrix needs a padding float, and F and C are stored as `float[12]` instead of `mat3`. A later branch adds per-pass GPU timers and uses NVIDIA's native float atomics where the driver supports them.
+**OpenGL compute shaders (the original).** The particles-to-grid step has thousands of threads adding into the same grid nodes at once, and core GLSL has no atomic add for floats. I worked around it with a compare-and-swap loop: read the value, add to it, and try to swap it in, retrying if another thread got there first. On NVIDIA it now uses the driver's native float atomics instead, and keeps the loop as a fallback. It's also strict about memory layout: every column of a 3×3 matrix gets padded to four floats, so on the C side F and C are stored as `float[12]`.
 
 **CUDA.** The simulation moves to CUDA kernels and rendering stays in OpenGL. CUDA has a native float `atomicAdd`, so the whole compare-and-swap loop becomes one line.
 
 **WebGPU (live on the web).** The shaders are rewritten in WGSL, and the setup code in JavaScript. WebGPU has no float atomics either, so the grid is stored as integers, and each add reinterprets the bits as a float, adds, and swaps them back in. It runs in any browser with WebGPU and is served from a Docker container.
 
+## Benchmarking them
+
+I added a headless benchmark mode to all three and ran them on the same RTX 3080: the castle scene, 24 substeps per frame, each kernel timed on the GPU, and the median of 3 runs.
+
+| | OpenGL | CUDA | WebGPU |
+|---|--:|--:|--:|
+| ms per substep, 16K particles | 0.101 | 0.098 | 0.197 |
+| ms per substep, 131K particles | 0.575 | 0.614 | 1.085 |
+| most particles at 60 fps (simulation only) | 150,382 | 143,748 | 83,188 |
+
+OpenGL and CUDA end up close. WebGPU is about twice as slow, and most of that is the missing float atomics. Forcing the same compare-and-swap loop in OpenGL makes its particles-to-grid step 3.3× slower at 16K particles and 2.7× slower at 131K.
+
+## Testing it
+
+The CUDA kernels are thin wrappers around plain C functions, so tests can run the exact same code on the CPU with no GPU. They check that particles-to-grid conserves mass and momentum, that the Drucker–Prager step always ends on or inside the cone, and that the SVD rebuilds F. GitHub Actions runs them on every push. They also found where my SVD stops working: when F gets close to singular. Every sand scene stays well inside the safe range, so I left it as a known limit.
+
 ## Back to Houdini
 
-Since Houdini is where I started with MPM, I added a `-bgeo` flag that writes every frame out as a Houdini `.bgeo` file, so the particles can be loaded and rendered offline.
+Since Houdini is where I started with MPM, I added a `-bgeo` flag that writes every frame out as a Houdini geometry file (`.geo`), so the particles can be loaded with a File SOP and rendered offline.
 
 ## What's left
 
-I wish I could use this in real sims. Right now it's a demo: scenes are built from boxes in code, and the `.bgeo` export only goes one way. To get there, these are still unchecked in my notes: wet-sand cohesion, viscosity, hardening under compression, and loading per-particle materials straight from Houdini so a scene can be set up there instead of in code.
+I wish I could use this in real sims. Right now it's a demo: scenes are built from boxes in code, and the Houdini export only goes one way. To get there, these are still unchecked in my notes: wet-sand cohesion, viscosity, hardening under compression, and loading per-particle materials straight from Houdini so a scene can be set up there instead of in code.
 
 The blog post goes through every step with the full math and code.
