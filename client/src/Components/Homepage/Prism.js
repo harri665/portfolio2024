@@ -29,6 +29,10 @@ const DETAIL_BACKDROPS = { cs: 'grid', art: 'cover' };
 // phones/tablets keep the css frost, the pass is too heavy there
 export const PANE_GLASS_QUERY = '(min-width: 1024px) and (pointer: fine)';
 
+// touch scrolls on the compositor but the cs pass only redraws on the relight's 24fps clock,
+// so its card glass trailed the cards. touch gets css frost (.glass-card) and keeps the glass title
+const TOUCH_QUERY = '(pointer: coarse)';
+
 const SCENES = {
   hub: { variant: 'hub', camera: [0, 0, 4.1] },
   cs: { variant: 'cs', camera: [0, 0, 5] },
@@ -56,6 +60,10 @@ export function PrismBackdrop({ lens = 'hub', tone = 'page', image }) {
   const paneGlass = useMemo(
     () => detailBackdrop === 'grid' && (window.matchMedia?.(PANE_GLASS_QUERY).matches ?? false),
     [detailBackdrop]
+  );
+  const csGlass = useMemo(
+    () => (window.matchMedia?.(TOUCH_QUERY).matches ? { ...CS_GLASS, selector: null } : CS_GLASS),
+    []
   );
   const artHome = drip && lens === 'art';
   const overlaysRef = useRef(null);
@@ -101,7 +109,7 @@ export function PrismBackdrop({ lens = 'hub', tone = 'page', image }) {
                     selector: '[data-liquid-glass]',
                     imageSelector: '[data-glass-image]',
                     shade: false,
-                    ...(lens === 'cs' ? CS_GLASS : null),
+                    ...(lens === 'cs' ? csGlass : null),
                   }
                 : paneGlass
                   ? { ...PANE_GLASS, selector: '[data-liquid-glass]:not([data-glass-side])' }

@@ -48,6 +48,15 @@
   backdrop-filter: blur(10px) saturate(140%);
 }
 
+/* touch screens draw the cs cards here, not in the pass, so the frost scrolls with the card */
+@media (pointer: coarse) {
+  .liquid-glass.glass-card {
+    background-color: rgb(8 9 12 / 0.28);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    backdrop-filter: blur(14px) saturate(140%);
+  }
+}
+
 /* filled not blurred: backdrop blur over a page-length panel + live canvas repaints
 every scroll frame. with data-glass-pass the webgl pass draws it instead */
 .liquid-glass.glass-panel {

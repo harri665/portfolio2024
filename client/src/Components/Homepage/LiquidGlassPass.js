@@ -389,9 +389,11 @@ export default function LiquidGlassPass({
         attachText(el);
       }
     }
+    let textShown = false;
     if (textState.ready && textState.el?.isConnected) {
       const rect = textState.el.getBoundingClientRect();
       const { pad } = textState;
+      textShown = rect.bottom + pad > canvasRect.top && rect.top - pad < canvasRect.bottom;
       uniforms.textRect.value.set(
         rect.left - canvasRect.left - pad,
         rect.top - canvasRect.top - pad,
@@ -404,10 +406,17 @@ export default function LiquidGlassPass({
       uniforms.textOpacity.value = 0;
     }
 
+    // lights draw nothing, so a lone mesh with a version can be reused between frames
+    let drawnChild = null;
+    let drawnCount = 0;
+    scene.children.forEach((child) => {
+      if (!child.isLight) {
+        drawnChild = child;
+        drawnCount += 1;
+      }
+    });
     const sceneVersion =
-      scene.children.length === 1 && !imageSelector
-        ? scene.children[0].userData?.sceneVersion
-        : undefined;
+      drawnCount === 1 && !imageSelector ? drawnChild.userData?.sceneVersion : undefined;
     const rs = renderedScene.current;
     const sameScene =
       sceneVersion !== undefined &&
@@ -416,8 +425,12 @@ export default function LiquidGlassPass({
       rs.height === target.height &&
       !mipsMissing.current &&
       (!mipmaps || !anyHover || rs.hasMips);
+    // glassOnly with nothing on screen never samples the scene
+    const sceneUnused = glassOnly && count === 0 && !textShown;
 
-    if (!sameScene) {
+    if (sceneUnused) {
+      rs.version = -1;
+    } else if (!sameScene) {
       // only rebuild mips while something's hovered (or they're missing)
       const buildMips = mipmaps && (anyHover || mipsMissing.current);
       target.texture.generateMipmaps = buildMips;

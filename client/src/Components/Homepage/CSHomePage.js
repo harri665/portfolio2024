@@ -293,7 +293,7 @@ function RepoCard({ repo, meta }) {
       data-liquid-glass
       data-glass-bevel
       data-glass-hover
-      className="liquid-glass prism-glow lens-cs group relative flex flex-col overflow-hidden rounded-card"
+      className="liquid-glass glass-card prism-glow lens-cs group relative flex flex-col overflow-hidden rounded-card"
     >
       <span aria-hidden="true" className="liquid-glass-rim" />
       {meta?.media && (
